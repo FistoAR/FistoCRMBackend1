@@ -1,0 +1,70 @@
+@import "tailwindcss";
+ 
+.hand-animation {
+  animation: handMove 1s ease-in-out infinite;
+}
+ 
+@keyframes handMove {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(8px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+ 
+ @keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-20px) scale(0.95);
+  }
+}
+ 
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+ 
+.animate-slideOut {
+  animation: slideOut 0.25s ease-out forwards;
+}
+ 
+.animate-slideIn {
+  animation: slideIn 0.25s ease-out forwards;
+}
+ 
+
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background-color: #d2d7e2; 
+  border-radius: 10px;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #d5def8; 
+}
+
+.custom-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d2daeb transparent;
+}
