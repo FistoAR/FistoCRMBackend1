@@ -53,6 +53,12 @@ const RequestsTab = ({
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const currentUserDesignation = getCurrentUserDesignation().toLowerCase();
   const isAdmin = currentUserDesignation.includes("admin");
+  const isManagement = 
+    isAdmin || 
+    currentUserDesignation.includes("sbu") || 
+    currentUserDesignation.includes("project head") || 
+    currentUserDesignation.includes("marketing") || 
+    currentUserDesignation.includes("hr");
 
   // Update Modal State
   const [updateModal, setUpdateModal] = useState({
@@ -343,7 +349,7 @@ const RequestsTab = ({
       const empDesignation = (emp?.designation || "").toLowerCase();
       const isPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
 
-      if (isPHorSBU && !isAdmin) {
+      if (isPHorSBU && !isManagement) {
         return false;
       }
 
@@ -406,7 +412,7 @@ const RequestsTab = ({
   // Use ONLY passed active employees as requested
   const employees = allEmployees
     .filter(emp => {
-      if (isAdmin) return true;
+      if (isManagement) return true;
       const des = (emp.designation || "").toLowerCase();
       return !des.includes("project head") && !des.includes("sbu");
     })

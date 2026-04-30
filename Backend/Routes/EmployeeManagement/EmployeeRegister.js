@@ -14,7 +14,7 @@ router.get("/", (req, res) => {
       account_name, account_number, bank_name, ifsc_code,
       designation, team_head, employment_type, working_status,
       join_date, intern_start_date, intern_end_date,
-      address, profile_url, resume_url, offer_letter_url, 
+      address, password, profile_url, resume_url, offer_letter_url, 
       intern_offer_letter_url,
       ID_url, Certificates_url, otherDocs_url, exit_docs_url
     FROM employees_details
@@ -78,6 +78,7 @@ router.get("/", (req, res) => {
         intern_start_date: emp.intern_start_date,
         intern_end_date: emp.intern_end_date,
         address: emp.address,
+        password: emp.password,
         profile_url: emp.profile_url,
         resume_url: emp.resume_url,
         offer_letter_url: emp.offer_letter_url,

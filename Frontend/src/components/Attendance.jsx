@@ -231,7 +231,7 @@ const MissedAttendanceModal = ({ onClose, employeeData, showToast, morningInDone
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-[50vw] h-[75vh] max-w-[650px] flex flex-col"
+        className="bg-white rounded-xl shadow-2xl w-[50vw] h-auto max-h-[85vh] max-w-[650px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -729,7 +729,7 @@ const Attendance = ({ onClose }) => {
         onClick={onClose}
       >
         <div
-          className="bg-white rounded-xl shadow-2xl w-[65vw] h-[75vh] flex flex-col max-w-[850px]"
+          className="bg-white rounded-xl shadow-2xl w-[65vw] h-auto flex flex-col max-w-[850px]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

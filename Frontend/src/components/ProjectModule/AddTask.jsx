@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Check, X, Loader2, Trash2 } from "lucide-react";
+import { Check, X, Loader2, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import { useConfirm } from "../ConfirmContext";
 import closeIcon from "../../assets/ProjectPages/overview/close.webp"
@@ -40,6 +40,7 @@ export default function AddTask({
   const [showActivityPointsInput, setShowActivityPointsInput] = useState({});
   const [activityPointInput, setActivityPointInput] = useState({});
   const [deadlineCrossed, setDeadlineCrossed] = useState(false);
+  const [isCorrectionsExpanded, setIsCorrectionsExpanded] = useState(false);
 
   const getTodayDate = () => {
     const today = new Date();
@@ -78,26 +79,21 @@ export default function AddTask({
   };
 
   const isDeadlineCrossed = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayStr = getTodayDate();
 
     if (correctionDate && correctionDate.length > 0) {
       const isInCorrectionRange = correctionDate.some((correction) => {
-        const correctionStart = new Date(correction.startDate);
-        correctionStart.setHours(0, 0, 0, 0);
-        const correctionEnd = new Date(correction.date);
-        correctionEnd.setHours(23, 59, 59, 999);
-        return today >= correctionStart && today <= correctionEnd;
+        const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+        const endStr = correction.date ? correction.date.split("T")[0] : "";
+        return todayStr >= startStr && todayStr <= endStr;
       });
       if (isInCorrectionRange) return false;
     }
 
     if (startDate && endDate) {
-      const projectStart = new Date(startDate);
-      projectStart.setHours(0, 0, 0, 0);
-      const projectEnd = new Date(endDate);
-      projectEnd.setHours(23, 59, 59, 999);
-      if (today >= projectStart && today <= projectEnd) return false;
+      const startStr = startDate.split("T")[0];
+      const endStr = endDate.split("T")[0];
+      if (todayStr >= startStr && todayStr <= endStr) return false;
     }
 
     return true;
@@ -252,25 +248,18 @@ export default function AddTask({
   ) => {
     if (!taskEndDate || !projectEndDate) return true;
 
-    const normalizeLocalDate = (d) => {
-      const date = new Date(d);
-      const offset = date.getTimezoneOffset();
-      return new Date(date.getTime() - offset * 60000);
-    };
-
-    const today = normalizeLocalDate(new Date());
-    today.setHours(0, 0, 0, 0);
-
+    const todayStr = getTodayDate();
     const effectiveDates = getEffectiveDates(
       taskCreatedAt,
       projectEndDate,
       projectEndDate,
       correctionDates,
     );
-    const effectiveProjectEnd = normalizeLocalDate(effectiveDates.endDate);
-    const taskEnd = normalizeLocalDate(taskEndDate);
+    
+    const effectiveProjectEndStr = effectiveDates.endDate ? effectiveDates.endDate.split("T")[0] : "";
+    const taskEndStr = taskEndDate ? taskEndDate.split("T")[0] : "";
 
-    return effectiveProjectEnd >= today && effectiveProjectEnd >= taskEnd;
+    return effectiveProjectEndStr >= todayStr && effectiveProjectEndStr >= taskEndStr;
   };
 
   const calculateDuration = (sDate, sTime, eDate, eTime) => {
@@ -1731,31 +1720,43 @@ export default function AddTask({
         </div>
       </div>
 
-      {correctionDate && correctionDate.length > 0 && (
-        <div className="px-[0.8vw] py-[0.3vw] mx-[1vw] my-[0.7vw] mb-0 bg-orange-50 border-2 border-orange-300 rounded-lg">
-          <h3 className="text-[0.85vw] font-normal text-orange-800 mb-[0.05vw]">
-            Correction Periods
-          </h3>
-          <div className="space-y-[0.4vw]">
-            {correctionDate.map((correction, idx) => (
-              <div
-                key={idx}
-                className="text-[0.75vw] text-orange-700 bg-orange-50 px-[0.6vw] py-[0.1vw] rounded flex gap-[1vw] items-center"
-              >
-                <span className="font-medium">
-                  Corrections -{idx + 1}
-                </span>
-                <div>
-                  Start: {formatDateTime(correction.startDate, correction.startTime)}
-                </div>
-                <div>End: {formatDateTime(correction.date, correction.time)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="max-h-[75vh] h-auto w-full overflow-y-auto overflow-x-hidden pr-[0.3vw] pt-[0.3vw] scrollbar-thin scrollbar-thumb-gray-300">
+        {correctionDate && correctionDate.length > 0 && (
+          <div className="px-[0.8vw] py-[0.3vw] mx-[1vw] my-[0.7vw] mb-[1vw] bg-orange-50 border-2 border-orange-300 rounded-lg">
+            <div 
+              className="flex items-center justify-between cursor-pointer"
+              onClick={() => setIsCorrectionsExpanded(!isCorrectionsExpanded)}
+            >
+              <h3 className="text-[0.85vw] font-normal text-orange-800 mb-[0.05vw]">
+                Correction Periods ({correctionDate.length})
+              </h3>
+              {isCorrectionsExpanded ? (
+                <ChevronUp className="w-[1.1vw] h-[1.1vw] text-orange-800" />
+              ) : (
+                <ChevronDown className="w-[1.1vw] h-[1.1vw] text-orange-800" />
+              )}
+            </div>
+            {isCorrectionsExpanded && (
+              <div className="space-y-[0.4vw] mt-[0.4vw]">
+                {correctionDate.map((correction, idx) => (
+                  <div
+                    key={idx}
+                    className="text-[0.75vw] text-orange-700 bg-orange-50 px-[0.6vw] py-[0.1vw] rounded flex gap-[1vw] items-center"
+                  >
+                    <span className="font-medium">
+                      Corrections -{idx + 1}
+                    </span>
+                    <div>
+                      Start: {formatDateTime(correction.startDate, correction.startTime)}
+                    </div>
+                    <div>End: {formatDateTime(correction.date, correction.time)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {deadlineCrossed && tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-[1vw] py-[2vw]">
             <div className="text-center max-w-[36vw]">
@@ -3048,50 +3049,40 @@ export default function AddTask({
               deadlineCrossed ||
               (tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
               (() => {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                const todayStr = getTodayDate();
 
                 // Check if today is within any correction date range
                 if (correctionDate && correctionDate.length > 0) {
                   const isInCorrectionRange = correctionDate.some((correction) => {
-                    const correctionStart = new Date(correction.startDate);
-                    correctionStart.setHours(0, 0, 0, 0);
-                    const correctionEnd = new Date(correction.date);
-                    correctionEnd.setHours(23, 59, 59, 999);
-                    return today >= correctionStart && today <= correctionEnd;
+                    const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+                    const endStr = correction.date ? correction.date.split("T")[0] : "";
+                    return todayStr >= startStr && todayStr <= endStr;
                   });
                   if (isInCorrectionRange) return false;
                 }
 
                 // Check if today is within project start and end date range
-                const projectStart = new Date(startDate);
-                projectStart.setHours(0, 0, 0, 0);
-                const projectEnd = new Date(endDate);
-                projectEnd.setHours(23, 59, 59, 999);
-                return !(today >= projectStart && today <= projectEnd);
+                const startStr = startDate ? startDate.split("T")[0] : "";
+                const endStr = endDate ? endDate.split("T")[0] : "";
+                return !(todayStr >= startStr && todayStr <= endStr);
               })()
             }
             className={`flex items-center text-white px-[0.5vw] py-[0.3vw] text-[0.75vw] rounded-full ${(tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
               (() => {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                const todayStr = getTodayDate();
 
                 if (correctionDate && correctionDate.length > 0) {
                   const isInCorrectionRange = correctionDate.some((correction) => {
-                    const correctionStart = new Date(correction.startDate);
-                    correctionStart.setHours(0, 0, 0, 0);
-                    const correctionEnd = new Date(correction.date);
-                    correctionEnd.setHours(23, 59, 59, 999);
-                    return today >= correctionStart && today <= correctionEnd;
+                    const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+                    const endStr = correction.date ? correction.date.split("T")[0] : "";
+                    return todayStr >= startStr && todayStr <= endStr;
                   });
                   if (isInCorrectionRange) return false;
                 }
 
-                const projectStart = new Date(startDate);
-                projectStart.setHours(0, 0, 0, 0);
-                const projectEnd = new Date(endDate);
-                projectEnd.setHours(23, 59, 59, 999);
-                return !(today >= projectStart && today <= projectEnd);
+                const startStr = startDate ? startDate.split("T")[0] : "";
+                const endStr = endDate ? endDate.split("T")[0] : "";
+                return !(todayStr >= startStr && todayStr <= endStr);
               })()
               ? "bg-gray-400 cursor-not-allowed"
               : "bg-gray-700 hover:bg-gray-500 cursor-pointer"
