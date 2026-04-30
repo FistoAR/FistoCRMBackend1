@@ -12,10 +12,23 @@ const upload = multer({
 });
 
 // ─── OAuth2 Setup ───
+const CLIENT_ID = process.env.CLIENT_ID?.trim();
+const CLIENT_SECRET = process.env.CLIENT_SECRET?.trim();
+const REDIRECT_URI = process.env.REDIRECT_URI?.trim();
+
+if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+  console.error("❌ Drive: Missing OAuth2 configuration in environment variables!");
+  console.log("Values found:", { 
+    CLIENT_ID: CLIENT_ID ? "Found" : "Missing", 
+    CLIENT_SECRET: CLIENT_SECRET ? "Found" : "Missing", 
+    REDIRECT_URI: REDIRECT_URI ? "Found" : "Missing" 
+  });
+}
+
 const oauth2Client = new google.auth.OAuth2(
-  process.env.CLIENT_ID,
-  process.env.CLIENT_SECRET,
-  process.env.REDIRECT_URI
+  CLIENT_ID,
+  CLIENT_SECRET,
+  REDIRECT_URI
 );
 
 const TOKEN_PATH = path.join(__dirname, "../../tokens.json");
@@ -24,32 +37,36 @@ const TOKEN_PATH = path.join(__dirname, "../../tokens.json");
 // Supports BOTH local file (development) AND env vars (Render/production)
 
 function loadTokens() {
-  // 1. Try environment variable first (production/Render)
+  // 1. Try environment variable first (prioritized)
   if (process.env.GOOGLE_TOKENS) {
     try {
-      const tokens = JSON.parse(process.env.GOOGLE_TOKENS);
+      const tokenStr = process.env.GOOGLE_TOKENS.trim();
+      const tokens = JSON.parse(tokenStr);
       oauth2Client.setCredentials(tokens);
-      console.log("✅ Drive: tokens loaded from GOOGLE_TOKENS env var");
-      return;
+      console.log("✅ Drive: tokens successfully loaded from GOOGLE_TOKENS env var");
+      return true;
     } catch (e) {
-      console.error("❌ Drive: Failed to parse GOOGLE_TOKENS env var:", e.message);
+      console.error("❌ Drive: Failed to parse GOOGLE_TOKENS env var. Ensure it is valid JSON.");
+      console.error("Error details:", e.message);
     }
   }
 
-  // 2. Fallback to local file (development)
+  // 2. Fallback to local file
   if (fs.existsSync(TOKEN_PATH)) {
     try {
       const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
       oauth2Client.setCredentials(tokens);
       console.log("✅ Drive: tokens loaded from tokens.json file");
-      return;
+      return true;
     } catch (e) {
-      console.error("❌ Drive: Failed to read tokens.json:", e.message);
+      console.error("❌ Drive: Failed to read or parse tokens.json:", e.message);
     }
   }
 
-  console.warn("⚠️  Drive: No tokens found. Visit /api/drive/auth to authenticate.");
+  console.warn("⚠️  Drive: No valid tokens found in GOOGLE_TOKENS or tokens.json. Visit /api/drive/auth.");
+  return false;
 }
+
 
 function saveTokens(tokens) {
   // Always try to save to file (works locally, silently fails on Render read-only FS)
@@ -107,7 +124,19 @@ router.get("/auth", (req, res) => {
 
 router.get("/auth/callback", async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code, error } = req.query;
+
+    if (error) {
+      console.error("Auth error from Google:", error);
+      return res.status(400).send(`Auth failed: ${error}`);
+    }
+
+    if (!code) {
+      console.error("Auth error: No code provided in callback");
+      return res.status(400).send("Auth failed: No authorization code provided.");
+    }
+
+    console.log("📥 Received auth code, exchanging for tokens...");
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
     saveTokens(tokens);

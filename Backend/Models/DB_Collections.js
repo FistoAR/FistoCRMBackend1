@@ -458,7 +458,7 @@ const driveAccess = new mongoose.Schema(
   { timestamps: true }
 );
 
-driveAccess.index({ folderId: 1 });
+
 
 const Project_Details = mongoose.model("Project_details", Project_details);
 const Project_Request = mongoose.model("Project_Request", Project_request);
