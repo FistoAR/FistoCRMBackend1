@@ -35,10 +35,23 @@ router.get("/team-by-designation/:designation", async (req, res) => {
 });
 
 // ✅ Shared helper: process a single attendance record into a full report
+function getISTDateString(date) {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 async function processAttendanceRecord(attendance) {
-  const reportDate = new Date(attendance.report_date);
-  const startOfDay = new Date(new Date(reportDate).setHours(0, 0, 0, 0));
-  const endOfDay = new Date(new Date(reportDate).setHours(23, 59, 59, 999));
+  // Normalize date from MySQL (YYYY-MM-DD) to a full day range in UTC that covers IST 00:00 to 23:59
+  const reportDateStr = getISTDateString(attendance.report_date);
+  
+  // IST is UTC+5:30. 
+  // IST Day Start (00:00) = UTC 18:30 (Previous Day)
+  // IST Day End (23:59) = UTC 18:29 (Current Day)
+  const startOfDay = new Date(reportDateStr + "T00:00:00.000Z");
+  startOfDay.setMinutes(startOfDay.getMinutes() - 330); // Shift to UTC
+  
+  const endOfDay = new Date(reportDateStr + "T23:59:59.999Z");
+  endOfDay.setMinutes(endOfDay.getMinutes() - 330); // Shift to UTC
 
   const dayReports = await DayReport.find({
     employeeID: attendance.employee_id,
@@ -81,16 +94,17 @@ async function processAttendanceRecord(attendance) {
           taskStatus = taskPercentage >= 100 ? "Completed" : "In Progress";
         }
 
-        // ✅ First check approved TaskReports
+        // ✅ Check TaskReports (approved)
         const taskReport = await TaskReports.findOne({
           projectId: dayReport.projectId,
           taskId: dayReport.taskId,
           activityId: dayReport.activityId,
           employeeID: attendance.employee_id,
-          createdAt: { $gte: startOfDay, $lte: endOfDay },
+          // Use a slightly wider range for reports as they might be submitted slightly after the day ends
+          createdAt: { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) },
         }).lean();
 
-        // ✅ If no approved report, check TaskReportsReview (underReview / declined)
+        // ✅ Check TaskReportsReview (underReview / declined)
         let reviewReport = null;
         if (!taskReport) {
           reviewReport = await TaskReportsReview.findOne({
@@ -98,22 +112,17 @@ async function processAttendanceRecord(attendance) {
             taskId: dayReport.taskId,
             activityId: dayReport.activityId,
             employeeID: attendance.employee_id,
-            createdAt: { $gte: startOfDay, $lte: endOfDay },
+            createdAt: { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) },
           }).lean();
         }
 
-        // ✅ Determine final source and status
         const activeReport = taskReport || reviewReport;
-        let reportStatus = taskStatus; // default from task percentage
+        let reportStatus = taskStatus;
 
         if (taskReport) {
-          // Approved report — use percentage to determine status
-          reportStatus =
-            taskReport.percentage >= 100 ? "Completed" : "In Progress";
+          reportStatus = taskReport.percentage >= 100 ? "Completed" : "In Progress";
         } else if (reviewReport) {
-          // Review report — use its own status field
-          reportStatus =
-            reviewReport.status === "declined" ? "Declined" : "Under Review";
+          reportStatus = reviewReport.status === "declined" ? "Declined" : "Under Review";
         }
 
         return {
@@ -125,20 +134,13 @@ async function processAttendanceRecord(attendance) {
           percentage: activeReport?.percentage ?? taskPercentage,
           status: reportStatus,
           outcome: activeReport?.outcome || "-",
-          admin_remarks:
-            activeReport?.adminRemarks || reviewReport?.remarks || "-",
+          admin_remarks: activeReport?.adminRemarks || reviewReport?.remarks || "-",
           day_report_id: dayReport._id.toString(),
           activity_id: dayReport.activityId,
-          reporting_person:
-            taskReport?.verifiedBy || reviewReport?.reviewedBy || "-",
+          reporting_person: taskReport?.verifiedBy || reviewReport?.reviewedBy || "-",
           start_time: mongoTask?.startTime || "-",
           end_time: mongoTask?.endTime || "-",
-          // ✅ Flag so frontend knows the source
-          report_source: taskReport
-            ? "approved"
-            : reviewReport
-              ? "review"
-              : "none",
+          report_source: taskReport ? "approved" : reviewReport ? "review" : "none",
         };
       } catch (error) {
         console.error("Error processing day report:", error);
@@ -186,14 +188,26 @@ async function processAttendanceRecord(attendance) {
 // ✅ Helper: Expand a leave request into daily records
 function expandLeaveToDays(leave, startDate, endDate) {
   const days = [];
-  const start = new Date(Math.max(new Date(leave.from_date), startDate ? new Date(startDate) : new Date(0)));
-  const end = new Date(Math.min(new Date(leave.to_date || leave.from_date), endDate ? new Date(endDate) : new Date(8640000000000000)));
   
-  // Cutoff at end of today
+  // Normalize dates to midnight for consistent comparison
+  const leaveStart = new Date(leave.from_date);
+  leaveStart.setHours(0, 0, 0, 0);
+  
+  const leaveEnd = new Date(leave.to_date || leave.from_date);
+  leaveEnd.setHours(23, 59, 59, 999);
+
+  const filterStart = startDate ? new Date(startDate) : new Date(0);
+  filterStart.setHours(0, 0, 0, 0);
+  
+  const filterEnd = endDate ? new Date(endDate) : new Date(8640000000000000);
+  filterEnd.setHours(23, 59, 59, 999);
+
+  const start = new Date(Math.max(leaveStart, filterStart));
+  const end = new Date(Math.min(leaveEnd, filterEnd));
+  
   const today = new Date();
   today.setHours(23, 59, 59, 999);
 
-  // Consolidated Status Logic
   let displayStatus = "Pending";
   const phStatus = leave.team_head_status || "Pending";
   const mgmtStatus = leave.management_status || "Pending";
@@ -201,45 +215,41 @@ function expandLeaveToDays(leave, startDate, endDate) {
   if (phStatus.toLowerCase() === "approved" && mgmtStatus.toLowerCase() === "approved") {
     displayStatus = "Approved";
   } else {
-    // Show granular status (PH = Project Head / Team Head)
     displayStatus = `PH: ${phStatus.charAt(0).toUpperCase() + phStatus.slice(1)} | MGMT: ${mgmtStatus.charAt(0).toUpperCase() + mgmtStatus.slice(1)}`;
   }
 
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    // Skip Sundays
-    if (d.getDay() === 0) continue;
-    // Hide upcoming leaves (only show <= today)
-    if (d > today) break;
+  // Use a simple date string loop to avoid timezone drifts
+  let current = new Date(start);
+  while (current <= end && current <= today) {
+    if (current.getDay() !== 0) { // Skip Sundays
+      const formattedDate = getISTDateString(current);
 
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const formattedDate = `${year}-${month}-${day}`;
-
-    days.push({
-      employee_id: leave.employee_id,
-      employee_name: leave.employee_name,
-      report_date: formattedDate,
-      total_hours: 0,
-      morning_in: "LEAVE",
-      morning_out: "-",
-      afternoon_in: "-",
-      afternoon_out: "-",
-      is_leave: true,
-      tasks: [{
-        task_type: "leave",
-        project_name: "LEAVE",
-        task_name: leave.leave_type,
-        percentage: "-",
-        status: displayStatus,
-        outcome: leave.reason,
-        admin_remarks: leave.management_remark || leave.team_head_remark || "-",
-        reporting_person: leave.approved_by || "-",
-        start_time: "-",
-        end_time: "-",
-        report_source: "leave"
-      }]
-    });
+      days.push({
+        employee_id: leave.employee_id,
+        employee_name: leave.employee_name,
+        report_date: formattedDate,
+        total_hours: 0,
+        morning_in: "LEAVE",
+        morning_out: "-",
+        afternoon_in: "-",
+        afternoon_out: "-",
+        is_leave: true,
+        tasks: [{
+          task_type: "leave",
+          project_name: "LEAVE",
+          task_name: leave.leave_type,
+          percentage: "-",
+          status: displayStatus,
+          outcome: leave.reason,
+          admin_remarks: leave.management_remark || leave.team_head_remark || "-",
+          reporting_person: leave.approved_by || "-",
+          start_time: "-",
+          end_time: "-",
+          report_source: "leave"
+        }]
+      });
+    }
+    current.setDate(current.getDate() + 1);
   }
   return days;
 }
@@ -252,6 +262,8 @@ router.get("/all-reports", async (req, res) => {
       offset = 0,
       start_date,
       end_date,
+      employee_id,
+      search,
       designation,
       isTeamHead,
       fetchAll,
@@ -269,18 +281,31 @@ router.get("/all-reports", async (req, res) => {
     let attendanceQuery = `
       SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
              att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out
-      FROM attendance att WHERE 1=1
+      FROM attendance att 
+      JOIN employees_details ed ON att.employee_id = ed.employee_id
+      WHERE 1=1
     `;
 
     const params = [];
     let filterClause = "";
 
-    if (isTeamHead === "true" && designation) {
-      filterClause += ` AND att.employee_id IN (SELECT employee_id FROM employees_details WHERE designation = ?)`;
-      params.push(designation);
-    } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
-      filterClause += ` AND att.employee_id IN (SELECT employee_id FROM employees_details WHERE designation = ?)`;
-      params.push(designation);
+    if (employee_id && employee_id !== "all") {
+      filterClause += ` AND att.employee_id = ?`;
+      params.push(employee_id);
+    } else {
+      // Exclude management roles when viewing all
+      filterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
+                         AND ed.designation NOT LIKE '%SBU%' 
+                         AND ed.designation NOT LIKE '%HR%' 
+                         AND ed.designation NOT LIKE '%Marketing%')`;
+
+      if (isTeamHead === "true" && designation) {
+        filterClause += ` AND ed.designation = ?`;
+        params.push(designation);
+      } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
+        filterClause += ` AND ed.designation = ?`;
+        params.push(designation);
+      }
     }
 
     if (start_date) {
@@ -290,6 +315,10 @@ router.get("/all-reports", async (req, res) => {
     if (end_date) {
       filterClause += ` AND att.login_date <= ?`;
       params.push(end_date);
+    }
+    if (search) {
+      filterClause += ` AND att.employee_name LIKE ?`;
+      params.push(`%${search}%`);
     }
 
     // Filter out Sundays from attendance query too
@@ -308,12 +337,23 @@ router.get("/all-reports", async (req, res) => {
     const leaveParams = [];
     let leaveFilterClause = "";
 
-    if (isTeamHead === "true" && designation) {
-      leaveFilterClause += ` AND lr.employee_id IN (SELECT employee_id FROM employees_details WHERE designation = ?)`;
-      leaveParams.push(designation);
-    } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
-      leaveFilterClause += ` AND lr.employee_id IN (SELECT employee_id FROM employees_details WHERE designation = ?)`;
-      leaveParams.push(designation);
+    if (employee_id && employee_id !== "all") {
+      leaveFilterClause += ` AND lr.employee_id = ?`;
+      leaveParams.push(employee_id);
+    } else {
+      // Exclude management roles when viewing all
+      leaveFilterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
+                             AND ed.designation NOT LIKE '%SBU%' 
+                             AND ed.designation NOT LIKE '%HR%' 
+                             AND ed.designation NOT LIKE '%Marketing%')`;
+
+      if (isTeamHead === "true" && designation) {
+        leaveFilterClause += ` AND ed.designation = ?`;
+        leaveParams.push(designation);
+      } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
+        leaveFilterClause += ` AND ed.designation = ?`;
+        leaveParams.push(designation);
+      }
     }
 
     if (start_date) {
@@ -334,13 +374,13 @@ router.get("/all-reports", async (req, res) => {
     // Combine records, prioritizing attendance if both exist for same day/employee
     const attendanceMap = new Map();
     attendanceRecords.forEach(att => {
-      const key = `${att.employee_id}_${att.report_date}`;
+      const key = `${att.employee_id}_${getISTDateString(att.report_date)}`;
       attendanceMap.set(key, att);
     });
 
     const combinedReports = [...attendanceRecords];
     leaveDays.forEach(leaveDay => {
-      const key = `${leaveDay.employee_id}_${leaveDay.report_date}`;
+      const key = `${leaveDay.employee_id}_${getISTDateString(leaveDay.report_date)}`;
       if (!attendanceMap.has(key)) {
         combinedReports.push(leaveDay);
       } else {
@@ -482,7 +522,7 @@ router.get("/management-reports", async (req, res) => {
 
     attendanceRecords.forEach(att => {
       // Normalize date to YYYY-MM-DD
-      const dateStr = new Date(att.report_date).toISOString().split('T')[0];
+      const dateStr = getISTDateString(att.report_date);
       const key = `${att.employee_id}_${dateStr}`;
       reportMap.set(key, {
         ...att,
@@ -491,7 +531,7 @@ router.get("/management-reports", async (req, res) => {
     });
 
     workdoneRecords.forEach(wd => {
-      const dateStr = new Date(wd.report_date).toISOString().split('T')[0];
+      const dateStr = getISTDateString(wd.report_date);
       const key = `${wd.employee_id}_${dateStr}`;
       if (reportMap.has(key)) {
         reportMap.get(key).tasks.push({
@@ -506,7 +546,7 @@ router.get("/management-reports", async (req, res) => {
     });
 
     marketingRecords.forEach(mt => {
-      const dateStr = new Date(mt.report_date).toISOString().split('T')[0];
+      const dateStr = getISTDateString(mt.report_date);
       const key = `${mt.employee_id}_${dateStr}`;
       if (reportMap.has(key)) {
         reportMap.get(key).tasks.push({
@@ -598,13 +638,13 @@ router.get("/reports/:employee_id", async (req, res) => {
     // 3. Combine
     const attendanceMap = new Map();
     attendanceRecords.forEach(att => {
-      const key = `${att.employee_id}_${att.report_date}`;
+      const key = `${att.employee_id}_${getISTDateString(att.report_date)}`;
       attendanceMap.set(key, att);
     });
 
     const combinedReports = [...attendanceRecords];
     leaveDays.forEach(leaveDay => {
-      const key = `${leaveDay.employee_id}_${leaveDay.report_date}`;
+      const key = `${leaveDay.employee_id}_${getISTDateString(leaveDay.report_date)}`;
       if (!attendanceMap.has(key)) {
         combinedReports.push(leaveDay);
       } else {

@@ -123,12 +123,9 @@ const InternReports = () => {
     }
   }, [searchTerm, startDate, endDate, selectedEmployee]);
 
-  // Load all records when filters are active - AFTER first batch loads
-  useEffect(() => {
-    if (hasActiveFilters && userInfo && totalReportsCount > 0) {
-      loadAllRecordsForFiltering();
-    }
-  }, [hasActiveFilters, totalReportsCount]);
+  // ✅ All records are now handled by the backend pagination and filtering
+  // loadAllRecordsForFiltering is removed as it's no longer needed and was fragile
+
 
   const fetchEmployees = async () => {
     try {
@@ -162,9 +159,8 @@ const InternReports = () => {
     fetchReportsBatch(0, false);
   };
 
-  // ✅ Fetch a specific batch of reports
+  // ✅ Fetch a specific batch of reports with all active filters
   const fetchReportsBatch = async (batchNumber, append = false) => {
-    // ✅ Use different loading state based on whether it's initial load or fetching more
     if (append) {
       setFetchingMore(true);
     } else {
@@ -174,33 +170,43 @@ const InternReports = () => {
     try {
       const offset = batchNumber * FETCH_BATCH_SIZE;
       let url = "";
-      let response;
+      
+      // Build common query parameters
+      const params = new URLSearchParams({
+        limit: FETCH_BATCH_SIZE,
+        offset: offset
+      });
+      
+      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+      if (searchTerm) params.append("search", searchTerm);
 
       if (reportType === "management") {
-        url = `${API_URL}/intern-reports/management-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-        if (selectedEmployee !== "all")
-          url += `&employee_id=${selectedEmployee}`;
-        if (startDate) url += `&start_date=${startDate}`;
-        if (endDate) url += `&end_date=${endDate}`;
-        response = await fetch(url);
+        url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
       } else if (userInfo?.isAdmin) {
-        url = `${API_URL}/intern-reports/all-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-        response = await fetch(url);
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
       } else if (userInfo?.isTeamHead) {
-        url = `${API_URL}/intern-reports/all-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}&designation=${userInfo?.designation}&isTeamHead=true`;
-        response = await fetch(url);
+        params.append("designation", userInfo.designation);
+        params.append("isTeamHead", "true");
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
       } else {
-        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-        response = await fetch(url);
+        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
       }
 
+      const response = await fetch(url);
       const data = await response.json();
 
       if (data.success) {
         const newReports = data.reports || [];
 
         if (append) {
-          setAllFetchedReports((prev) => [...prev, ...newReports]);
+          setAllFetchedReports((prev) => {
+            // Avoid duplicates if same batch is fetched twice
+            const existingKeys = new Set(prev.map(r => `${r.employee_id}_${r.report_date}`));
+            const uniqueNew = newReports.filter(r => !existingKeys.has(`${r.employee_id}_${r.report_date}`));
+            return [...prev, ...uniqueNew];
+          });
         } else {
           setAllFetchedReports(newReports);
           setTotalReportsCount(data.total || newReports.length);
@@ -220,54 +226,8 @@ const InternReports = () => {
     }
   };
 
-  // ✅ Load ALL records when filters are active
-  const loadAllRecordsForFiltering = async () => {
-    setLoadingAllRecords(true);
-    try {
-      let allReports = [...allFetchedReports];
-      const totalBatches = Math.ceil(totalReportsCount / FETCH_BATCH_SIZE);
+  // ✅ loadAllRecordsForFiltering is no longer needed as the backend handles filtering
 
-      // Fetch all remaining batches
-      for (let batch = 0; batch < totalBatches; batch++) {
-        if (!loadedBatches.has(batch)) {
-          const offset = batch * FETCH_BATCH_SIZE;
-          let url = "";
-          let response;
-
-          if (reportType === "management") {
-            url = `${API_URL}/intern-reports/management-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-            if (selectedEmployee !== "all")
-              url += `&employee_id=${selectedEmployee}`;
-            if (startDate) url += `&start_date=${startDate}`;
-            if (endDate) url += `&end_date=${endDate}`;
-            response = await fetch(url);
-          } else if (userInfo?.isAdmin) {
-            url = `${API_URL}/intern-reports/all-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-            response = await fetch(url);
-          } else if (userInfo?.isTeamHead) {
-            url = `${API_URL}/intern-reports/all-reports?limit=${FETCH_BATCH_SIZE}&offset=${offset}&designation=${userInfo?.designation}&isTeamHead=true`;
-            response = await fetch(url);
-          } else {
-            url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?limit=${FETCH_BATCH_SIZE}&offset=${offset}`;
-            response = await fetch(url);
-          }
-
-          const data = await response.json();
-          if (data.success) {
-            allReports = [...allReports, ...(data.reports || [])];
-            setLoadedBatches((prev) => new Set([...prev, batch]));
-          }
-        }
-      }
-
-      setAllFetchedReports(allReports);
-    } catch (error) {
-      console.error("Error loading all records:", error);
-      showToast("Error", "Failed to load all records");
-    } finally {
-      setLoadingAllRecords(false);
-    }
-  };
 
   const showToast = (title, message) => {
     setToast({ title, message });
@@ -299,19 +259,15 @@ const InternReports = () => {
   };
 
   const getFilteredReports = () => {
+    // Note: Most filtering is now done on the server. 
+    // This client-side filter handles only the local search term (on current results)
+    // and ensuring no Sundays are displayed if they somehow slipped through.
     let filtered = allFetchedReports.filter((report) => {
       const date = new Date(report.report_date);
       return date.getDay() !== 0; // Skip Sundays
     });
 
-    // Filter by employee
-    if (selectedEmployee !== "all") {
-      filtered = filtered.filter(
-        (report) => report.employee_id === selectedEmployee,
-      );
-    }
-
-    // Filter by search term
+    // Filter by local search term (on current fetched data)
     if (searchTerm) {
       filtered = filtered.filter(
         (report) =>
@@ -330,9 +286,6 @@ const InternReports = () => {
       );
     }
 
-    // Filter by date
-    filtered = filtered.filter(filterByDate);
-
     // Sort by report_date in descending order (latest first)
     filtered = filtered.sort((a, b) => {
       const dateA = new Date(a.report_date);
@@ -343,28 +296,23 @@ const InternReports = () => {
     return filtered;
   };
 
+
   const filteredReports = getFilteredReports();
 
-  // ✅ Determine which reports to display
-  let displayedReports = [];
-  let displayStartIndex = 0;
+  // ✅ Determine which reports to display (always paginated)
+  const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
+  const endIndex = startIndex + RECORDS_PER_PAGE;
+  
+  // We slice from the local set that corresponds to the current page's batch
+  // Since we fetch in batches of 30 and show 10 per page, 
+  // the data for the current page should be in allFetchedReports.
+  const displayedReports = filteredReports.slice(startIndex, endIndex);
+  const displayStartIndex = startIndex;
 
-  if (hasActiveFilters) {
-    // When filters are active: show ALL filtered results (no pagination)
-    displayedReports = filteredReports;
-  } else {
-    // When no filters: show paginated results
-    const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
-    const endIndex = startIndex + RECORDS_PER_PAGE;
-    displayedReports = filteredReports.slice(startIndex, endIndex);
-    displayStartIndex = startIndex;
-  }
 
   // ✅ Calculate total pages based on server total, not filtered length
   const totalPages = Math.ceil(totalReportsCount / RECORDS_PER_PAGE);
-  const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
-  const endIndex = startIndex + RECORDS_PER_PAGE;
-  const paginatedReports = filteredReports.slice(startIndex, endIndex);
+
 
   // ✅ Smart page change handler
   const handlePageChange = async (newPage) => {
@@ -393,20 +341,42 @@ const InternReports = () => {
 
   const exportToPDF = async () => {
     try {
-      showToast("Info", "Generating PDF...");
-      // Use the filteredReports state or getFilteredData() helper
-      const dataToExport = filteredReports;
+      showToast("Info", "Fetching all records for PDF...");
       
-      if (dataToExport.length === 0) {
+      // Fetch ALL records for the current filter from the backend
+      const params = new URLSearchParams({ fetchAll: "true" });
+      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+
+      let url = "";
+      if (reportType === "management") {
+        url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
+      } else if (userInfo?.isAdmin) {
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else if (userInfo?.isTeamHead) {
+        params.append("designation", userInfo.designation);
+        params.append("isTeamHead", "true");
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else {
+        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
+      }
+
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (!data.success || !data.reports || data.reports.length === 0) {
         showToast("Error", "No data to export");
         return;
       }
 
+      const dataToExport = data.reports;
       let employeeName = "All Employees";
-      if (selectedEmployee !== "all" && dataToExport.length > 0) {
+      if (selectedEmployee !== "all") {
         employeeName = dataToExport[0].employee_name;
       }
 
+      showToast("Info", "Generating PDF...");
       const pdfExporter = new ExportInternReportPDF();
       await pdfExporter.export(
         dataToExport,
@@ -426,20 +396,41 @@ const InternReports = () => {
 
   const exportToExcel = async () => {
     try {
-      showToast("Info", "Generating Excel...");
+      showToast("Info", "Fetching all records for Excel...");
+      
+      const params = new URLSearchParams({ fetchAll: "true" });
+      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
 
-      const dataToExport = filteredReports;
+      let url = "";
+      if (reportType === "management") {
+        url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
+      } else if (userInfo?.isAdmin) {
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else if (userInfo?.isTeamHead) {
+        params.append("designation", userInfo.designation);
+        params.append("isTeamHead", "true");
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else {
+        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
+      }
 
-      if (dataToExport.length === 0) {
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!data.success || !data.reports || data.reports.length === 0) {
         showToast("Error", "No data to export");
         return;
       }
 
+      const dataToExport = data.reports;
       let employeeName = "All Employees";
-      if (selectedEmployee !== "all" && dataToExport.length > 0) {
+      if (selectedEmployee !== "all") {
         employeeName = dataToExport[0].employee_name;
       }
 
+      showToast("Info", "Generating Excel...");
       const excelExporter = new ExportInternReportExcel();
       excelExporter.export(
         dataToExport,
@@ -456,6 +447,7 @@ const InternReports = () => {
       showToast("Error", "Failed to export Excel");
     }
   };
+
 
   const clearAllFilters = () => {
     setStartDate("");
@@ -631,19 +623,18 @@ const InternReports = () => {
                             <option value="all">All Employees</option>
                             {employees
                               .filter((emp) => {
+                                const designation = emp.designation || "";
+                                const isManagementRole =
+                                  designation.includes("Project Head") ||
+                                  designation.includes("SBU") ||
+                                  designation.includes("HR") ||
+                                  designation.includes("Marketing");
                                 if (reportType === "management") {
-                                  const designation = emp.designation || "";
-                                  return (
-                                    designation.includes("Project Head") ||
-                                    designation.includes("SBU") ||
-                                    designation.includes("HR") ||
-                                    designation.includes("Marketing")
-                                  );
+                                  // Management tab: only show management roles
+                                  return isManagementRole;
                                 }
-                                // For intern view, we show those who ARE NOT in management roles?
-                                // Or just show all as before.
-                                // Usually Interns don't have these designations.
-                                return true;
+                                // Employees tab: exclude management roles
+                                return !isManagementRole;
                               })
                               .map((emp) => (
                                 <option
@@ -665,16 +656,18 @@ const InternReports = () => {
                             <option value="all">All Team Members</option>
                             {employees
                               .filter((emp) => {
+                                const designation = emp.designation || "";
+                                const isManagementRole =
+                                  designation.includes("Project Head") ||
+                                  designation.includes("SBU") ||
+                                  designation.includes("HR") ||
+                                  designation.includes("Marketing");
                                 if (reportType === "management") {
-                                  const designation = emp.designation || "";
-                                  return (
-                                    designation.includes("Project Head") ||
-                                    designation.includes("SBU") ||
-                                    designation.includes("HR") ||
-                                    designation.includes("Marketing")
-                                  );
+                                  // Management tab: only show management roles
+                                  return isManagementRole;
                                 }
-                                return true;
+                                // Employees tab: exclude management roles
+                                return !isManagementRole;
                               })
                               .map((emp) => (
                                 <option
@@ -1096,9 +1089,9 @@ const InternReports = () => {
                               <td className="px-[0.5vw] py-[0.5vw] text-[0.75vw] font-semibold text-gray-900 border border-gray-300 text-center align-middle">
                                 {report.total_hours || "-"}
                               </td>
-                              <td
+                                <td
                                 colSpan={reportType === "management" ? 2 : 5}
-                                className="px-[0.5vw] py-[0.5vw] text-[0.75vw] text-center text-gray-500 italic border border-gray-300"
+                                className="px-[1vw] py-[0.5vw] text-[0.75vw] text-left text-gray-400 italic border border-gray-300"
                               >
                                 No tasks reported for this day
                               </td>
@@ -1116,54 +1109,45 @@ const InternReports = () => {
           {/* Pagination/Info - Different based on filter state */}
           {!loading && totalReportsCount > 0 && (
             <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] h-[8%] border-t border-gray-200">
-              {hasActiveFilters &&
-                (loadingAllRecords ? (
-                  <div className="text-[0.85vw] text-blue-600 flex items-center gap-[0.3vw]">
+              <div className="text-[0.85vw] text-gray-600">
+                {hasActiveFilters ? (
+                  <span className="text-blue-600 font-medium bg-blue-50 px-[0.5vw] py-[0.2vw] rounded mr-2">
+                    Filtered
+                  </span>
+                ) : null}
+                Showing {Math.min(startIndex + 1, totalReportsCount)} to{" "}
+                {Math.min(
+                  startIndex + displayedReports.length,
+                  totalReportsCount,
+                )}{" "}
+                of {totalReportsCount} entries
+              </div>
+              <div className="flex items-center gap-[0.5vw]">
+                <button
+                  onClick={handlePrevious}
+                  disabled={currentPage === 1 || fetchingMore}
+                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                >
+                  <ChevronLeft size={"1vw"} />
+                  Previous
+                </button>
+                <span className="text-[0.85vw] text-gray-600 px-[0.5vw] flex items-center gap-[0.3vw]">
+                  Page {currentPage} of {totalPages}
+                  {fetchingMore && (
                     <div className="animate-spin rounded-full h-[0.9vw] w-[0.9vw] border-b-2 border-blue-600"></div>
-                    Loading all the records
-                  </div>
-                ) : (
-                  <div className="text-[0.85vw] text-blue-600 font-medium bg-blue-50 px-[0.8vw] py-[0.4vw] rounded-lg">
-                    Showing all {filteredReports.length} filtered result(s)
-                  </div>
-                ))}
-              {!hasActiveFilters && (
-                <>
-                  <div className="text-[0.85vw] text-gray-600">
-                    Showing {Math.min(startIndex + 1, totalReportsCount)} to{" "}
-                    {Math.min(
-                      startIndex + paginatedReports.length,
-                      totalReportsCount,
-                    )}{" "}
-                    of {totalReportsCount} entries
-                  </div>
-                  <div className="flex items-center gap-[0.5vw]">
-                    <button
-                      onClick={handlePrevious}
-                      disabled={currentPage === 1 || fetchingMore}
-                      className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-                    >
-                      <ChevronLeft size={"1vw"} />
-                      Previous
-                    </button>
-                    <span className="text-[0.85vw] text-gray-600 px-[0.5vw] flex items-center gap-[0.3vw]">
-                      Page {currentPage} of {totalPages}
-                      {fetchingMore && (
-                        <div className="animate-spin rounded-full h-[0.9vw] w-[0.9vw] border-b-2 border-blue-600"></div>
-                      )}
-                    </span>
-                    <button
-                      onClick={handleNext}
-                      disabled={currentPage >= totalPages || fetchingMore}
-                      className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-                    >
-                      Next
-                      <ChevronRight size={"1vw"} />
-                    </button>
-                  </div>
-                </>
-              )}
+                  )}
+                </span>
+                <button
+                  onClick={handleNext}
+                  disabled={currentPage >= totalPages || fetchingMore}
+                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                >
+                  Next
+                  <ChevronRight size={"1vw"} />
+                </button>
+              </div>
             </div>
+
           )}
         </div>
       </div>

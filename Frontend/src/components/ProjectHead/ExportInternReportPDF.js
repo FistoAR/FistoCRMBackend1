@@ -120,12 +120,60 @@ class ExportInternReportPDF {
           let columnStyles = {};
           if (reportType === "management") {
             columnStyles = isAllEmployees 
-              ? { 0: { cellWidth: 28 }, 1: { cellWidth: 22 }, 2: { cellWidth: 22 }, 3: { cellWidth: 20 }, 4: { cellWidth: 20 }, 5: { cellWidth: 20 }, 6: { cellWidth: 20 }, 7: { cellWidth: 20 }, 8: { cellWidth: 35 }, 9: { cellWidth: "auto" } }
-              : { 0: { cellWidth: 28 }, 1: { cellWidth: 28 }, 2: { cellWidth: 22 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 }, 5: { cellWidth: 22 }, 6: { cellWidth: 22 }, 7: { cellWidth: 40 }, 8: { cellWidth: "auto" } };
+              ? { 
+                  0: { cellWidth: 25, halign: 'left' },   // Employee
+                  1: { cellWidth: 22, halign: 'center' }, // Date
+                  2: { cellWidth: 20, halign: 'center' }, // Day
+                  3: { cellWidth: 18, halign: 'center' }, // Morning In
+                  4: { cellWidth: 18, halign: 'center' }, // Morning Out
+                  5: { cellWidth: 18, halign: 'center' }, // Afternoon In
+                  6: { cellWidth: 18, halign: 'center' }, // Afternoon Out
+                  7: { cellWidth: 20, halign: 'center' }, // Hours
+                  8: { cellWidth: 35, halign: 'left' },   // Project
+                  9: { cellWidth: 'auto', halign: 'left' } // Outcomes
+                }
+              : { 
+                  0: { cellWidth: 25, halign: 'center' }, // Date
+                  1: { cellWidth: 25, halign: 'center' }, // Day
+                  2: { cellWidth: 20, halign: 'center' }, // Morning In
+                  3: { cellWidth: 20, halign: 'center' }, // Morning Out
+                  4: { cellWidth: 20, halign: 'center' }, // Afternoon In
+                  5: { cellWidth: 20, halign: 'center' }, // Afternoon Out
+                  6: { cellWidth: 20, halign: 'center' }, // Hours
+                  7: { cellWidth: 40, halign: 'left' },   // Project
+                  8: { cellWidth: 'auto', halign: 'left' } // Outcomes
+                };
           } else {
             columnStyles = isAllEmployees
-              ? { 0: { cellWidth: 28 }, 1: { cellWidth: 22 }, 2: { cellWidth: 20 }, 3: { cellWidth: 17 }, 4: { cellWidth: 17 }, 5: { cellWidth: 17 }, 6: { cellWidth: 17 }, 7: { cellWidth: 17 }, 8: { cellWidth: 25 }, 9: { cellWidth: 25 }, 10: { cellWidth: 15 }, 11: { cellWidth: 20 }, 12: { cellWidth: "auto" } }
-              : { 0: { cellWidth: 28 }, 1: { cellWidth: 22 }, 2: { cellWidth: 20 }, 3: { cellWidth: 20 }, 4: { cellWidth: 20 }, 5: { cellWidth: 20 }, 6: { cellWidth: 20 }, 7: { cellWidth: 35 }, 8: { cellWidth: 35 }, 9: { cellWidth: 18 }, 10: { cellWidth: 25 }, 11: { cellWidth: "auto" } };
+              ? { 
+                  0: { cellWidth: 25, halign: 'left' },   // Employee
+                  1: { cellWidth: 22, halign: 'center' }, // Date
+                  2: { cellWidth: 20, halign: 'center' }, // Day
+                  3: { cellWidth: 16, halign: 'center' }, // Morning In
+                  4: { cellWidth: 16, halign: 'center' }, // Morning Out
+                  5: { cellWidth: 16, halign: 'center' }, // Afternoon In
+                  6: { cellWidth: 16, halign: 'center' }, // Afternoon Out
+                  7: { cellWidth: 18, halign: 'center' }, // Hours
+                  8: { cellWidth: 25, halign: 'left' },   // Project
+                  9: { cellWidth: 25, halign: 'left' },   // Task
+                  10: { cellWidth: 14, halign: 'center' }, // Progress
+                  11: { cellWidth: 22, halign: 'center' }, // Status
+                  12: { cellWidth: 'auto', halign: 'left' } // Outcome
+                }
+              : { 
+                  0: { cellWidth: 22, halign: 'center' }, // Date
+                  1: { cellWidth: 20, halign: 'center' }, // Day
+                  2: { cellWidth: 17, halign: 'center' }, // Morning In
+                  3: { cellWidth: 17, halign: 'center' }, // Morning Out
+                  4: { cellWidth: 17, halign: 'center' }, // Afternoon In
+                  5: { cellWidth: 17, halign: 'center' }, // Afternoon Out
+                  6: { cellWidth: 18, halign: 'center' }, // Hours
+                  7: { cellWidth: 30, halign: 'left' },   // Project
+                  8: { cellWidth: 35, halign: 'left' },   // Task
+                  9: { cellWidth: 16, halign: 'center' }, // Progress
+                  10: { cellWidth: 22, halign: 'center' }, // Status
+                  11: { cellWidth: 'auto', halign: 'left' } // Outcome
+                };
           }
 
           autoTable(doc, {
