@@ -1,8 +1,9 @@
 import io from "socket.io-client";
 
-const SOCKET_URL =
-  import.meta.env.VITE_API_BASE_URL.split("/api")[0] ||
-  import.meta.env.VITE_API_BASE_URL;
+const API_URL = import.meta.env.VITE_API_BASE_URL || "";
+const SOCKET_URL = API_URL.includes("/api")
+  ? API_URL.split("/api")[0]
+  : API_URL;
 
 class SocketManager {
   constructor() {

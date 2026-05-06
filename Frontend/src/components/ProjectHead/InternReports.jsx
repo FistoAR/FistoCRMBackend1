@@ -6,6 +6,7 @@ import {
   X,
   FileDown,
   Search,
+  MessageCircle,
 } from "lucide-react";
 import Notification from "../ToastProp";
 import ExportInternReportPDF from "./ExportInternReportPDF";
@@ -140,6 +141,7 @@ const InternReports = () => {
           `${API_URL}/intern-reports/team-by-designation/${userInfo?.designation}`,
         );
         const data = await response.json();
+        console.log("Fetched Reports Data:", data.reports); // Debug log
         if (data.success) {
           setEmployees(data.data || []);
         }
@@ -989,8 +991,8 @@ const InternReports = () => {
                                       <td className="px-[0.5vw] py-[0.5vw] text-[0.75vw] text-gray-900 border border-gray-300">
                                         {task.project_name || "-"}
                                       </td>
-                                      <td className="px-[0.5vw] py-[0.5vw] text-[0.75vw] text-gray-900 border border-gray-300">
-                                        {task.task_name || "-"}
+                                      <td className="px-[0.5vw] py-[0.5vw] text-[0.75vw] text-gray-900 border border-gray-300 max-w-[20vw]" title={task.task_name || ""}>
+                                        <div className="truncate">{task.task_name || "-"}</div>
                                       </td>
                                    
                                       {reportType !== "management" && (
@@ -1035,8 +1037,8 @@ const InternReports = () => {
                                         </>
                                       )}
                                       {reportType !== "management" && (
-                                        <td className="px-[0.5vw] py-[0.5vw] text-[0.7vw] text-gray-700 border border-gray-300">
-                                          {task.outcome || "-"}
+                                        <td className="px-[0.5vw] py-[0.5vw] text-[0.7vw] text-gray-700 border border-gray-300 max-w-[20vw]" title={task.outcome || ""}>
+                                          <div className="truncate">{task.outcome || "-"}</div>
                                         </td>
                                       )}
                                     </>
@@ -1044,20 +1046,57 @@ const InternReports = () => {
                                     /* Leave Column: Spans across all time and task columns */
                                     <td
                                       colSpan={
-                                        reportType === "management" ? 9 : 10
+                                        reportType === "management" ? 7 : 10
                                       }
-                                      className="px-[1vw] py-[0.5vw] text-[0.8vw] font-bold text-center text-black border border-gray-300 uppercase italic"
+                                      className="px-[1vw] py-[0.6vw] border border-gray-300 bg-yellow-50/30"
                                     >
-                                      LEAVE REQUEST: {task.task_name} (
-                                      {task.outcome}) - STATUS: {
-                                        (() => {
-                                          const empDesignation = (report.designation || "").toLowerCase();
-                                          if (empDesignation.includes("project head") || empDesignation.includes("sbu")) {
-                                            return task.management_status || "Pending";
-                                          }
-                                          return task.status;
-                                        })()
-                                      }
+                                      <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-[1.5vw]">
+                                          <div className="flex flex-col">
+                                            <span className="text-[0.85vw] font-medium text-[#b47c32] leading-none mb-[0.1vw]">
+                                              Leave type
+                                            </span>
+                                            <span className=" text-gray-900 text-[0.9vw] whitespace-nowrap">
+                                              {task.task_name}
+                                            </span>
+                                          </div>
+
+                                          <div className="h-[1.5vw] w-[1px] bg-yellow-200"></div>
+
+                                          <div className="flex flex-col">
+                                            <span className="text-[0.85vw] font-medium text-[#b47c32] leading-none mb-[0.1vw]">
+                                              Reason
+                                            </span>
+                                            <span className="text-gray-700 text-[0.85vw] font-medium italic">
+                                              {task.reason || task.outcome || "No reason provided"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        
+                                        {/* Split Status Display */}
+                                        <div className="flex items-center gap-[0.8vw] bg-white px-[0.6vw] py-[0.3vw] rounded border border-yellow-100 shadow-sm">
+                                          <div className="flex items-center gap-[0.4vw] border-r border-gray-100 pr-[0.8vw]">
+                                            <span className="text-[0.65vw] text-gray-400 font-medium">Project head:</span>
+                                            <span className={`px-[0.5vw] py-[0.05vw] rounded-full text-[0.7vw] font-bold ${
+                                              (task.team_head_status || "").toLowerCase() === "approved" 
+                                                ? "text-green-600 bg-green-50" 
+                                                : "text-orange-600 bg-orange-50"
+                                            }`}>
+                                              {task.team_head_status || "Pending"}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-[0.4vw]">
+                                            <span className="text-[0.65vw] text-gray-400 font-medium">Management:</span>
+                                            <span className={`px-[0.5vw] py-[0.05vw] rounded-full text-[0.7vw] font-bold ${
+                                              (task.management_status || "").toLowerCase() === "approved" 
+                                                ? "text-green-600 bg-green-50" 
+                                                : "text-orange-600 bg-orange-50"
+                                            }`}>
+                                              {task.management_status || "Pending"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
                                     </td>
                                   )}
                                 </tr>

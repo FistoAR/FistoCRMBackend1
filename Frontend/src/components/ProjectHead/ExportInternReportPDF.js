@@ -83,8 +83,12 @@ class ExportInternReportPDF {
                     isFirstOfGroup ? afternoonOut : "",
                     { content: isFirstOfGroup ? (report.total_hours || "-") : "", styles: { fontStyle: "bold" } }
                   );
-                  row.push(task.project_name || "-", task.task_name || "-");
-                  if (reportType !== "management") {
+                  
+                  if (reportType === "management") {
+                    // For management, Project is col 8, Outcomes is col 9
+                    row.push(task.project_name || "-", task.outcome !== "-" ? task.outcome : (task.task_name || "-"));
+                  } else {
+                    row.push(task.project_name || "-", task.task_name || "-");
                     row.push(
                       task.task_type === "unscheduled" ? "Unscheduled" : `${task.percentage || 0}%`,
                       {
@@ -99,11 +103,38 @@ class ExportInternReportPDF {
                     );
                   }
                 } else {
-                  row.push({
-                    content: `LEAVE REQUEST: ${task.task_name} (${task.outcome}) - STATUS: ${task.status}`,
-                    colSpan: reportType === "management" ? (isAllEmployees ? 7 : 6) : (isAllEmployees ? 10 : 9),
-                    styles: { halign: "center", fontStyle: "bolditalic", fillColor: [254, 249, 195] }
-                  });
+                  // Split leave row into 3 parts with metadata for custom drawing
+                  const isMgmt = reportType === "management";
+                  row.push(
+                    { 
+                      content: `Leave type\n${task.task_name}`, // Pass text for height calculation
+                      isLeaveCell: true,
+                      label: "Leave type",
+                      value: task.task_name,
+                      labelColor: [180, 124, 50],
+                      valueColor: [17, 24, 39],
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, fontSize: 7.5, textColor: [254, 249, 195] } 
+                    },
+                    { 
+                      content: `Reason\n${task.reason || task.outcome || "-"}`, // Pass text for height calculation
+                      isLeaveCell: true,
+                      label: "Reason",
+                      value: task.reason || task.outcome || "-",
+                      labelColor: [180, 124, 50],
+                      valueColor: [60, 60, 60],
+                      colSpan: isMgmt ? 5 : 8,
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, halign: "left", fontSize: 7.5, textColor: [254, 249, 195] } 
+                    },
+                    { 
+                      content: `Status\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`, // Pass text for height calculation
+                      isLeaveCell: true,
+                      label: "Status",
+                      value: `PH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
+                      labelColor: [180, 124, 50],
+                      valueColor: [60, 60, 60],
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, halign: "center", fontSize: 7.5, textColor: [254, 249, 195] } 
+                    }
+                  );
                 }
                 row.groupKey = groupKey;
                 row.rawMetadata = { employee_name: report.employee_name, date: formattedDate, day: dayOfWeek, mIn: morningIn, mOut: morningOut, aIn: afternoonIn, aOut: afternoonOut, hours: report.total_hours };
@@ -189,6 +220,31 @@ class ExportInternReportPDF {
             pageBreak: "auto",
             
             didDrawCell: function (data) {
+              // Custom drawing for leave cells to differentiate label and value colors
+              if (data.cell.raw && data.cell.raw.isLeaveCell) {
+                const { label, value, labelColor, valueColor } = data.cell.raw;
+                const { doc } = data;
+                const { x, y, width } = data.cell;
+                const padding = 2;
+
+                // Labels in Gold
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(7);
+                doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+                doc.text(label, x + padding, y + padding + 3);
+
+                // Values in Black/Dark Gray
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(7.5);
+                doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+                
+                // Handle multi-line value with splitTextToSize
+                const splitValue = doc.splitTextToSize(value, width - (padding * 2));
+                doc.text(splitValue, x + padding, y + padding + 7);
+                
+                return false; // Prevents default text drawing
+              }
+
               // Handle continuation of identity on new pages
               if (data.row.section === 'body' && data.column.index < 8) {
                 const pageRows = data.table.pageRows || [];
