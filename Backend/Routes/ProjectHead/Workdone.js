@@ -9,9 +9,18 @@ router.post("/reports", async (req, res) => {
   console.log("✅ WORK REPORT SUBMIT HIT!");
   try {
     const userData = JSON.parse(req.headers["x-user-data"] || "{}");
-    const employee_id = userData.userName || "FST001";
-    const employee_name = userData.employeeName || employee_id;
+    const employee_id = userData.employee_id || userData.userName;
+    const employee_name = userData.name || userData.employeeName || "Unknown";
     const { project_name, description } = req.body;
+
+    // Validate employee ID exists and is not empty
+    if (!employee_id || employee_id.trim() === "") {
+      console.warn("❌ Employee ID missing in user data:", userData);
+      return res.status(401).json({
+        success: false,
+        error: "Employee ID is missing. Please log out and log in again.",
+      });
+    }
 
     if (!project_name?.trim() || !description?.trim()) {
       return res.status(400).json({
@@ -24,10 +33,10 @@ router.post("/reports", async (req, res) => {
       `INSERT INTO workdone_reports 
        (employee_id, employee_name, project_name, description)
        VALUES (?, ?, ?, ?)`,
-      [employee_id, employee_name, project_name.trim(), description.trim()]
+      [employee_id.trim(), employee_name.trim(), project_name.trim(), description.trim()]
     );
 
-    console.log(`✅ Work report created with ID: ${result.insertId}`);
+    console.log(`✅ Work report created with ID: ${result.insertId} for employee: ${employee_id}`);
 
     res.json({
       success: true,
@@ -48,17 +57,29 @@ router.post("/reports", async (req, res) => {
 router.get("/reports", async (req, res) => {
   console.log("✅ GET WORK REPORTS HIT!");
   try {
-    const { employee_id } = req.query;
+    const userData = JSON.parse(req.headers["x-user-data"] || "{}");
+    const employee_id_param = req.query.employee_id;
+    
+    // Validate employee data
+    const employee_id = userData.employee_id || userData.userName;
+    
+    if (!employee_id || employee_id.trim() === "") {
+      console.warn("❌ Employee ID missing in user data for GET:", userData);
+      return res.status(401).json({
+        success: false,
+        error: "Employee ID is missing. Please log out and log in again.",
+      });
+    }
 
     let query = `SELECT * FROM workdone_reports ORDER BY created_at DESC`;
     let params = [];
 
-    // If employee_id is provided, filter by that employee
-    if (employee_id) {
+    // If employee_id is provided in query params, filter by that employee
+    if (employee_id_param) {
       query = `SELECT * FROM workdone_reports 
                WHERE employee_id = ? 
                ORDER BY created_at DESC`;
-      params = [employee_id];
+      params = [employee_id_param];
     }
 
     const results = await queryWithRetry(query, params);

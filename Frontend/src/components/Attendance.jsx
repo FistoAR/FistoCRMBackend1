@@ -703,6 +703,14 @@ const Attendance = ({ onClose }) => {
     ? getNextActionForSession(formData.attendanceType)
     : null;
 
+  // Check if In/Out are already recorded for the selected attendance type
+  const isInAlreadyRecorded = formData.attendanceType
+    ? attendanceStatus[formData.attendanceType.toLowerCase()]?.in !== null
+    : false;
+  const isOutAlreadyRecorded = formData.attendanceType
+    ? attendanceStatus[formData.attendanceType.toLowerCase()]?.out !== null
+    : false;
+
   return (
     <>
       {showNotification && notificationData && (
@@ -806,10 +814,15 @@ const Attendance = ({ onClose }) => {
                         value="In"
                         checked={formData.action === "In"}
                         onChange={() => handleActionChange("In")}
-                        className="w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                        disabled={isInAlreadyRecorded}
+                        className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
+                          isInAlreadyRecorded ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                        }`}
                       />
                       <span
-                        className={`text-[0.85vw] ${formData.action === "In" ? "text-gray-900 font-semibold" : "text-gray-600"}`}
+                        className={`text-[0.85vw] ${
+                          formData.action === "In" ? "text-gray-900 font-semibold" : "text-gray-600"
+                        } ${isInAlreadyRecorded ? "opacity-50 line-through" : ""}`}
                       >
                         In
                       </span>
@@ -821,10 +834,15 @@ const Attendance = ({ onClose }) => {
                         value="Out"
                         checked={formData.action === "Out"}
                         onChange={() => handleActionChange("Out")}
-                        className="w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                        disabled={isOutAlreadyRecorded}
+                        className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
+                          isOutAlreadyRecorded ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                        }`}
                       />
                       <span
-                        className={`text-[0.85vw] ${formData.action === "Out" ? "text-gray-900 font-semibold" : "text-gray-600"}`}
+                        className={`text-[0.85vw] ${
+                          formData.action === "Out" ? "text-gray-900 font-semibold" : "text-gray-600"
+                        } ${isOutAlreadyRecorded ? "opacity-50 line-through" : ""}`}
                       >
                         Out
                       </span>

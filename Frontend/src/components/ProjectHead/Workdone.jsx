@@ -83,6 +83,14 @@ const Workdone = () => {
     setLoading(true);
     try {
       const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
+      
+      // Validate employee ID exists
+      if (!userData.employee_id && !userData.userName) {
+        showToast("Error", "Log out login again, employee id is missing");
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/workdone/reports`, {
         headers: {
           "x-user-data": JSON.stringify(userData),
@@ -122,14 +130,19 @@ const Workdone = () => {
   const handleSubmit = async () => {
     const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
 
+    // Validate employee ID exists
+    if (!userData.employee_id && !userData.userName) {
+      showToast("Error", "Log out login again, employee id is missing");
+      return;
+    }
+
     if (!formData.projectName.trim() || !formData.description.trim()) {
       showToast("Error", "Please fill all required fields");
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
-
       const response = await fetch(`${API_BASE_URL}/workdone/reports`, {
         method: "POST",
         headers: {
@@ -142,14 +155,27 @@ const Workdone = () => {
         }),
       });
 
+      // Check if HTTP response is successful
+      if (!response.ok) {
+        showToast("Error", `Server error: ${response.status} ${response.statusText}`);
+        return;
+      }
+
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
-        showToast("Error", "Server returned an invalid response");
-        setIsSubmitting(false);
+        showToast("Error", "Server returned an invalid response format");
         return;
       }
 
       const result = await response.json();
+      
+      // Validate response has success field
+      if (typeof result.success === "undefined") {
+        showToast("Error", "Invalid server response: missing success field");
+        console.error("Invalid response format:", result);
+        return;
+      }
+
       if (result.success) {
         showToast("Success", "Work report submitted successfully!");
         clearForm();
@@ -158,7 +184,12 @@ const Workdone = () => {
           fetchReports();
         }
       } else {
-        showToast("Error", result.error || "Failed to submit work report");
+        // Check for specific error messages from backend
+        if (result.error?.includes("Employee ID")) {
+          showToast("Error", "Log out login again, employee id is missing");
+        } else {
+          showToast("Error", result.error || "Failed to submit work report");
+        }
       }
     } catch (error) {
       console.error("Submit error:", error);

@@ -12,6 +12,11 @@
  */
 
 session_start();
+@ini_set('upload_max_filesize', '2048M');
+@ini_set('post_max_size', '2048M');
+@ini_set('memory_limit', '2048M');
+@ini_set('max_execution_time', '3600');
+@ini_set('max_input_time', '3600');
 
 // ══════════════════════════════════════════════════════════
 //  CONFIG — edit these
@@ -20,7 +25,7 @@ define('APP_NAME', 'NexFile');
 define('APP_VERSION', '1.0');
 define('DEMO_USER', 'admin');
 define('DEMO_PASS', 'admin123');      // ← CHANGE THIS!
-define('MAX_UPLOAD_MB', 50);
+
 
 // Root is the directory where this file lives — no sub-folder created
 define('ROOT_DIR', realpath(__DIR__));
@@ -280,10 +285,6 @@ if (isset($_GET['api']) && $loggedIn) {
                         $err[] = $f['name'] . ': upload error';
                         continue;
                     }
-                    if ($f['sz'] > $max) {
-                        $err[] = $f['name'] . ': too large';
-                        continue;
-                    }
                     $n = preg_replace('/[^a-zA-Z0-9._\- ]/', '_', $f['name']);
                     $n = ltrim($n, '.');
                     $d = $dest . DIRECTORY_SEPARATOR . $n;
@@ -373,9 +374,8 @@ if (isset($_GET['api']) && $loggedIn) {
                     jErr('Not found');
                 if (strtolower(pathinfo($a, PATHINFO_EXTENSION)) !== 'zip')
                     jErr('Not a zip');
-                $dd = dirname($a) . DIRECTORY_SEPARATOR . pathinfo($a, PATHINFO_FILENAME);
-                if (!is_dir($dd))
-                    @mkdir($dd, 0755, true);
+                $dd = dirname($a); // Extract directly to the parent folder
+                $realDd = realpath($dd);
                 $z = new ZipArchive();
                 if ($z->open($a) !== true)
                     jErr('Cannot open zip');
@@ -700,6 +700,16 @@ input,textarea{font-family:inherit}
 .toast.wrn .t-ttl{color:var(--yw)}
 
 /* ════════════════════════════════════════════════
+   UPLOAD MODAL
+════════════════════════════════════════════════ */
+.upl-mo { max-width: 480px!important; }
+.upl-area { border: 2px dashed var(--bd); border-radius: var(--rl); padding: 48px 24px; text-align: center; background: var(--bg); transition: all var(--t); cursor: pointer; position: relative; margin-top: 5px; }
+.upl-area:hover, .upl-area.drag { border-color: var(--ac); background: var(--ac-d); transform: translateY(-2px); }
+.upl-ico { font-size: 44px; display: block; margin-bottom: 18px; opacity: .8; filter: drop-shadow(0 4px 12px rgba(88,166,255,0.2)); }
+.upl-tit { font-size: 16px; font-weight: 700; margin-bottom: 6px; display: block; color: var(--tx); }
+.upl-sub { font-size: 12px; color: var(--tx3); display: block; margin-bottom: 24px; }
+
+/* ════════════════════════════════════════════════
    RESPONSIVE
 ════════════════════════════════════════════════ */
 @media(max-width:700px){
@@ -739,7 +749,6 @@ input,textarea{font-family:inherit}
           </div>
           <button class="lg-btn" type="submit" name="_login">Sign In →</button>
         </form>
-        <div class="lg-hint">Demo: <code>admin</code> / <code>admin123</code></div>
       </div>
     </div>
 
@@ -872,7 +881,28 @@ input,textarea{font-family:inherit}
             <button class="mc" data-mo="moPreview">✕</button>
           </div>
         </div>
-        <div class="mb full"><div id="prevContent"></div></div>
+        <div class="mb full" id="prevContent"></div>
+      </div>
+    </div>
+
+    <!-- UPLOAD MODAL -->
+    <div class="mo hid" id="moUpload">
+      <div class="md upl-mo">
+        <div class="mh">
+          <h3>Upload Files</h3>
+          <button class="mc" data-mo="moUpload">✕</button>
+        </div>
+        <div class="mb">
+          <div class="upl-area" id="uplArea">
+            <span class="upl-ico">☁️</span>
+            <span class="upl-tit">Drag and drop files here</span>
+            <span class="upl-sub">Files will be uploaded to the current folder</span>
+            <button class="btn pri" id="uplBrowse">Select Files from Device</button>
+          </div>
+        </div>
+        <div class="mf">
+          <button class="btn ghost sm" data-mo="moUpload">Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -897,7 +927,7 @@ input,textarea{font-family:inherit}
     // ════════════════════════════════════════════════
     const ME = <?= json_encode($me) ?>;          // this PHP file's name
     const API = `${ME}?api=`;
-    const MAX_MB = <?= MAX_UPLOAD_MB ?>;
+    const MAX_MB = 0; // No limit restricted by script
 
     // ════════════════════════════════════════════════
     //  STATE
@@ -1094,12 +1124,11 @@ input,textarea{font-family:inherit}
         <div class="f-tp"><span class="badge">${esc(item.ext||(item.isDir?'folder':'file'))}</span></div>`;
         el.querySelector('input').addEventListener('change', e => { e.stopPropagation(); toggleSel(item.path, el); });
         el.addEventListener('click', e => {
-            if (e.target.type === 'checkbox') return;
-            if (e.ctrlKey||e.metaKey) { toggleSel(item.path, el); return; }
+            if (e.target.tagName === 'INPUT') return;
             if (e.shiftKey) { rangeSel(i); return; }
-            if (item.isDir) nav(item.path);
+            toggleSel(item.path, el);
         });
-        el.addEventListener('dblclick', e => { if(e.target.type==='checkbox') return; dblClick(item); });
+        el.addEventListener('dblclick', e => { if(e.target.tagName==='INPUT') return; dblClick(item); });
         el.addEventListener('contextmenu', e => { e.preventDefault(); ctxOpen(e, item); });
         return el;
     }
@@ -1117,11 +1146,11 @@ input,textarea{font-family:inherit}
         <span class="f-sz">${item.isDir?'':item.sizeH}</span>`;
         el.querySelector('input').addEventListener('change', e => { e.stopPropagation(); toggleSel(item.path, el); });
         el.addEventListener('click', e => {
-            if (e.target.type==='checkbox'||e.target.tagName==='LABEL') return;
-            if (e.ctrlKey||e.metaKey) { toggleSel(item.path, el); return; }
-            if (item.isDir) nav(item.path);
+            if (e.target.tagName === 'INPUT') return;
+            if (e.shiftKey) { rangeSel(i); return; }
+            toggleSel(item.path, el);
         });
-        el.addEventListener('dblclick', e => { if(e.target.type==='checkbox'||e.target.tagName==='LABEL') return; dblClick(item); });
+        el.addEventListener('dblclick', e => { if(e.target.tagName==='INPUT') return; dblClick(item); });
         el.addEventListener('contextmenu', e => { e.preventDefault(); ctxOpen(e, item); });
         return el;
     }
@@ -1192,8 +1221,15 @@ input,textarea{font-family:inherit}
         else if (a==='download') download(item);
         else if (a==='edit') openEditor(item);
         else if (a==='rename') promptRename(item);
-        else if (a==='delete') confirmDel([item.path]);
-        else if (a==='zip') await doZip([item.path], S.path, item.name+'.zip');
+        else if (a==='delete') {
+            const paths = S.sel.has(item.path) ? [...S.sel] : [item.path];
+            confirmDel(paths);
+        }
+        else if (a==='zip') {
+            const paths = S.sel.has(item.path) ? [...S.sel] : [item.path];
+            const name = paths.length > 1 ? 'archive.zip' : item.name + '.zip';
+            await doZip(paths, S.path, name);
+        }
         else if (a==='unzip') await doUnzip(item);
         else if (a==='copy') { navigator.clipboard.writeText('/'+item.path); toast('Copied','Path copied','inf'); }
     });
@@ -1262,22 +1298,47 @@ input,textarea{font-family:inherit}
     // ════════════════════════════════════════════════
     //  UPLOAD
     // ════════════════════════════════════════════════
-    document.getElementById('btnUpload').addEventListener('click', () => document.getElementById('fileInput').click());
-    document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) doUpload(e.target.files); e.target.value=''; });
+    const moUpload = document.getElementById('moUpload');
+    const uplArea = document.getElementById('uplArea');
+    const fileInput = document.getElementById('fileInput');
+
+    document.getElementById('btnUpload').addEventListener('click', () => moUpload.classList.remove('hid'));
+    document.getElementById('uplBrowse').addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+    uplArea.addEventListener('click', () => fileInput.click());
+    
+    // Modal Drag Events
+    uplArea.addEventListener('dragover', e => { e.preventDefault(); uplArea.classList.add('drag'); });
+    uplArea.addEventListener('dragleave', () => uplArea.classList.remove('drag'));
+    uplArea.addEventListener('drop', e => {
+        e.preventDefault();
+        uplArea.classList.remove('drag');
+        if (e.dataTransfer.files.length) {
+            moUpload.classList.add('hid');
+            doUpload(e.dataTransfer.files);
+        }
+    });
+
+    fileInput.addEventListener('change', e => { 
+        if(e.target.files.length) {
+            moUpload.classList.add('hid');
+            doUpload(e.target.files);
+        }
+        e.target.value=''; 
+    });
 
     async function doUpload(files) {
-        const max = MAX_MB*1024*1024;
-        const valid = [...files].filter(f => { if(f.size>max){toast('Skipped',`${f.name} > ${MAX_MB}MB`,'wrn');return false;} return true; });
-        if (!valid.length) return;
-        showUpb(0, `Uploading ${valid.length} file(s)…`);
+        if (!files.length) return;
+        showUpb(0, `Uploading ${files.length} file(s)…`);
         const fd = new FormData();
         fd.append('action','upload'); fd.append('path',S.path);
-        valid.forEach(f => fd.append('files[]',f));
+        [...files].forEach(f => fd.append('files[]',f));
         const xhr = new XMLHttpRequest();
         xhr.open('POST', ME);
         xhr.upload.addEventListener('progress', e => { if(e.lengthComputable) showUpb(Math.round(e.loaded/e.total*100),`Uploading… ${Math.round(e.loaded/e.total*100)}%`); });
         xhr.addEventListener('load', async () => {
             hideUpb();
+            if (xhr.status === 413) { toast('Upload failed','File is too large for the server configuration','err'); return; }
+            if (xhr.status >= 400) { toast('Upload failed','Server error: ' + xhr.status,'err'); return; }
             try {
                 const j=JSON.parse(xhr.responseText);
                 if(!j.ok) throw new Error(j.e);
