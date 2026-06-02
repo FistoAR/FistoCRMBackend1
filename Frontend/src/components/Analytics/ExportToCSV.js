@@ -11,6 +11,7 @@ class ExportToCSV {
       "State",
       "Contact",
       "Designation",
+      "Next Follow up",
       "Status",
     ];
 
@@ -32,6 +33,7 @@ class ExportToCSV {
         safe(row.state),
         safe(row.contact),
         safe(row.designation),
+        safe(row.nextFollowupDate),
         safe(row.status),
       ];
 

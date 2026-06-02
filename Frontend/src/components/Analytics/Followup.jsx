@@ -11,9 +11,10 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { Users, Phone, PhoneCall, Download, Clock } from "lucide-react";
+import { Users, Phone, PhoneCall, Download, Clock, History, X, ChevronLeft, ChevronRight } from "lucide-react";
 import ExportToCSV from "./ExportToCSV";
 import ExportToPDF from "./ExportToPDF";
+import FistoLogo from "../../assets/Fisto Logo.png";
 
 const RADIAN = Math.PI / 180;
 
@@ -183,9 +184,26 @@ const Followup = ({ employeeId: propEmployeeId = undefined }) => {
   const [reportNextFollowupDate, setReportNextFollowupDate] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState({ pdf: false, csv: false });
+  const [reportPage, setReportPage] = useState(1);
 
    const [overviewFromDate, setOverviewFromDate] = useState("");
-  const [overviewToDate, setOverviewToDate] = useState("")
+  const [overviewToDate, setOverviewToDate] = useState("");
+
+  // Date Wise Analysis State
+  const [dateWiseDate, setDateWiseDate] = useState(new Date().toISOString().split("T")[0]);
+  const [dateWiseData, setDateWiseData] = useState([]);
+  const [dateWiseLoading, setDateWiseLoading] = useState(false);
+  const [dateWiseEmployeeFilter, setDateWiseEmployeeFilter] = useState("all");
+  const [dateWiseStatusFilter, setDateWiseStatusFilter] = useState("all");
+  const [dateWiseSearchTerm, setDateWiseSearchTerm] = useState("");
+  const [dateWisePage, setDateWisePage] = useState(1);
+  const itemsPerPage = 10;
+
+  // History Modal State
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [clientHistory, setClientHistory] = useState([]);
+  const [historyClientInfo, setHistoryClientInfo] = useState({ company: "", customer: "" });
 
   const API_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -253,6 +271,64 @@ const parseDate = (dateString) => {
       fetchReportData();
     }
   }, [subTab, propEmployeeId]);
+
+  const fetchDateWiseData = async () => {
+    try {
+      setDateWiseLoading(true);
+      const empIdToUse = propEmployeeId || "all";
+      const url = `${API_URL}/marketing/analytics/date-wise-report?date=${dateWiseDate}&employee_id=${empIdToUse}`;
+      const res = await fetch(url);
+      const result = await res.json();
+      if (result.success && Array.isArray(result.data)) {
+        setDateWiseData(result.data);
+      } else {
+        setDateWiseData([]);
+      }
+    } catch (err) {
+      console.error("❌ Date Wise fetch error:", err);
+    } finally {
+      setDateWiseLoading(false);
+    }
+  };
+
+  const formatHistoryStatus = (status) => {
+    if (!status) return "-";
+    if (status === "first_followup") return "First Follow Up";
+    if (status === "second_followup") return "Second Follow Up";
+    if (status === "not_reachable") return "Not Reachable";
+    if (status === "not_available") return "Not Available";
+    if (status === "not_interested") return "Not Interested";
+    if (status === "converted") return "Converted / Lead";
+    if (status === "droped" || status === "dropped") return "Drop";
+    return status.split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+  };
+
+  const fetchClientHistory = async (clientId, company = "", customer = "") => {
+    try {
+      setHistoryClientInfo({ company, customer });
+      setHistoryLoading(true);
+      setHistoryModalOpen(true);
+      const res = await fetch(`${API_URL}/followups/client/${clientId}`);
+      const result = await res.json();
+      if (result.success && Array.isArray(result.data)) {
+        setClientHistory(result.data);
+      } else {
+        setClientHistory([]);
+      }
+    } catch (err) {
+      console.error("❌ History fetch error:", err);
+      setClientHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (subTab === "datewise") {
+      fetchDateWiseData();
+      setDateWisePage(1); // Reset page on filter change
+    }
+  }, [subTab, dateWiseDate, propEmployeeId]);
 
 const fetchAnalyticsOverview = async () => {
   try {
@@ -364,7 +440,7 @@ const fetchAnalyticsOverview = async () => {
     : "";
 
   const filteredReportData = useMemo(() => {
-    return reportData.filter((row) => {
+    const filtered = reportData.filter((row) => {
       const rowDate = parseDate(row.followupDate) || parseDate(row.created_at);
       const from = reportFromDate ? new Date(reportFromDate) : null;
       const to = reportToDate ? new Date(reportToDate) : null;
@@ -417,7 +493,93 @@ const fetchAnalyticsOverview = async () => {
 
       return dateOk && statusOk && searchOk && nextDateOk;
     });
+
+    return filtered.sort((a, b) => {
+      const aNotStarted = !a.status || a.status === "";
+      const bNotStarted = !b.status || b.status === "";
+      if (aNotStarted && !bNotStarted) return 1;
+      if (!aNotStarted && bNotStarted) return -1;
+      return 0;
+    });
   }, [reportData, reportFromDate, reportToDate, reportStatusFilter, reportSearchTerm, reportNextFollowupDate]);
+
+  const totalReportPages = Math.ceil(filteredReportData.length / itemsPerPage) || 1;
+  const paginatedReportData = filteredReportData.slice((reportPage - 1) * itemsPerPage, reportPage * itemsPerPage);
+
+  const distinctEmployees = useMemo(() => {
+    const map = new Map();
+    dateWiseData.forEach((row) => {
+      if (row.employee_id) {
+        map.set(row.employee_id, row.employee_name || row.employee_id);
+      }
+    });
+    return Array.from(map, ([id, name]) => ({ id, name }));
+  }, [dateWiseData]);
+
+  const filteredDateWiseData = useMemo(() => {
+    return dateWiseData.filter((row) => {
+      const empOk = dateWiseEmployeeFilter === "all" || row.employee_id === dateWiseEmployeeFilter;
+      const statusOk = dateWiseStatusFilter === "all" || row.status === dateWiseStatusFilter;
+      const searchOk =
+        !dateWiseSearchTerm ||
+        row.company_name?.toLowerCase().includes(dateWiseSearchTerm.toLowerCase()) ||
+        row.customer_name?.toLowerCase().includes(dateWiseSearchTerm.toLowerCase());
+      return empOk && statusOk && searchOk;
+    });
+  }, [dateWiseData, dateWiseEmployeeFilter, dateWiseStatusFilter, dateWiseSearchTerm]);
+
+  const totalDateWisePages = Math.ceil(filteredDateWiseData.length / itemsPerPage) || 1;
+  const paginatedDateWiseData = filteredDateWiseData.slice((dateWisePage - 1) * itemsPerPage, dateWisePage * itemsPerPage);
+
+  const handleDateWiseExportPDF = () => {
+    let empName = "";
+    if (propEmployeeId) {
+      empName = distinctEmployees.length > 0 ? distinctEmployees[0].name : propEmployeeId;
+    } else if (dateWiseEmployeeFilter !== "all") {
+      const emp = distinctEmployees.find(e => e.id === dateWiseEmployeeFilter);
+      if (emp) empName = emp.name;
+    }
+
+    const fileName = empName ? `Date_Wise_Report_${empName.replace(/\s+/g, '_')}_${dateWiseDate}` : `Date_Wise_Report_${dateWiseDate}`;
+    
+    const rows = filteredDateWiseData.map((row, index) => ({
+      sno: index + 1,
+      date: parseDate(row.followupDate) ? parseDate(row.followupDate).toLocaleDateString("en-GB") : "-",
+      company: row.company_name || "-",
+      customer: row.customer_name || "-",
+      employee: row.employee_name || row.employee_id || "-",
+      nextFollowupDate: parseDate(row.nextFollowupDate) ? parseDate(row.nextFollowupDate).toLocaleDateString("en-GB") : "-",
+      status: row.statusLabel || "-",
+      remarks: row.remarks || "-",
+    }));
+
+    const activeFilters = [];
+    activeFilters.push(`Date: ${new Date(dateWiseDate).toLocaleDateString('en-GB')}`);
+    if (empName) activeFilters.push(`Employee: ${empName}`);
+    if (dateWiseStatusFilter !== "all") activeFilters.push(`Status: ${dateWiseStatusFilter}`);
+    if (dateWiseSearchTerm) activeFilters.push(`Search: "${dateWiseSearchTerm}"`);
+
+    const headers = [["S.NO", "Date", "Company", "Customer", ...(!propEmployeeId ? ["Employee"] : []), "Next Follow up", "Status", "Remarks"]];
+    const dataKeys = ["sno", "date", "company", "customer", ...(!propEmployeeId ? ["employee"] : []), "nextFollowupDate", "status", "remarks"];
+
+    const doExport = (logoImg) => {
+      const pdfExporter = new ExportToPDF();
+      pdfExporter.export(rows, {
+        fileName,
+        title: "Date Wise Analysis Report",
+        headers,
+        dataKeys,
+        filters: activeFilters,
+        logoImg
+      });
+    };
+
+    const img = new Image();
+    img.crossOrigin = "Anonymous";
+    img.src = FistoLogo;
+    img.onload = () => doExport(img);
+    img.onerror = () => doExport(null);
+  };
 
   const handleExport = () => {
     const fileName = "Followup_Report";
@@ -448,8 +610,34 @@ const fetchAnalyticsOverview = async () => {
     }
 
     if (exportFormat.pdf) {
-      const pdfExporter = new ExportToPDF();
-      pdfExporter.export(rows, fileName);
+      const activeFilters = [];
+      if (reportFromDate) activeFilters.push(`From: ${new Date(reportFromDate).toLocaleDateString('en-GB')}`);
+      if (reportToDate) activeFilters.push(`To: ${new Date(reportToDate).toLocaleDateString('en-GB')}`);
+      if (reportStatusFilter !== "all") activeFilters.push(`Status: ${reportStatusFilter}`);
+      if (reportSearchTerm) activeFilters.push(`Search: "${reportSearchTerm}"`);
+      if (reportNextFollowupDate) activeFilters.push(`Next Follow up: ${new Date(reportNextFollowupDate).toLocaleDateString('en-GB')}`);
+
+      const doExport = (logoImg) => {
+        try {
+          const pdfExporter = new ExportToPDF();
+          pdfExporter.export(rows, {
+            fileName,
+            title: "Calls Report",
+            headers: [["S.NO", "Date", "Company", "Customer", "Industry", "City", "State", "Contact", "Designation", "Next Follow up", "Status"]],
+            dataKeys: ["sno", "date", "company", "customer", "industry", "city", "state", "contact", "designation", "nextFollowupDate", "status"],
+            filters: activeFilters,
+            logoImg
+          });
+        } catch (e) {
+          console.error("PDF Export Error:", e);
+        }
+      };
+
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.src = FistoLogo;
+      img.onload = () => doExport(img);
+      img.onerror = () => doExport(null);
     }
 
     setShowExportModal(false);
@@ -472,7 +660,7 @@ const fetchAnalyticsOverview = async () => {
       {/* Sub Tabs */}
       <div className="flex items-center justify-between border-b border-gray-200 px-[0.8vw] py-[0.5vw]">
         <h2 className="text-[1.1vw] font-semibold text-gray-800">
-          {subTab === "overview" ? "Calls Analysis" : "Calls Report"}
+          {subTab === "overview" ? "Calls Analysis" : subTab === "report" ? "Calls Report" : "Date Wise Analysis"}
         </h2>
         
          {subTab === "overview" && (
@@ -511,17 +699,17 @@ const fetchAnalyticsOverview = async () => {
         )}
         
         <div className="bg-slate-100 rounded-full p-[0.35vw] flex gap-[0.35vw]">
-          {["overview", "report"].map((key) => (
+          {["overview", "report", "datewise"].map((key) => (
             <button
               key={key}
               onClick={() => setSubTab(key)}
-              className={`px-[1.5vw] py-[0.5vw] text-[0.85vw] rounded-full transition-all duration-200 ${
+              className={`px-[1.5vw] py-[0.5vw] text-[0.85vw] cursor-pointer rounded-full transition-all duration-200 ${
                 subTab === key
                   ? "bg-sky-500 text-white shadow-md"
                   : "bg-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200"
               }`}
             >
-              {key === "overview" ? "Overview" : "Report"}
+              {key === "overview" ? "Overview" : key === "report" ? "Report" : "Date Wise"}
             </button>
           ))}
         </div>
@@ -869,7 +1057,7 @@ const fetchAnalyticsOverview = async () => {
               </div>
             </div>
           </div>
-        ) : (
+        ) : subTab === "report" ? (
           /* REPORT TAB - Same as before */
           <div className="w-full h-full flex flex-col gap-[0.8vw]">
             {/* Filters + Export */}
@@ -883,7 +1071,7 @@ const fetchAnalyticsOverview = async () => {
                     type="date"
                     className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500"
                     value={reportFromDate}
-                    onChange={(e) => setReportFromDate(e.target.value)}
+                    onChange={(e) => { setReportFromDate(e.target.value); setReportPage(1); }}
                   />
                   <span className="text-[0.85vw] text-gray-600 font-medium ml-[0.4vw]">
                     To
@@ -892,7 +1080,7 @@ const fetchAnalyticsOverview = async () => {
                     type="date"
                     className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500"
                     value={reportToDate}
-                    onChange={(e) => setReportToDate(e.target.value)}
+                    onChange={(e) => { setReportToDate(e.target.value); setReportPage(1); }}
                   />
                 </div>
 
@@ -903,7 +1091,7 @@ const fetchAnalyticsOverview = async () => {
                   <select
                     className="border border-gray-300 rounded-lg px-[0.8vw] py-[0.3vw] text-[0.85vw] bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
                     value={reportStatusFilter}
-                    onChange={(e) => setReportStatusFilter(e.target.value)}
+                    onChange={(e) => { setReportStatusFilter(e.target.value); setReportPage(1); }}
                   >
                     <option value="all">All Clients</option>
                     <option value="not_started">Not Started</option>
@@ -932,7 +1120,7 @@ const fetchAnalyticsOverview = async () => {
                     placeholder="Search Company, Customer, Industry, City, State, Contact..."
                     className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500 w-[15vw] min-w-[200px]"
                     value={reportSearchTerm}
-                    onChange={(e) => setReportSearchTerm(e.target.value)}
+                    onChange={(e) => { setReportSearchTerm(e.target.value); setReportPage(1); }}
                   />
                 </div>
 
@@ -944,7 +1132,7 @@ const fetchAnalyticsOverview = async () => {
                     type="date"
                     className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500"
                     value={reportNextFollowupDate}
-                    onChange={(e) => setReportNextFollowupDate(e.target.value)}
+                    onChange={(e) => { setReportNextFollowupDate(e.target.value); setReportPage(1); }}
                   />
                 </div>
               </div>
@@ -963,107 +1151,110 @@ const fetchAnalyticsOverview = async () => {
               <table className="w-full border-collapse border border-gray-300">
                 <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                   <tr>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       S.NO
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Date
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Company
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Customer
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Industry
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       City
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       State
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Contact
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Designation
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Next Follow up Date
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Status
+                    </th>
+                    <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      History
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {reportLoading ? (
                     <tr>
-                      <td
-                        colSpan={11}
-                        className="text-center py-[2vw] text-gray-500"
-                      >
-                        Loading...
+                      <td colSpan={12} className="py-[4vw]">
+                        <div className="flex flex-col items-center justify-center gap-[1vw]">
+                          <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-sky-600" />
+                          <p className="text-[0.9vw] text-gray-500">Applying filters...</p>
+                        </div>
                       </td>
                     </tr>
                   ) : filteredReportData.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={11}
+                        colSpan={12}
                         className="text-center py-[2vw] text-gray-500"
                       >
                         No data available for selected filters
                       </td>
                     </tr>
                   ) : (
-                    filteredReportData.map((row, index) => (
+                    paginatedReportData.map((row, index) => (
                       <tr
                         key={`${row.clientID}-${
                           row.followupDate || row.created_at
                         }-${index}`}
                         className="hover:bg-gray-50 transition-colors"
                       >
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
-                          {index + 1}
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
+                          {(reportPage - 1) * itemsPerPage + index + 1}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
                           {parseDate(row.followupDate) || parseDate(row.created_at)
                             ? (parseDate(row.followupDate) || parseDate(row.created_at)).toLocaleDateString("en-GB")
                             : "-"}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-900 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-900 border border-gray-300">
                           {row.company_name}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-900 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-900 border border-gray-300">
                           {row.customer_name}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
                           {row.industry_type}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
                           {row.city}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
                           {row.state}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
                           {row.contactName
                             ? `${row.contactName} (${row.contactNumber || "-"})`
                             : "-"}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
                           {row.designation || "-"}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.85vw] text-center text-gray-600 border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-600 border border-gray-300">
                           {parseDate(row.nextFollowupDate)
                             ? parseDate(row.nextFollowupDate).toLocaleDateString("en-GB")
                             : "-"}
                         </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-center border border-gray-300">
+                        <td className="px-[0.7vw] py-[1vw] text-center border border-gray-300">
                           <span
-                            className={`inline-block px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-medium ${
+                            className={`inline-block whitespace-nowrap px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-medium ${
                               row.status === "converted"
                                 ? "bg-green-100 text-green-700"
                                 : row.status === "first_followup"
@@ -1082,14 +1273,246 @@ const fetchAnalyticsOverview = async () => {
                             {row.statusLabel}
                           </span>
                         </td>
+                        <td className="px-[0.7vw] py-[1vw] text-center border border-gray-300">
+                          <button
+                            onClick={() => fetchClientHistory(row.clientID, row.company_name, row.customer_name)}
+                            className="text-sky-600 hover:text-sky-800 bg-sky-50 p-[0.3vw] rounded-md transition-colors cursor-pointer"
+                            title="View History"
+                          >
+                            <History size={"1.2vw"} />
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination controls */}
+            {totalReportPages > 1 && (
+              <div className="flex items-center justify-between px-[1vw] py-[0.6vw] bg-slate-50 border border-gray-300 rounded-b-xl -mt-[0.8vw] mx-[0.8vw] mb-[0.8vw] border-t-0">
+                <span className="text-[0.85vw] text-gray-600">
+                  Showing {(reportPage - 1) * itemsPerPage + 1} to {Math.min(reportPage * itemsPerPage, filteredReportData.length)} of {filteredReportData.length} entries
+                </span>
+                <div className="flex items-center gap-[0.5vw]">
+                  <button
+                    onClick={() => setReportPage(p => Math.max(1, p - 1))}
+                    disabled={reportPage === 1}
+                    className="p-[0.3vw] rounded-md border border-gray-300 disabled:opacity-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft size={"1.2vw"} />
+                  </button>
+                  <span className="text-[0.85vw] font-medium text-gray-700">
+                    Page {reportPage} of {totalReportPages}
+                  </span>
+                  <button
+                    onClick={() => setReportPage(p => Math.min(totalReportPages, p + 1))}
+                    disabled={reportPage === totalReportPages}
+                    className="p-[0.3vw] rounded-md border border-gray-300 disabled:opacity-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                  >
+                    <ChevronRight size={"1.2vw"} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        ) : subTab === "datewise" ? (
+          /* DATE WISE TAB */
+          <div className="w-full h-full flex flex-col gap-[0.8vw]">
+            <div className="flex items-start justify-between px-[0.8vw] py-[0.6vw] bg-white rounded-xl border border-gray-200 gap-[1vw]">
+              <div className="flex flex-wrap items-center gap-[1vw] flex-1">
+                <div className="flex items-center gap-[0.4vw]">
+                  <span className="text-[0.85vw] text-gray-600 font-medium">Date</span>
+                  <input
+                    type="date"
+                    className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    value={dateWiseDate}
+                    onChange={(e) => {
+                      setDateWiseDate(e.target.value);
+                      setDateWiseEmployeeFilter("all");
+                    }}
+                  />
+                </div>
+
+                {!propEmployeeId && distinctEmployees.length > 0 && (
+                  <div className="flex items-center gap-[0.4vw]">
+                    <span className="text-[0.85vw] text-gray-600 font-medium">Employee</span>
+                    <select
+                      className="border border-gray-300 rounded-lg px-[0.8vw] py-[0.3vw] text-[0.85vw] bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                      value={dateWiseEmployeeFilter}
+                      onChange={(e) => {
+                        setDateWiseEmployeeFilter(e.target.value);
+                        setDateWisePage(1);
+                      }}
+                    >
+                      <option value="all">All Employees</option>
+                      {distinctEmployees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-[0.4vw]">
+                  <span className="text-[0.85vw] text-gray-600 font-medium">Status</span>
+                  <select
+                    className="border border-gray-300 rounded-lg px-[0.8vw] py-[0.3vw] text-[0.85vw] bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                    value={dateWiseStatusFilter}
+                    onChange={(e) => {
+                      setDateWiseStatusFilter(e.target.value);
+                      setDateWisePage(1);
+                    }}
+                  >
+                    <option value="all">All</option>
+                    <option value="converted">Lead</option>
+                    <option value="first_followup">Follow Up</option>
+                    <option value="second_followup">Second Follow Up</option>
+                    <option value="not_reachable">Not Picking / Reachable</option>
+                    <option value="not_available">Not Available</option>
+                    <option value="not_interested">Not Interested</option>
+                    <option value="droped">Drop</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-[0.4vw]">
+                  <span className="text-[0.85vw] text-gray-600 font-medium">Search</span>
+                  <input
+                    type="text"
+                    placeholder="Company or Customer..."
+                    className="border border-gray-300 rounded-lg px-[0.6vw] py-[0.3vw] text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-sky-500 w-[15vw] min-w-[200px]"
+                    value={dateWiseSearchTerm}
+                    onChange={(e) => {
+                      setDateWiseSearchTerm(e.target.value);
+                      setDateWisePage(1);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-[1vw]">
+                <div className="flex items-center gap-[0.4vw] px-[1vw] py-[0.4vw] bg-slate-100 rounded-lg">
+                  <span className="text-[0.85vw] text-gray-600 font-medium">Total Records:</span>
+                  <span className="text-[0.9vw] font-bold text-gray-800">{filteredDateWiseData.length}</span>
+                </div>
+                <button
+                  onClick={handleDateWiseExportPDF}
+                  className="flex items-center gap-[0.5vw] px-[1vw] py-[0.4vw] bg-sky-500 text-white rounded-lg text-[0.85vw] font-medium hover:bg-sky-600 transition-colors cursor-pointer flex-shrink-0"
+                >
+                  <Download size={"1vw"} />
+                  Export PDF
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl bg-white overflow-hidden">
+              <div className="flex-1 overflow-auto">
+                <table className="w-full border-collapse border border-gray-300">
+                  <thead className="bg-[#E2EBFF] sticky top-0 z-10">
+                    <tr>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">S.NO</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Date</th>
+                      {!propEmployeeId && (
+                        <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Employee</th>
+                      )}
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Company</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Customer</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Next Follow up</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">Status</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 w-[15vw]">Remarks</th>
+                      <th className="px-[0.7vw] py-[0.8vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">History</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dateWiseLoading ? (
+                      <tr>
+                        <td colSpan={propEmployeeId ? 8 : 9} className="py-[4vw]">
+                          <div className="flex flex-col items-center justify-center gap-[1vw]">
+                            <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-sky-600" />
+                            <p className="text-[0.9vw] text-gray-500">Applying filters...</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : paginatedDateWiseData.length === 0 ? (
+                      <tr><td colSpan={propEmployeeId ? 8 : 9} className="text-center py-[2vw] text-gray-500">No data available</td></tr>
+                    ) : (
+                      paginatedDateWiseData.map((row, index) => (
+                        <tr key={index} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
+                            {(dateWisePage - 1) * itemsPerPage + index + 1}
+                          </td>
+                          <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-900 border border-gray-300">
+                            {parseDate(row.followupDate) ? parseDate(row.followupDate).toLocaleDateString("en-GB") : "-"}
+                          </td>
+                          {!propEmployeeId && (
+                            <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-600 border border-gray-300">
+                              {row.employee_name || row.employee_id}
+                            </td>
+                          )}
+                          <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-900 border border-gray-300">{row.company_name}</td>
+                          <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-gray-900 border border-gray-300">{row.customer_name}</td>
+                          <td className="px-[0.7vw] py-[1vw] text-[0.85vw] text-center text-gray-600 border border-gray-300">
+                            {parseDate(row.nextFollowupDate) ? parseDate(row.nextFollowupDate).toLocaleDateString("en-GB") : "-"}
+                          </td>
+                          <td className="px-[0.7vw] py-[1vw] text-center border border-gray-300">
+                            <span className={`inline-block px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-medium ${
+                                row.status === "converted" ? "bg-green-100 text-green-700" :
+                                row.status === "first_followup" ? "bg-blue-100 text-blue-700" :
+                                row.status === "second_followup" ? "bg-purple-100 text-purple-700" :
+                                "bg-gray-100 text-gray-700"
+                              }`}>
+                              {row.statusLabel}
+                            </span>
+                          </td>
+                          <td className="px-[0.7vw] py-[1vw] text-[0.8vw] text-gray-700 border border-gray-300 whitespace-pre-wrap max-w-[15vw]">
+                            {row.remarks || "-"}
+                          </td>
+                          <td className="px-[0.7vw] py-[1vw] text-center border border-gray-300">
+                            <button
+                              onClick={() => fetchClientHistory(row.clientID, row.company_name, row.customer_name)}
+                              className="text-sky-600 hover:text-sky-800 bg-sky-50 p-[0.3vw] rounded-md transition-colors cursor-pointer"
+                              title="View History"
+                            >
+                              <History size={"1.2vw"} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Pagination controls */}
+              {totalDateWisePages > 1 && (
+                <div className="flex items-center justify-between px-[1vw] py-[0.6vw] bg-slate-50 border-t border-gray-200">
+                  <span className="text-[0.85vw] text-gray-600">
+                    Showing {(dateWisePage - 1) * itemsPerPage + 1} to {Math.min(dateWisePage * itemsPerPage, filteredDateWiseData.length)} of {filteredDateWiseData.length} entries
+                  </span>
+                  <div className="flex items-center gap-[0.5vw]">
+                    <button
+                      onClick={() => setDateWisePage(p => Math.max(1, p - 1))}
+                      disabled={dateWisePage === 1}
+                      className="p-[0.3vw] rounded-md border border-gray-300 disabled:opacity-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                    >
+                      <ChevronLeft size={"1.2vw"} />
+                    </button>
+                    <span className="text-[0.85vw] font-medium text-gray-700">
+                      Page {dateWisePage} of {totalDateWisePages}
+                    </span>
+                    <button
+                      onClick={() => setDateWisePage(p => Math.min(totalDateWisePages, p + 1))}
+                      disabled={dateWisePage === totalDateWisePages}
+                      className="p-[0.3vw] rounded-md border border-gray-300 disabled:opacity-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                    >
+                      <ChevronRight size={"1.2vw"} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
       {showExportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1155,6 +1578,59 @@ const fetchAnalyticsOverview = async () => {
               >
                 Export
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* History Modal */}
+      {historyModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl w-[50vw] max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between p-[1.2vw] border-b border-gray-200">
+              <div>
+                <h3 className="text-[1.2vw] font-semibold text-gray-800">Followup History</h3>
+                {(historyClientInfo.company || historyClientInfo.customer) && (
+                  <p className="text-[0.85vw] text-gray-500 mt-[0.2vw]">
+                    {historyClientInfo.company} {historyClientInfo.company && historyClientInfo.customer && "-"} {historyClientInfo.customer}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setHistoryModalOpen(false)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+                <X size={"1.5vw"} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-auto p-[1.2vw] bg-slate-50 rounded-b-xl">
+              {historyLoading ? (
+                <div className="flex justify-center items-center h-full">
+                  <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-sky-600" />
+                </div>
+              ) : clientHistory.length === 0 ? (
+                <div className="text-center text-gray-500 py-[2vw]">No history found.</div>
+              ) : (
+                <div className="flex flex-col gap-[1vw]">
+                  {clientHistory.map((hist, idx) => (
+                    <div key={idx} className="bg-white border border-gray-200 rounded-lg p-[1vw] shadow-sm">
+                      <div className="flex items-center justify-between mb-[0.6vw]">
+                        <span className="text-[0.9vw] font-medium text-gray-800">
+                          {parseDate(hist.created_at) ? parseDate(hist.created_at).toLocaleDateString("en-GB") : "-"}
+                        </span>
+                        <span className="px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-medium bg-blue-50 text-blue-700">
+                          {formatHistoryStatus(hist.status)}
+                        </span>
+                      </div>
+                      <div className="text-[0.85vw] text-gray-600 whitespace-pre-wrap mb-[0.4vw]">
+                        <span className="font-medium text-gray-800">Remarks: </span>
+                        {hist.remarks || "No remarks"}
+                      </div>
+                      <div className="text-[0.85vw] text-gray-600">
+                        <span className="font-medium text-gray-800">Next Followup: </span>
+                        {parseDate(hist.nextFollowupDate) ? parseDate(hist.nextFollowupDate).toLocaleDateString("en-GB") : "-"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

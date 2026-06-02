@@ -455,4 +455,60 @@ router.get("/report", async (req, res) => {
   }
 });
 
+// ✅ Get date wise report data
+router.get("/date-wise-report", async (req, res) => {
+  try {
+    const { date, employee_id } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ error: "Date is required" });
+    }
+
+    const sql = `
+      SELECT
+        c.id AS clientID,
+        c.company_name,
+        c.customer_name,
+        f.created_at AS followupDate,
+        f.nextFollowupDate AS nextFollowupDate,
+        f.status,
+        f.remarks,
+        e.employee_name AS employee_name,
+        e.employee_id AS employee_id,
+        CASE f.status
+          WHEN 'converted' THEN 'Lead'
+          WHEN 'first_followup' THEN 'Follow Up'
+          WHEN 'second_followup' THEN 'Second Follow Up'
+          WHEN 'not_reachable' THEN 'Not Picking / Not Reachable'
+          WHEN 'not_available' THEN 'Not Available'
+          WHEN 'not_interested' THEN 'Not Interested / Not Needed'
+          WHEN 'droped' THEN 'Drop'
+          ELSE 'No Status'
+        END AS statusLabel
+      FROM Followups f
+      INNER JOIN ClientsData c ON f.clientID = c.id
+      LEFT JOIN employees_details e ON f.employee_id = e.employee_id
+      WHERE DATE(f.created_at) = ?
+      ${employee_id && employee_id !== "all" ? "AND f.employee_id = ?" : ""}
+      ORDER BY f.created_at DESC
+    `;
+
+    const params = [date];
+    if (employee_id && employee_id !== "all") {
+      params.push(employee_id);
+    }
+
+    const rows = await queryWithRetry(sql, params);
+
+    res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error("Date wise report error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch date wise report",
+      message: err.message,
+    });
+  }
+});
+
 module.exports = router;

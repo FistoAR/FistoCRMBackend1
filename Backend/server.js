@@ -42,7 +42,7 @@ app.use(
     origin: [
       "http://localhost:5173",
       "http://localhost:5174",
-      "https://pspc32l5-5173.inc1.devtunnels.ms",
+      "https://pspc32l5-5174.inc1.devtunnels.ms",
       "https://www.fist-o.com"
     ],
     credentials: true,
