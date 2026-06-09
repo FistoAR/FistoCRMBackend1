@@ -92,55 +92,50 @@ router.delete("/", async (req, res) => {
     const { employeeID, taskId, activityId } = req.body;
 
     if (!employeeID) {
-      return res.status(400).json({
-        success: false,
-        message: "employeeID is required",
-      });
+      return res.status(400).json({ success: false, message: "employeeID is required" });
     }
 
     const query = { employeeID };
-
-    if (taskId) {
-      query.taskId = taskId;
-    }
-
-    if (activityId) {
-      query.activityId = activityId;
-    }
+    if (taskId) query.taskId = taskId;
+    if (activityId) query.activityId = activityId;
 
     const dayReport = await DayReport.findOne(query);
-
     if (!dayReport) {
-      return res.status(404).json({
-        success: false,
-        message: "Day report not found",
-      });
+      return res.status(404).json({ success: false, message: "Day report not found" });
     }
+
+    // ✅ Scope to today only
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const todayDateFilter = { createdAt: { $gte: todayStart, $lte: todayEnd } };
 
     let hasStartedWork = false;
     let workDetails = null;
 
     if (taskId && !activityId) {
       const taskReport = await TaskReports.findOne({
-        taskId: taskId,
+        taskId,
         activityId: null,
+        ...todayDateFilter,         // ✅ only today's reports
       }).lean();
 
       const taskReportReview = await TaskReportsReview.findOne({
-        taskId: taskId,
+        taskId,
         activityId: null,
+        ...todayDateFilter,         // ✅ only today's reports
       }).lean();
 
       if (taskReport || taskReportReview) {
-        const percentage =
-          taskReport?.percentage || taskReportReview?.percentage || 0;
-
+        const percentage = taskReport?.percentage || taskReportReview?.percentage || 0;
         if (percentage > 0) {
           hasStartedWork = true;
           workDetails = {
             type: "task",
-            percentage: percentage,
-            message: `You have already started work on this task (${percentage}% completed). \n Cannot remove from today's tasks.`,
+            percentage,
+            message: `You have already submitted a report for this task today (${percentage}% completed). Cannot remove from today's tasks.`,
           };
         }
       }
@@ -148,23 +143,23 @@ router.delete("/", async (req, res) => {
 
     if (activityId) {
       const activityReport = await TaskReports.findOne({
-        activityId: activityId,
+        activityId,
+        ...todayDateFilter,         // ✅ only today's reports
       }).lean();
 
       const activityReportReview = await TaskReportsReview.findOne({
-        activityId: activityId,
+        activityId,
+        ...todayDateFilter,         // ✅ only today's reports
       }).lean();
 
       if (activityReport || activityReportReview) {
-        const percentage =
-          activityReport?.percentage || activityReportReview?.percentage || 0;
-
+        const percentage = activityReport?.percentage || activityReportReview?.percentage || 0;
         if (percentage > 0) {
           hasStartedWork = true;
           workDetails = {
             type: "activity",
-            percentage: percentage,
-            message: `You have already started work on this activity (${percentage}% completed). Cannot remove from today's tasks.`,
+            percentage,
+            message: `You have already submitted a report for this activity today (${percentage}% completed). Cannot remove from today's tasks.`,
           };
         }
       }
@@ -180,7 +175,6 @@ router.delete("/", async (req, res) => {
     }
 
     const deletedReport = await DayReport.findOneAndDelete(query);
-
     res.status(200).json({
       success: true,
       canRemove: true,
@@ -189,11 +183,7 @@ router.delete("/", async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting day report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete day report",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete day report", error: error.message });
   }
 });
 

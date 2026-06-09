@@ -303,8 +303,8 @@ const DayTask = () => {
           !matchesSearch(task) ||
           !matchesDateFilter(task.startDate, task.endDate)
         ) {
-          // Skip
-        } else if (task.status === "Hold") {
+          // Skip?
+        } else if (task.status === "Hold" || task.status === "Cancelled") {
           // Completely avoid hold tasks in day task
           return;
         } else {
@@ -336,7 +336,7 @@ const DayTask = () => {
             !matchesDateFilter(activity.startDate, activity.endDate)
           ) {
             // Skip
-          } else if (activity.status === "Hold") {
+          } else if (activity.status === "Hold" || activity.status === "Cancelled") {
             // Completely avoid hold activities in day task
             return;
           } else {

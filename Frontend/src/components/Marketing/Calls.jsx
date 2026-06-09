@@ -17,7 +17,7 @@ import uploadLogo from "../../assets/Marketing/upload.webp";
 import searchIcon from "../../assets/Marketing/search.webp";
 import filter from "../../assets/ProjectPages/filter.webp";
 
-const RECORDS_PER_PAGE = 8;
+const RECORDS_PER_PAGE = 10;
 
 const STATUS_GROUP_FOLLOWUP = [
   "followup",
@@ -1167,7 +1167,7 @@ const Followup = ({ type = "Marketing" }) => {
                             </td>
                           )}
                           {mainTab === "followups" && subTab !== "project_onboard" && (
-                            <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
+                            <td className="px-[0.7vw] py-[0.72vw] border border-gray-300">
                               <button
                                 onClick={() => handleFollowup(client)}
                                 className="text-[0.85vw] text-blue-600 hover:text-blue-700 font-medium cursor-pointer transition flex items-center gap-[0.3vw]"
@@ -1179,7 +1179,7 @@ const Followup = ({ type = "Marketing" }) => {
                           )}
 
                           {mainTab === "clientsData" && (
-                            <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
+                            <td className="px-[0.7vw] py-[0.22vw] border border-gray-300">
                               {subTab === "deleted" ? (
                                 <button
                                   onClick={() => handleRestore(client.id)}
