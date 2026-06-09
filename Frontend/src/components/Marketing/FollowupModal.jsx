@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, History, Calendar, ArrowLeft, Plus, PhoneCall } from "lucide-react";
+import { X, History, ArrowLeft, PhoneCall } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import { useConfirm } from "../ConfirmContext";
 
@@ -12,7 +12,6 @@ const FollowupModal = ({
   subTab,
 }) => {
 
-  console.log(clientData)
   const { notify } = useNotification();
   const confirm = useConfirm();
   const [selectedContacts, setSelectedContacts] = useState("");
@@ -30,23 +29,14 @@ const FollowupModal = ({
     designation: "",
     email: "",
   });
-  const [hasMeeting, setHasMeeting] = useState(false);
-  const [isViewingMeeting, setIsViewingMeeting] = useState(false);
-
-  const [shareViaWhatsApp, setShareViaWhatsApp] = useState(false);
-  const [shareViaEmail, setShareViaEmail] = useState(false);
-  const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [meetingData, setMeetingData] = useState({
-    title: "",
-    date: "",
-    startTime: "",
-    endTime: "",
-    agenda: "",
-    link: "",
-    attendees: "",
-  });
+  const [showNewContactForm, setShowNewContactForm] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_BASE_URL;
+  const NO_NEXT_FOLLOWUP_STATUSES = [
+    "not_interested",
+    "dropped",
+    "project_onboard",
+  ];
 
   useEffect(() => {
     if (isOpen && clientData) {
@@ -57,48 +47,25 @@ const FollowupModal = ({
       setStatus("");
       setShowHistory(false);
       setHistoryTab("followups");
-      setShareViaWhatsApp(false);
-      setShareViaEmail(false);
-      setShowMeetingModal(false);
-      setHasMeeting(false);
-      setIsViewingMeeting(false);
+      setShowNewContactForm(false);
       setNewContact({
         name: "",
         contactNumber: "",
         designation: "",
         email: "",
       });
-      setMeetingData({
-        title: "",
-        date: "",
-        startTime: "",
-        endTime: "",
-        agenda: "",
-        link: "",
-        attendees: "",
-      });
     }
   }, [isOpen, clientData]);
 
-  useEffect(() => {
-    if (isOpen && clientData && clientHistory) {
-      const clientHistoryData = clientHistory.find(
-        (h) => h.clientID === clientData.id
-      );
-
-      const firstHistory = clientHistoryData?.history?.[0];
-
-      if (firstHistory) {
-        setShareViaWhatsApp(["both", "whatsapp"].includes(firstHistory.shared));
-        setShareViaEmail(["both", "email"].includes(firstHistory.shared));
-      } else {
-        setShareViaWhatsApp(false);
-        setShareViaEmail(false);
-      }
-    }
-  }, [isOpen, clientData, clientHistory]);
 
   function handleContactSelect(contactId) {
+    setShowNewContactForm(false);
+    setNewContact({
+      name: "",
+      contactNumber: "",
+      designation: "",
+      email: "",
+    });
     if (selectedContacts === contactId) {
       setSelectedContacts("");
       setContactDetails([]);
@@ -111,16 +78,20 @@ const FollowupModal = ({
     }
   }
 
+  const handleNewContactMode = (flag) => {
+    setSelectedContacts("");
+    setContactDetails([]);
+    setShowNewContactForm(flag);
+  };
+
   const handleSubmit = async () => {
     if (
-      selectedContacts === "" &&
-      status !== "not_available" &&
-      subTab === "not_available" &&
+      !selectedContacts &&
       (!newContact.name?.trim() || !newContact.contactNumber?.trim())
     ) {
       notify({
         title: "Warning",
-        message: `Please select at least one contact person`,
+        message: `Please select or add a contact person`,
       });
       return;
     }
@@ -133,18 +104,6 @@ const FollowupModal = ({
       return;
     }
 
-    if (subTab === "not_available") {
-      const hasAnyField =
-        newContact.name?.trim() || newContact.contactNumber?.trim();
-      if (!hasAnyField) {
-        notify({
-          title: "Warning",
-          message: `Please enter contact person details`,
-        });
-        return;
-      }
-    }
-
     if (status === "") {
       notify({
         title: "Warning",
@@ -153,16 +112,13 @@ const FollowupModal = ({
       return;
     }
 
-    if (
-      ["first_followup", "second_followup", "not_reachable"].includes(status)
-    ) {
-      if (nextFollowup === "") {
-        notify({
-          title: "Warning",
-          message: `Please select next followup date`,
-        });
-        return;
-      }
+    const requiresNextFollowup = !NO_NEXT_FOLLOWUP_STATUSES.includes(status);
+    if (requiresNextFollowup && nextFollowup === "") {
+      notify({
+        title: "Warning",
+        message: `Please select next followup date`,
+      });
+      return;
     }
 
     setLoading(true);
@@ -204,11 +160,8 @@ const FollowupModal = ({
           remarks: remarks,
           nextFollowup: nextFollowup,
           newContact: newContact,
-          meetingData: meetingData,
-          shareViaEmail: shareViaEmail,
-          shareViaWhatsApp: shareViaWhatsApp,
           subTab: subTab,
-          following:clientData.following
+          following: clientData.following,
         }),
       });
 
@@ -268,13 +221,63 @@ const FollowupModal = ({
   const getStatusLabel = (status) => {
     const statusMap = {
       first_followup: "First Followup",
-      second_followup: "Second Followup",
-      not_available: "Not Available",
+      followup: "Follow-up",
+      project_onboard: "Project Onboard",
       not_interested: "Not Interested / Not Needed",
-      not_reachable: "Not Picking / Not Reachable",
-      converted:"Lead",
+      not_picking: "Not Picking / Busy / Others",
+      lead: "Lead",
+      demo_shared: "Demo Shared",
+      appointment: "Appointment",
+      quotation: "Quotation",
+      proposal: "Proposal",
+      dropped: "Dropped",
     };
     return statusMap[status] || status;
+  };
+
+  const getStatusOptions = () => {
+    switch (subTab) {
+      case "first_followup":
+        return [
+          { value: "not_picking", label: "Not Picking / Busy / Others" },
+          { value: "not_interested", label: "Not Interested" },
+          { value: "demo_shared", label: "Demo Shared" },
+          { value: "appointment", label: "Appointment" },
+          { value: "followup", label: "Follow-up" },
+          { value: "lead", label: "Lead" },
+          { value: "quotation", label: "Quotation" },
+          { value: "proposal", label: "Proposal" },
+          { value: "project_onboard", label: "Project Onboard" },
+          { value: "dropped", label: "Drop" },
+        ];
+      case "followup":
+        return [
+          { value: "not_picking", label: "Not Picking / Busy / Others" },
+          { value: "not_interested", label: "Not Interested" },
+          { value: "demo_shared", label: "Demo Shared" },
+          { value: "appointment", label: "Appointment" },
+          { value: "followup", label: "Follow-up" },
+          { value: "lead", label: "Lead" },
+          { value: "quotation", label: "Quotation" },
+          { value: "proposal", label: "Proposal" },
+          { value: "dropped", label: "Drop" },
+        ];
+      case "project_onboard":
+        return [{ value: "project_onboard", label: "Project Onboard" }];
+      case "not_interested":
+      case "dropped":
+        return [
+          { value: "demo_shared", label: "Demo Shared" },
+          { value: "appointment", label: "Appointment" },
+          { value: "followup", label: "Follow-up" },
+          { value: "lead", label: "Lead" },
+          { value: "quotation", label: "Quotation" },
+          { value: "proposal", label: "Proposal" },
+          { value: "project_onboard", label: "Project Onboard" },
+        ];
+      default:
+        return [];
+    }
   };
 
   const getCurrentClientHistory = () => {
@@ -287,89 +290,7 @@ const FollowupModal = ({
     return clientHistoryData?.history || [];
   };
 
-  const getCurrentClientMeetings = () => {
-    if (!clientHistory || !clientData) return [];
-
-    const clientHistoryData = clientHistory.find(
-      (h) => h.clientID === clientData.id
-    );
-
-    return clientHistoryData?.meetings || [];
-  };
-
   const history = getCurrentClientHistory();
-  const meetings = getCurrentClientMeetings();
-
-  const handleAddMeeting = () => {
-    if (
-      !meetingData.title?.trim() ||
-      !meetingData.date ||
-      !meetingData.startTime ||
-      !meetingData.endTime
-    ) {
-      notify({
-        title: "Warning",
-        message: `Please fill in all required meeting fields`,
-      });
-      return;
-    }
-    setHasMeeting(true);
-    setShowMeetingModal(false);
-    setIsViewingMeeting(false);
-  };
-
-  const handleViewMeeting = () => {
-    setIsViewingMeeting(true);
-    setShowMeetingModal(true);
-  };
-
-  const handleDeleteMeeting = async () => {
-    const ok = await confirm({
-      type: "error",
-      title: `Are you sure you want to delete this meeting?`,
-      message: "This action cannot be undone.\nAre you sure?",
-      confirmText: "Yes, Delete",
-      cancelText: "Cancel",
-    });
-    if (ok) {
-      setMeetingData({
-        title: "",
-        date: "",
-        startTime: "",
-        endTime: "",
-        agenda: "",
-        link: "",
-        attendees: "",
-      });
-      setHasMeeting(false);
-      setIsViewingMeeting(false);
-    }
-  };
-
-  const handleCloseMeetingModal = () => {
-    if (isViewingMeeting) {
-      setShowMeetingModal(false);
-      setIsViewingMeeting(false);
-    } else {
-      const hasData =
-        meetingData.title || meetingData.date || meetingData.startTime;
-      if (hasData && !window.confirm("Discard meeting details?")) {
-        return;
-      }
-      setShowMeetingModal(false);
-    }
-  };
-
-  function formatTime(timeString) {
-    if (!timeString) return "";
-
-    const [hour, minute] = timeString.split(":");
-    const h = parseInt(hour);
-    const suffix = h >= 12 ? "PM" : "AM";
-    const hour12 = h % 12 || 12;
-
-    return `${hour12}:${minute} ${suffix}`;
-  }
 
   if (!isOpen || !clientData) return null;
 
@@ -433,19 +354,15 @@ const FollowupModal = ({
 
               <div className="mb-[1.5vw]">
                 <label className="block text-[0.95vw] font-medium text-gray-800 mb-[0.5vw]">
-                  {subTab === "not_available"
-                    ? "Contact Person(s)"
-                    : "Select Contact Person(s)"}
+                  Contact Person
                 </label>
                 <div className="border border-gray-300 rounded-lg overflow-hidden">
                   <table className="w-full">
                     <thead className="bg-blue-50">
                       <tr>
-                        {subTab !== "not_available" && (
-                          <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700 w-[3vw]">
-                            Select
-                          </th>
-                        )}
+                        <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700 w-[3vw]">
+                          Select
+                        </th>
                         <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700">
                           Name
                         </th>
@@ -455,33 +372,26 @@ const FollowupModal = ({
                         <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700">
                           Designation
                         </th>
-                        {subTab === "not_available" && (
-                          <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700">
-                            Email
-                          </th>
-                        )}
+                        <th className="px-[0.8vw] py-[0.35vw] text-left text-[0.93vw] font-medium text-gray-700">
+                          Email
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {clientData.contactPersons &&
-                      clientData.contactPersons.length > 0 && subTab !== "not_available" ? (
+                      {clientData.contactPersons && clientData.contactPersons.length > 0 ? (
                         clientData.contactPersons.map((contact) => (
                           <tr
                             key={contact.id}
                             className="border-t border-gray-200 hover:bg-gray-50"
                           >
-                            {subTab !== "not_available" && (
-                              <td className="px-[0.8vw] py-[0.5vw]">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedContacts === contact.id}
-                                  onChange={() =>
-                                    handleContactSelect(contact.id)
-                                  }
-                                  className="w-[1vw] h-[1vw] cursor-pointer"
-                                />
-                              </td>
-                            )}
+                            <td className="px-[0.8vw] py-[0.5vw]">
+                              <input
+                                type="radio"
+                                checked={selectedContacts === contact.id}
+                                onChange={() => handleContactSelect(contact.id)}
+                                className="w-[1vw] h-[1vw] cursor-pointer"
+                              />
+                            </td>
                             <td className="px-[0.8vw] py-[0.5vw] text-[0.92vw] text-gray-900">
                               {contact.name || "-"}
                             </td>
@@ -491,78 +401,14 @@ const FollowupModal = ({
                             <td className="px-[0.8vw] py-[0.5vw] text-[0.92vw] text-gray-600">
                               {contact.designation || "-"}
                             </td>
-                            {subTab === "not_available" && (
-                              <td className="px-[0.8vw] py-[0.5vw] text-[0.92vw] text-gray-600">
-                                {contact.email || "-"}
-                              </td>
-                            )}
+                            <td className="px-[0.8vw] py-[0.5vw] text-[0.92vw] text-gray-600">
+                              {contact.email || "-"}
+                            </td>
                           </tr>
                         ))
-                      ) : subTab === "not_available" ? (
-                        <tr className="border-t border-gray-200">
-                          <td className="px-[0.8vw] py-[0.8vw]">
-                            <input
-                              type="text"
-                              value={newContact.name}
-                              onChange={(e) =>
-                                setNewContact({
-                                  ...newContact,
-                                  name: e.target.value,
-                                })
-                              }
-                              placeholder="Enter name *"
-                              className="w-full px-[0.6vw] py-[0.4vw] text-[0.92vw] border border-gray-300 rounded-lg  focus:ring-black"
-                            />
-                          </td>
-                          <td className="px-[0.8vw] py-[0.8vw]">
-                            <input
-                              type="text"
-                              value={newContact.contactNumber}
-                              onChange={(e) =>
-                                setNewContact({
-                                  ...newContact,
-                                  contactNumber: e.target.value,
-                                })
-                              }
-                              placeholder="Enter contact number *"
-                              className="w-full px-[0.6vw] py-[0.4vw] text-[0.92vw] border border-gray-300 rounded-lg  focus:ring-black"
-                            />
-                          </td>
-                          <td className="px-[0.8vw] py-[0.8vw]">
-                            <input
-                              type="text"
-                              value={newContact.designation}
-                              onChange={(e) =>
-                                setNewContact({
-                                  ...newContact,
-                                  designation: e.target.value,
-                                })
-                              }
-                              placeholder="Enter designation"
-                              className="w-full px-[0.6vw] py-[0.4vw] text-[0.92vw] border border-gray-300 rounded-lg  focus:ring-black"
-                            />
-                          </td>
-                          <td className="px-[0.8vw] py-[0.8vw]">
-                            <input
-                              type="email"
-                              value={newContact.email}
-                              onChange={(e) =>
-                                setNewContact({
-                                  ...newContact,
-                                  email: e.target.value,
-                                })
-                              }
-                              placeholder="Enter email"
-                              className="w-full px-[0.6vw] py-[0.4vw] text-[0.92vw] border border-gray-300 rounded-lg  focus:ring-black"
-                            />
-                          </td>
-                        </tr>
                       ) : (
                         <tr>
-                          <td
-                            colSpan={subTab === "not_available" ? "4" : "5"}
-                            className="px-[0.8vw] py-[1vw] text-center text-[0.85vw] text-gray-500"
-                          >
+                          <td colSpan="5" className="px-[0.8vw] py-[1vw] text-center text-[0.85vw] text-gray-500">
                             No contact persons available
                           </td>
                         </tr>
@@ -570,6 +416,87 @@ const FollowupModal = ({
                     </tbody>
                   </table>
                 </div>
+                <div className="mt-[0.8vw] flex flex-wrap items-center gap-[0.6vw]">
+                  <button
+                    type="button"
+                    onClick={()=>handleNewContactMode(!showNewContactForm)}
+                    className="px-[0.8vw] py-[0.45vw] text-[0.88vw] font-medium text-blue-700 cursor-pointer bg-blue-50 rounded-full hover:bg-blue-100 transition-colors"
+                  >
+                   {showNewContactForm ? "Cancel":"Add new contact person"} 
+                  </button>
+                  {selectedContacts && (
+                    <span className="text-[0.82vw] text-gray-600">
+                      Selected contact person will be used for the followup.
+                    </span>
+                  )}
+                </div>
+
+                {showNewContactForm && (
+                  <div className="mt-[1vw] grid grid-cols-2 gap-[0.8vw] text-[0.92vw]">
+                    <div>
+                      <label className="block text-[0.9vw] text-gray-700 mb-[0.3vw]">
+                        Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={newContact.name}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, name: e.target.value })
+                        }
+                        placeholder="Enter name"
+                        className="w-full px-[0.7vw] py-[0.45vw] border border-gray-300 rounded-lg focus:ring-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[0.9vw] text-gray-700 mb-[0.3vw]">
+                        Contact Number *
+                      </label>
+                      <input
+                        type="text"
+                        value={newContact.contactNumber}
+                        onChange={(e) =>
+                          setNewContact({
+                            ...newContact,
+                            contactNumber: e.target.value,
+                          })
+                        }
+                        placeholder="Enter contact number"
+                        className="w-full px-[0.7vw] py-[0.45vw] border border-gray-300 rounded-lg focus:ring-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[0.9vw] text-gray-700 mb-[0.3vw]">
+                        Designation
+                      </label>
+                      <input
+                        type="text"
+                        value={newContact.designation}
+                        onChange={(e) =>
+                          setNewContact({
+                            ...newContact,
+                            designation: e.target.value,
+                          })
+                        }
+                        placeholder="Enter designation"
+                        className="w-full px-[0.7vw] py-[0.45vw] border border-gray-300 rounded-lg focus:ring-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[0.9vw] text-gray-700 mb-[0.3vw]">
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        value={newContact.email}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, email: e.target.value })
+                        }
+                        placeholder="Enter email"
+                        className="w-full px-[0.7vw] py-[0.45vw] border border-gray-300 rounded-lg focus:ring-black"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {contactDetails.length > 0 && (
@@ -641,155 +568,49 @@ const FollowupModal = ({
                 </div>
               )}
 
-              <div className="mb-[1.5vw] flex gap-[1vw]">
-                <div className="w-[50%]">
+              <div className="mb-[1.5vw] flex gap-[1vw] flex-wrap">
+                <div className="w-full md:w-[50%]">
                   <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
                     Status
                   </label>
                   <select
                     value={status}
-                    onChange={(e) => setStatus(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setStatus(value);
+                      if (NO_NEXT_FOLLOWUP_STATUSES.includes(value)) {
+                        setNextFollowup("");
+                      }
+                    }}
                     className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] cursor-pointer border border-gray-300 rounded-lg focus:ring-black"
                   >
-                    {subTab === "second_followup" ? (
-                      <>
-                        <option value="" disabled>
-                          Select Status
-                        </option>
-                        <option value="second_followup">In Progress</option>
-                        <option value="converted">Lead</option>
-                        <option value="droped">Droped</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="" disabled selected>
-                          Select Status
-                        </option>
-                        {(subTab === "first_followup" ||
-                          subTab === "not_available") && (
-                          <>
-                            <option value="first_followup">In progress</option>
-                            {subTab === "first_followup" && (
-                              <option value="not_available">
-                                Not Available
-                              </option>
-                            )}
-                          </>
-                        )}
-                        {(subTab === "not_available" ||
-                          subTab === "first_followup") && (
-                          <option value="not_reachable">
-                            Not Picking / Not Reachable
-                          </option>
-                        )}
-                        <option value="second_followup">Second Followup</option>
-                        {subTab !== "not_interested" && subTab !== "droped" && (
-                          <option value="not_interested">
-                            Not Interested / Not Needed
-                          </option>
-                        )}
-                      </>
-                    )}
+                    <option value="" disabled>
+                      Select Status
+                    </option>
+                    {getStatusOptions().map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                {[
-                  "first_followup",
-                  "second_followup",
-                  "not_reachable",
-                ].includes(status) && (
-                  <div className="w-[50%]">
+                {!NO_NEXT_FOLLOWUP_STATUSES.includes(status) && (
+                  <div className="w-full md:w-[50%]">
                     <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
                       Next followup date *
                     </label>
                     <input
                       type="date"
+                      value={nextFollowup}
+                      onChange={(e) => setNextFollowup(e.target.value)}
                       className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] cursor-pointer border border-gray-300 rounded-lg"
                       min={new Date().toISOString().split("T")[0]}
-                      onChange={(e) => setNextFollowup(e.target.value)}
                     />
                   </div>
                 )}
               </div>
 
-              {subTab === "second_followup" && (
-                <>
-                  <div className="mb-[1.5vw]">
-                    <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
-                      Share Information
-                    </label>
-                    <div className="flex gap-[2vw]">
-                      <label className="flex items-center gap-[0.5vw] cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={shareViaWhatsApp}
-                          onChange={(e) =>
-                            setShareViaWhatsApp(e.target.checked)
-                          }
-                          className="w-[1vw] h-[1vw] cursor-pointer"
-                        />
-                        <span className="text-[0.92vw] text-gray-700">
-                          Share via WhatsApp
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-[0.5vw] cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={shareViaEmail}
-                          onChange={(e) => setShareViaEmail(e.target.checked)}
-                          className="w-[1vw] h-[1vw] cursor-pointer"
-                        />
-                        <span className="text-[0.92vw] text-gray-700">
-                          Share via Email
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {!hasMeeting ? (
-                    <button
-                      onClick={() => setShowMeetingModal(true)}
-                      className="flex items-center gap-[0.4vw] mb-[1.5vw] px-[1vw] py-[0.4vw] text-[0.9vw] text-white bg-gray-900 rounded-full hover:bg-gray-800 transition-colors cursor-pointer"
-                    >
-                      <Plus size={"1.1vw"} />
-                      <span>Add Meeting</span>
-                    </button>
-                  ) : (
-                    <div className="mb-[1.5vw] p-[1vw] border border-gray-300 rounded-lg bg-blue-50">
-                      <h1 className="text-[0.95vw] font-bold text-gray-900">
-                        Meeting details
-                      </h1>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-[0.92vw] font-semibold text-gray-800 mb-[0.3vw]">
-                            {meetingData.title}
-                          </h4>
-                          <p className="text-[0.92vw] text-gray-600">
-                            {meetingData.date} •{" "}
-                            {formatTime(meetingData.startTime)} -{" "}
-                            {formatTime(meetingData.endTime)}
-                          </p>
-                        </div>
-                        <div className="flex gap-[0.5vw]">
-                          <button
-                            onClick={handleViewMeeting}
-                            className="px-[0.8vw] py-[0.3vw] text-[0.92vw] text-blue-600 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors cursor-pointer"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={handleDeleteMeeting}
-                            className="px-[0.8vw] py-[0.3vw] text-[0.92vw] text-red-600 bg-red-100 rounded-lg hover:bg-red-200 transition-colors cursor-pointer"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
 
               <div className="mb-[1vw]">
                 <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
@@ -808,195 +629,90 @@ const FollowupModal = ({
             <>
               <div className="mb-[1vw] border-b border-gray-200 -mt-[0.6vw]">
                 <div className="flex gap-[1vw] items-start">
-                  <button
-                    onClick={() => setHistoryTab("followups")}
-                    className={`px-[1.2vw]  text-[0.96vw] cursor-pointer font-medium border-b-2 transition-colors ${
-                      historyTab === "followups"
-                        ? "border-blue-600 text-blue-600"
-                        : "border-transparent text-gray-600 hover:text-gray-800"
-                    }`}
-                  >
+                  <span className="px-[1.2vw] text-[0.96vw] font-medium border-b-2 border-blue-600 text-blue-600">
                     Previous Followups
-                  </button>
-                  <button
-                    onClick={() => setHistoryTab("meetings")}
-                    className={`px-[1.2vw]  text-[0.96vw] cursor-pointer font-medium border-b-2 transition-colors ${
-                      historyTab === "meetings"
-                        ? "border-blue-600 text-blue-600"
-                        : "border-transparent text-gray-600 hover:text-gray-800"
-                    }`}
-                  >
-                    Meetings
-                  </button>
+                  </span>
                 </div>
               </div>
 
-              {historyTab === "followups" ? (
-                <div className="border border-gray-300 rounded-lg overflow-hidden min-h-[30vh]">
-                  {history.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="bg-blue-50">
-                        <tr>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Date
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Contact Person
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Contact Number
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Next Followup
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Status
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Remarks
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {history.map((record, index) => (
-                          <tr
-                            key={index}
-                            className="border-t border-gray-200 hover:bg-gray-50"
-                          >
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
-                              {formatDateTime(record.created_at)}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
-                              {record.contact_person_name || "-"}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
-                              {record.contactNumber || "-"}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
-                              {formatDate(record.nextFollowupDate)}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw]">
-                              <span
-                                className={`px-[0.5vw] py-[0.2vw] rounded-full text-[0.88vw] text-gray-600 `}
-                              >
-                                {getStatusLabel(
-                                  record.status === "first_followup"
-                                    ? "In Progress"
-                                    : record.status
-                                )}
-                              </span>
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[9vw]">
-                              <div
-                                className="line-clamp-2"
-                                title={record.remarks}
-                              >
-                                {record.remarks || "-"}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="p-[2vw] text-center text-gray-500 ">
-                      <History
-                        className="mx-auto mb-[0.5vw] text-gray-300"
-                        size={"4vw"}
-                      />
-                      <p className="text-[1vw]">
-                        No followup history available
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="border border-gray-300 rounded-lg overflow-hidden min-h-[30vh]">
-                  {meetings.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="bg-blue-50">
-                        <tr>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Title
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Date
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Time
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Agenda
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Link
-                          </th>
-                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Attendees
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {meetings.map((meeting, index) => (
-                          <tr
-                            key={index}
-                            className="border-t border-gray-200 hover:bg-gray-50"
-                          >
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] font-medium text-gray-900">
-                              {meeting.title}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
-                              {formatDate(meeting.date)}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
-                              {formatTime(meeting.startTime)} -{" "}
-                              {formatTime(meeting.endTime)}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[12vw]">
-                              <div
-                                className="line-clamp-2"
-                                title={meeting.agenda}
-                              >
-                                {meeting.agenda || "-"}
-                              </div>
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw]">
-                              {meeting.link ? (
-                                <a
-                                  href={meeting.link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  Join
-                                </a>
-                              ) : (
-                                "-"
+              <div className="border border-gray-300 rounded-lg overflow-hidden min-h-[30vh]">
+                {history.length > 0 ? (
+                  <table className="w-full">
+                    <thead className="bg-blue-50">
+                      <tr>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Date
+                        </th>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Contact Person
+                        </th>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Contact Number
+                        </th>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Next Followup
+                        </th>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Status
+                        </th>
+                        <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                          Remarks
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((record, index) => (
+                        <tr
+                          key={index}
+                          className="border-t border-gray-200 hover:bg-gray-50"
+                        >
+                          <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
+                            {formatDateTime(record.created_at)}
+                          </td>
+                          <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
+                            {record.contact_person_name || "-"}
+                          </td>
+                          <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
+                            {record.contactNumber || "-"}
+                          </td>
+                          <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
+                            {formatDate(record.nextFollowupDate)}
+                          </td>
+                          <td className="px-[0.8vw] py-[0.6vw]">
+                            <span
+                              className={`px-[0.5vw] py-[0.2vw] rounded-full text-[0.88vw] text-gray-600 `}
+                            >
+                              {getStatusLabel(
+                                record.status === "first_followup"
+                                  ? "In Progress"
+                                  : record.status
                               )}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[10vw]">
-                              <div
-                                className="line-clamp-1"
-                                title={meeting.attendees}
-                              >
-                                {meeting.attendees || "-"}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="p-[2vw] text-center text-gray-500">
-                      <Calendar
-                        className="mx-auto mb-[0.5vw] text-gray-300"
-                        size={"3.8vw"}
-                      />
-                      <p className="text-[1vw]">No meetings scheduled yet</p>
-                    </div>
-                  )}
-                </div>
-              )}
+                            </span>
+                          </td>
+                          <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[9vw]">
+                            <div
+                              className="line-clamp-2"
+                              title={record.remarks}
+                            >
+                              {record.remarks || "-"}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="p-[2vw] text-center text-gray-500 ">
+                    <History
+                      className="mx-auto mb-[0.5vw] text-gray-300"
+                      size={"4vw"}
+                    />
+                    <p className="text-[1vw]">
+                      No followup history available
+                    </p>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -1056,166 +772,6 @@ const FollowupModal = ({
         </div>
       </div>
 
-      {showMeetingModal && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-[4px]"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleCloseMeetingModal();
-          }}
-        >
-          <div
-            className="bg-white rounded-xl shadow-2xl w-[45vw] max-h-[85vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-[1.2vw] py-[0.8vw] border-b border-gray-200 bg-blue-50">
-              <h2 className="text-[1.15vw] font-semibold text-gray-800">
-                {isViewingMeeting ? "Meeting Details" : "Schedule Meeting"}
-              </h2>
-              <button
-                onClick={handleCloseMeetingModal}
-                className="text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                <X size={22} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-[1.5vw]">
-              <div className="mb-[1.2vw]">
-                <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Meeting Title *
-                </label>
-                <input
-                  type="text"
-                  value={meetingData.title}
-                  onChange={(e) =>
-                    setMeetingData({ ...meetingData, title: e.target.value })
-                  }
-                  placeholder="Enter meeting title"
-                  className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg focus:ring-black disabled:bg-gray-100 disabled:cursor-not-allowed"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-[1vw] mb-[1.2vw]">
-                <div>
-                  <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Date *
-                  </label>
-                  <input
-                    type="date"
-                    value={meetingData.date}
-                    onChange={(e) =>
-                      setMeetingData({ ...meetingData, date: e.target.value })
-                    }
-                    min={new Date().toISOString().split("T")[0]}
-                    className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Start Time *
-                  </label>
-                  <input
-                    type="time"
-                    value={meetingData.startTime}
-                    onChange={(e) =>
-                      setMeetingData({
-                        ...meetingData,
-                        startTime: e.target.value,
-                      })
-                    }
-                    className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                    End Time *
-                  </label>
-                  <input
-                    type="time"
-                    value={meetingData.endTime}
-                    onChange={(e) =>
-                      setMeetingData({
-                        ...meetingData,
-                        endTime: e.target.value,
-                      })
-                    }
-                    className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-[1.2vw]">
-                <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Agenda
-                </label>
-                <textarea
-                  value={meetingData.agenda}
-                  onChange={(e) =>
-                    setMeetingData({ ...meetingData, agenda: e.target.value })
-                  }
-                  placeholder="Enter meeting agenda"
-                  rows={3}
-                  className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg focus:ring-black resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                />
-              </div>
-
-              <div className="mb-[1.2vw]">
-                <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Meeting Link
-                </label>
-                <input
-                  type="url"
-                  value={meetingData.link}
-                  onChange={(e) =>
-                    setMeetingData({ ...meetingData, link: e.target.value })
-                  }
-                  placeholder="Enter meeting link (e.g., Zoom, Google Meet)"
-                  className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg focus:ring-black disabled:bg-gray-100 disabled:cursor-not-allowed"
-                />
-              </div>
-
-              <div className="mb-[1.2vw]">
-                <label className="block text-[1vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Attendees
-                </label>
-                <input
-                  type="text"
-                  value={meetingData.attendees}
-                  onChange={(e) =>
-                    setMeetingData({
-                      ...meetingData,
-                      attendees: e.target.value,
-                    })
-                  }
-                  placeholder="Enter attendee names (comma separated)"
-                  className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] border border-gray-300 rounded-lg focus:ring-black disabled:bg-gray-100 disabled:cursor-not-allowed"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-[0.8vw] p-[1.2vw] border-t border-gray-200">
-              <button
-                onClick={handleCloseMeetingModal}
-                className="px-[1.2vw] py-[0.5vw] text-[0.92vw] text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors cursor-pointer"
-              >
-                {isViewingMeeting ? "Close" : "Cancel"}
-              </button>
-              <button
-                onClick={handleAddMeeting}
-                disabled={loading}
-                className="px-[1.2vw] py-[0.5vw] text-[0.92vw] text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {isViewingMeeting ? (
-                  "Update"
-                ) : (
-                  <>{loading ? "Adding..." : "Add Meeting"}</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

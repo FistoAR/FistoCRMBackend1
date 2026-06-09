@@ -6,17 +6,29 @@ import {
   AlertCircle,
   CheckCircle,
   Users,
+  Download,
+  ChevronDown,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import fileLogo from "../../assets/Marketing/file.webp";
 import uploadLogo from "../../assets/Marketing/upload.webp";
+import DuplicateClientsModal from "./DuplicateClientsModal";
+import { useNotification } from "../NotificationContext";
 
 const ClientUploadModal = ({ isOpen, onClose, onSuccess }) => {
+  const { notify } = useNotification();
   const [file, setFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [showFormatDropdown, setShowFormatDropdown] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Duplicate modal state
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicatesData, setDuplicatesData] = useState([]);
 
   // New states for employee selection
   const [employees, setEmployees] = useState([]);
@@ -62,6 +74,8 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess }) => {
       setSuccess(false);
       setIsDragging(false);
       setSelectedEmployee("");
+      setShowDuplicateModal(false);
+      setDuplicatesData([]);
     }
   }, [isOpen]);
 
@@ -149,13 +163,27 @@ const fetchEmployees = async () => {
 
       const result = await response.json();
 
-      if (response.ok) {
-        setSuccess(true);
-        setTimeout(() => {
+      if (response.ok || response.status === 206) {
+        setUploadResult(result);
+        if (result.duplicates && result.duplicates.length > 0) {
+          setDuplicatesData(result.duplicates);
+          setShowDuplicateModal(true);
+          setSuccess(true);
           onSuccess();
-          handleClose();
-        }, 1500);
+        } else {
+          setSuccess(true);
+          setTimeout(() => {
+            onSuccess();
+            handleClose();
+          }, 1500);
+        }
       } else {
+        if (result.empty) {
+          notify({
+            title: "Empty File",
+            message: "The uploaded file is empty — no data rows were found.",
+          });
+        }
         setError(result.message || "Upload failed");
       }
     } catch (err) {
@@ -170,9 +198,52 @@ const fetchEmployees = async () => {
     setFile(null);
     setError("");
     setSuccess(false);
+    setUploadResult(null);
     setIsDragging(false);
     setSelectedEmployee("");
+    setShowDuplicateModal(false);
+    setDuplicatesData([]);
     onClose();
+  };
+
+  const handleCloseDuplicateModal = () => {
+    setShowDuplicateModal(false);
+  };
+
+  const HEADERS = [
+    "Company name",
+    "Customer Name",
+    "Industry Type",
+    "Website",
+    "Address",
+    "City",
+    "State",
+    "Type of Source",
+    "Requirements",
+    "Contact Person",
+    "Phone Number",
+    "Mail ID",
+    "Designation",
+  ];
+
+  const handleDownloadCSV = () => {
+    const csvContent = "data:text/csv;charset=utf-8," + HEADERS.join(",");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "client_upload_format.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setShowFormatDropdown(false);
+  };
+
+  const handleDownloadExcel = () => {
+    const ws = XLSX.utils.aoa_to_sheet([HEADERS]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Clients");
+    XLSX.writeFile(wb, "client_upload_format.xlsx");
+    setShowFormatDropdown(false);
   };
 
   if (!isOpen) return null;
@@ -270,15 +341,46 @@ const fetchEmployees = async () => {
 
           {/* File Format Info */}
           <div className="mt-[1vw] p-[1vw] bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-[0.9vw] text-gray-800 font-medium mb-[0.5vw]">
-              Expected File Format:
-            </p>
+            <div className="flex items-center justify-between mb-[0.5vw]">
+              <p className="text-[0.9vw] text-gray-800 font-medium">
+                Expected File Format:
+              </p>
+              <div className="relative">
+                <button
+                  onClick={() => setShowFormatDropdown(!showFormatDropdown)}
+                  className="flex items-center gap-[0.4vw] px-[0.8vw] py-[0.3vw] bg-white border border-blue-300 text-blue-700 rounded-md hover:bg-blue-100 transition-colors text-[0.8vw] font-medium cursor-pointer shadow-sm"
+                >
+                  <Download size={"1vw"} />
+                  Download Format
+                  <ChevronDown size={"0.9vw"} className={`transition-transform ${showFormatDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showFormatDropdown && (
+                  <div className="absolute right-0 top-full mt-[0.3vw] w-[10vw] bg-white border border-gray-200 rounded-lg shadow-lg z-10 overflow-hidden">
+                    <button
+                      onClick={handleDownloadCSV}
+                      className="w-full flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] text-[0.8vw] text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer"
+                    >
+                      <Download size={"0.9vw"} />
+                      CSV (.csv)
+                    </button>
+                    <button
+                      onClick={handleDownloadExcel}
+                      className="w-full flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] text-[0.8vw] text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer border-t border-gray-100"
+                    >
+                      <Download size={"0.9vw"} />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
             <p className="text-[0.85vw] text-blue-700">
               <span className="text-gray-900">
                 Your file should contain columns:{" "}
               </span>
               Company name, Customer Name, Industry Type, Website, Address,
-              City, State, Reference, Requirements, Contact Person, Phone
+              City, State, Type of Source, Requirements, Contact Person, Phone
               Number, Mail ID, Designation
             </p>
           </div>
@@ -301,9 +403,30 @@ const fetchEmployees = async () => {
                 className="text-green-600 flex-shrink-0 mt-0.5"
                 size={20}
               />
-              <p className="text-green-800 text-[1vw]">
-                File uploaded successfully!
-              </p>
+              <div>
+                <p className="text-green-800 text-[1vw] font-medium">
+                  Upload complete!
+                </p>
+                {uploadResult && (
+                  <p className="text-green-700 text-[0.85vw] mt-[0.2vw]">
+                    {uploadResult.inserted} record{uploadResult.inserted !== 1 ? 's' : ''} added
+                    {uploadResult.duplicates?.length > 0 && (
+                      <span className="text-orange-600 font-medium"> · {uploadResult.duplicates.length} duplicate{uploadResult.duplicates.length !== 1 ? 's' : ''} skipped
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowDuplicateModal(true);
+                          }}
+                          className="ml-[0.5vw] text-blue-600 underline cursor-pointer hover:text-blue-700"
+                        >
+                          View skipped
+                        </button>
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -339,6 +462,13 @@ const fetchEmployees = async () => {
           </button>
         </div>
       </div>
+
+      <DuplicateClientsModal 
+        isOpen={showDuplicateModal}
+        onClose={handleCloseDuplicateModal}
+        duplicates={duplicatesData}
+        isBulk={true}
+      />
     </div>
   );
 };

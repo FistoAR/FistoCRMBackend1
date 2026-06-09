@@ -68,11 +68,20 @@ const upload = multer({
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "application/vnd.ms-excel",
       "text/csv",
+      "application/csv",
+      "application/octet-stream",
+      "application/excel",
+      "application/x-excel",
+      "application/x-msexcel",
+      "text/comma-separated-values",
+      "text/plain",
     ];
-    if (allowedTypes.includes(file.mimetype)) {
+    const ext = file.originalname.split(".").pop().toLowerCase();
+    const allowedExts = ["xlsx", "xls", "csv"];
+    if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type"));
+      cb(new Error("Invalid file type. Only .xlsx, .xls and .csv files are allowed."));
     }
   },
 });

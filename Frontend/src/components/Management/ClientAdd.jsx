@@ -181,6 +181,15 @@ export default function ClientAddModal({
           return false;
         }
 
+        // Check if phone number is exactly 10 digits
+        if (contact.contactNumber.trim().length < 10) {
+          notify({
+            title: "Warning",
+            message: `Phone number for Contact ${i + 1} must be at least 10 digits`,
+          });
+          return false;
+        }
+
         const phoneRegex = /^[0-9\s\-\+]{10,15}$/;
         if (!phoneRegex.test(contact.contactNumber.replace(/\s/g, ""))) {
           notify({
@@ -396,11 +405,14 @@ export default function ClientAddModal({
                     />
                     <Field
                       label="Phone Number *"
-                      placeholder="Eg: 12345 67890"
+                      placeholder="Eg: 1234567890"
                       value={contact.contactNumber}
                       onChange={(value) =>
                         handleContactChange(index, "contactNumber", value)
                       }
+                      type="phone"
+                      maxLength="10"
+                      minLength="10"
                     />
                     <Field
                       label="Email ID"
@@ -517,9 +529,23 @@ const Field = ({
   onChange,
   multiline = false,
   extend = false,
+  maxLength = null,
+  minLength = null,
+  pattern = null,
 }) => {
   const isRequired = label.trim().endsWith("*");
   const labelText = isRequired ? label.trim().slice(0, -1) : label;
+
+  const handlePhoneChange = (e) => {
+    let inputValue = e.target.value;
+    
+    // If type is phone, only allow digits
+    if (type === "phone") {
+      inputValue = inputValue.replace(/[^0-9]/g, "");
+    }
+    
+    onChange(inputValue);
+  };
 
   return (
     <div className="flex flex-col ">
@@ -543,10 +569,14 @@ const Field = ({
         />
       ) : (
         <input
-          type={type}
+          type={type === "phone" ? "tel" : type}
           placeholder={placeholder}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handlePhoneChange}
+          maxLength={maxLength}
+          minLength={minLength}
+          pattern={pattern}
+          inputMode={type === "phone" ? "numeric" : undefined}
           className="border border-gray-700 px-[0.8vw] py-[0.3vw] rounded-full text-[0.9vw] transition-all focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent placeholder:text-gray-800 placeholder:text-[0.85vw] "
         />
       )}

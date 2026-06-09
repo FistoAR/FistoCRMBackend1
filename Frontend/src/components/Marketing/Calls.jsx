@@ -16,12 +16,72 @@ import FollowupModal from "../Marketing/FollowupModal";
 import uploadLogo from "../../assets/Marketing/upload.webp";
 import searchIcon from "../../assets/Marketing/search.webp";
 import filter from "../../assets/ProjectPages/filter.webp";
-import { useConfirm } from "../ConfirmContext";
 
-const RECORDS_PER_PAGE = 7;
+const RECORDS_PER_PAGE = 8;
+
+const STATUS_GROUP_FOLLOWUP = [
+  "followup",
+  "demo_shared",
+  "appointment",
+  "quotation",
+  "proposal",
+  "lead",
+  "not_picking",
+  "not_reachable",
+  "converted",
+];
+
+const FOLLOWUP_STATUS_LABELS = {
+  followup: "Follow-up",
+  demo_shared: "Demo Shared",
+  appointment: "Appointment",
+  quotation: "Quotation",
+  proposal: "Proposal",
+  lead: "Lead",
+  not_picking: "Not Picking / Busy / Others",
+  not_reachable: "Not Picking / Not Reachable",
+  converted: "Lead",
+};
+
+const statusOptions = [
+  { value: "", label: "All Statuses" },
+  ...STATUS_GROUP_FOLLOWUP.map((value) => ({
+    value,
+    label: FOLLOWUP_STATUS_LABELS[value] || value,
+  })),
+];
+
+const parseLocalDate = (dateString) => {
+  if (!dateString) return null;
+
+  const normalized = String(dateString).trim().split("T")[0].split(" ")[0];
+  const [year, month, day] = normalized.split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getTodayStart = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const isMissedFollowupDate = (dateString) => {
+  const followupDate = parseLocalDate(dateString);
+  if (!followupDate) return false;
+  return followupDate < getTodayStart();
+};
+
+const isTodayFollowupDate = (dateString) => {
+  const followupDate = parseLocalDate(dateString);
+  if (!followupDate) return false;
+  return followupDate.getTime() === getTodayStart().getTime();
+};
 
 const Followup = ({ type = "Marketing" }) => {
-  const confirm = useConfirm();
   const [mainTab, setMainTab] = useState("followups");
   const [subTab, setSubTab] = useState("first_followup");
   const [clients, setClients] = useState([]);
@@ -39,6 +99,12 @@ const Followup = ({ type = "Marketing" }) => {
   const [followupClient, setFollowupClient] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteClientId, setDeleteClientId] = useState(null);
+  const [deleteClientName, setDeleteClientName] = useState("");
+  const [deleteInProgressId, setDeleteInProgressId] = useState(null);
+  const [deleteInProgressType, setDeleteInProgressType] = useState(null);
+  const [restoreInProgressId, setRestoreInProgressId] = useState(null);
   const tableBodyRef = useRef(null);
   const fetchTimeoutRef = useRef(null);
   const filterRef = useRef(null);
@@ -64,17 +130,14 @@ const Followup = ({ type = "Marketing" }) => {
 
   const [tabCounts, setTabCounts] = useState({
     first_followup: 0,
-    second_followup: 0,
-    not_available: 0,
+    followup: 0,
+    project_onboard: 0,
     not_interested: 0,
     not_reachable: 0,
-    droped: 0,
-    converted: 0,
-    returned: 0,
+    dropped: 0,
+    lead: 0,
     current: 0,
     deleted: 0,
-    returnedDroped: 0,
-    returnedConverted: 0,
   });
 
   const [countsLoading, setCountsLoading] = useState(false);
@@ -160,7 +223,19 @@ const Followup = ({ type = "Marketing" }) => {
       const data = await response.json();
 
       if (data.success) {
-        setTabCounts(data.data);
+        const raw = data.data || {};
+        setTabCounts((prev) => ({
+          ...prev,
+          first_followup: Number(raw.first_followup) || 0,
+          followup: Number(raw.followup) || 0,
+          project_onboard: Number(raw.project_onboard) || 0,
+          not_interested: Number(raw.not_interested) || 0,
+          not_reachable: Number(raw.not_reachable) || 0,
+          dropped: Number(raw.dropped ?? raw.droped) || 0,
+          lead: Number(raw.lead ?? raw.converted) || 0,
+          current: Number(raw.current) || 0,
+          deleted: Number(raw.deleted) || 0,
+        }));
       }
     } catch (error) {
       console.error("Error fetching counts:", error);
@@ -193,40 +268,23 @@ const Followup = ({ type = "Marketing" }) => {
           url = isProjectHead
             ? `${API_URL}/followups?status=first_followup`
             : `${API_URL}/followups?status=first_followup&employee_id=${employeeId}`;
-        } else if (subTab === "second_followup") {
+        } else if (subTab === "followup") {
           url = isProjectHead
-            ? `${API_URL}/followups?status=second_followup`
-            : `${API_URL}/followups?status=second_followup&employee_id=${employeeId}`;
-        } else if (subTab === "not_available") {
+            ? `${API_URL}/followups?status=followup`
+            : `${API_URL}/followups?status=followup&employee_id=${employeeId}`;
+
+        } else if (subTab === "project_onboard") {
           url = isProjectHead
-            ? `${API_URL}/followups?status=not_available`
-            : `${API_URL}/followups?status=not_available&employee_id=${employeeId}`;
+            ? `${API_URL}/followups?status=project_onboard`
+            : `${API_URL}/followups?status=project_onboard&employee_id=${employeeId}`;
         } else if (subTab === "not_interested") {
           url = isProjectHead
             ? `${API_URL}/followups?status=not_interested`
             : `${API_URL}/followups?status=not_interested&employee_id=${employeeId}`;
-        } else if (subTab === "droped") {
+        } else if (subTab === "dropped") {
           url = isProjectHead
-            ? `${API_URL}/followups?status=droped`
-            : `${API_URL}/followups?status=droped&employee_id=${employeeId}`;
-        }
-      } else if (mainTab === "Leads") {
-        if (subTab === "generated") {
-          url = isProjectHead
-            ? `${API_URL}/followups?status=converted`
-            : `${API_URL}/followups?status=converted&employee_id=${employeeId}`;
-        } else if (subTab === "returned") {
-          url = isProjectHead
-            ? `${API_URL}/followups?status=returned`
-            : `${API_URL}/followups?status=returned&employee_id=${employeeId}`;
-        } else if (subTab === "returnedConverted") {
-          url = isProjectHead
-            ? `${API_URL}/followups?status=returnedConverted`
-            : `${API_URL}/followups?status=returnedConverted&employee_id=${employeeId}`;
-        } else if (subTab === "returnedDroped") {
-          url = isProjectHead
-            ? `${API_URL}/followups?status=returnedDroped`
-            : `${API_URL}/followups?status=returnedDroped&employee_id=${employeeId}`;
+            ? `${API_URL}/followups?status=dropped`
+            : `${API_URL}/followups?status=dropped&employee_id=${employeeId}`;
         }
       }
 
@@ -250,40 +308,60 @@ const Followup = ({ type = "Marketing" }) => {
     }
   };
 
-  const statusOptions = [
-    { value: "", label: "All Statuses" },
-    { value: "first_followup", label: "In Progress" },
-    { value: "not_reachable", label: "Not Reachable" },
-    { value: "none", label: "None" },
-  ];
+  const openDeleteModal = (id, companyName = "") => {
+    setDeleteClientId(id);
+    setDeleteClientName(companyName);
+    setDeleteModalOpen(true);
+  };
 
-  const handleDelete = async (id) => {
-    const ok = await confirm({
-      type: "error",
-      title: `Are you sure you want to delete this client?`,
-      message: "This action cannot be undone.\nAre you sure?",
-      confirmText: "Yes, Delete",
-      cancelText: "Cancel",
-    });
+  const closeDeleteModal = () => {
+    setDeleteModalOpen(false);
+    setDeleteClientId(null);
+    setDeleteClientName("");
+  };
 
-    if (ok) {
-      try {
-        await fetch(`${API_URL}/clientAdd/${id}`, { method: "DELETE" });
+  const handleDelete = async (type) => {
+    if (!deleteClientId) return;
+
+    setDeleteInProgressId(deleteClientId);
+    setDeleteInProgressType(type);
+
+    try {
+      const endpoint = `${API_URL}/followups/client/${deleteClientId}${
+        type === "permanent" ? "?permanent=true" : ""
+      }`;
+      const response = await fetch(endpoint, { method: "DELETE" });
+      if (response.ok) {
+        closeDeleteModal();
         fetchClients();
         fetchCounts();
-      } catch (error) {
-        console.error("Error deleting client:", error);
+      } else {
+        console.error("Error deleting client:", response.statusText);
       }
+    } catch (error) {
+      console.error("Error deleting client:", error);
+    } finally {
+      setDeleteInProgressId(null);
+      setDeleteInProgressType(null);
     }
   };
 
   const handleRestore = async (id) => {
+    setRestoreInProgressId(id);
     try {
-      await fetch(`${API_URL}/clientAdd/${id}`, { method: "PATCH" });
-      fetchClients();
-      fetchCounts();
+      const response = await fetch(`${API_URL}/followups/client/${id}/restore`, {
+        method: "POST",
+      });
+      if (response.ok) {
+        fetchClients();
+        fetchCounts();
+      } else {
+        console.error("Error restoring client:", response.statusText);
+      }
     } catch (error) {
       console.error("Error restoring client:", error);
+    } finally {
+      setRestoreInProgressId(null);
     }
   };
 
@@ -297,42 +375,26 @@ const Followup = ({ type = "Marketing" }) => {
             countKey: "first_followup",
           },
           {
-            key: "not_available",
-            label: "Not Available",
-            countKey: "not_available",
+            key: "followup",
+            label: "Today Followup",
+            countKey: "followup",
+          },
+          {
+            key: "project_onboard",
+            label: "Project onboard",
+            countKey: "project_onboard",
           },
           {
             key: "not_interested",
-            label: "Not Interested / Not Needed",
+            label: "Not interested",
             countKey: "not_interested",
           },
-          {
-            key: "second_followup",
-            label: "Second Followup",
-            countKey: "second_followup",
-          },
-          { key: "droped", label: "Droped", countKey: "droped" },
+          { key: "dropped", label: "Dropped", countKey: "dropped" },
         ];
       case "clientsData":
         return [
           { key: "current", label: "Current", countKey: "current" },
           { key: "deleted", label: "Deleted", countKey: "deleted" },
-        ];
-
-      case "Leads":
-        return [
-          { key: "generated", label: "Generated", countKey: "converted" },
-          { key: "returned", label: "Returned", countKey: "returned" },
-          {
-            key: "returnedConverted",
-            label: "Lead from Returned",
-            countKey: "returnedConverted",
-          },
-          {
-            key: "returnedDroped",
-            label: "Droped from Returned",
-            countKey: "returnedDroped",
-          },
         ];
       default:
         return [];
@@ -367,31 +429,46 @@ const Followup = ({ type = "Marketing" }) => {
     return true;
   };
 
+  const getLatestNextFollowupDate = (client) => {
+    const historyRecord = clientsHistory.find((h) => h.clientID === client.id);
+
+    if (historyRecord?.latest_status?.nextFollowupDate) {
+      return historyRecord.latest_status.nextFollowupDate;
+    }
+
+    if (client.nextFollowupDate) {
+      return client.nextFollowupDate;
+    }
+
+    return historyRecord?.history?.[0]?.nextFollowupDate || null;
+  };
+
   const filterByNextFollowupDate = (client) => {
     if (!nextFollowupDate) return true;
 
-    if (!client.nextFollowupDate) return false;
+    const clientDate = parseLocalDate(getLatestNextFollowupDate(client));
+    const filterDate = parseLocalDate(nextFollowupDate);
 
-    return nextFollowupDate === client.nextFollowupDate;
+    if (!clientDate || !filterDate) return false;
+
+    return clientDate.getTime() === filterDate.getTime();
   };
 
   const filterByMissedFollowup = (client) => {
     if (!showMissedFollowups) return true;
+    return isMissedFollowupDate(getLatestNextFollowupDate(client));
+  };
 
-    if (!client.nextFollowupDate) return false;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const followupDate = new Date(client.nextFollowupDate);
-    followupDate.setHours(0, 0, 0, 0);
-
-    return followupDate < today;
+  const filterByTodayFollowup = (client) => {
+    if (subTab !== "followup") return true;
+    if (showMissedFollowups || nextFollowupDate) return true;
+    return isTodayFollowupDate(getLatestNextFollowupDate(client));
   };
 
   const filterByStatus = (client) => {
     if (!statusFilter) return true;
     const clientStatus = client.status || "none";
+    if (statusFilter === "lead" && clientStatus === "converted") return true;
     return clientStatus === statusFilter;
   };
 
@@ -413,6 +490,7 @@ const Followup = ({ type = "Marketing" }) => {
     }
 
     filtered = filtered.filter(filterByDate);
+    filtered = filtered.filter(filterByTodayFollowup);
     filtered = filtered.filter(filterByNextFollowupDate);
     filtered = filtered.filter(filterByMissedFollowup);
     filtered = filtered.filter(filterByStatus);
@@ -489,22 +567,25 @@ const Followup = ({ type = "Marketing" }) => {
     (showMissedFollowups ? 1 : 0) +
     (statusFilter ? 1 : 0);
 
-  const showFollowupFilters = [
-    "first_followup",
-    "second_followup",
-    "not_reachable",
-    "returned",
-  ].includes(subTab);
+  const showFollowupFilters =
+    mainTab === "followups" && subTab === "followup";
 
-  const showStatusFilter = subTab === "first_followup";
+  const showStatusFilter =
+    mainTab === "followups" && subTab === "followup";
 
   function formatDateToIST(dateString) {
     if (!dateString) return "-";
 
-    const date = new Date(dateString);
-    const adjustedDate = new Date(date.getTime() + 10.5 * 60 * 60 * 1000);
+    const normalized = String(dateString).trim().replace(" ", "T");
+    const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized);
+    const date = new Date(
+      hasTimezone ? normalized : `${normalized}+05:30`
+    );
 
-    return adjustedDate.toLocaleString("en-IN", {
+    if (Number.isNaN(date.getTime())) return "-";
+
+    return date.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -514,18 +595,33 @@ const Followup = ({ type = "Marketing" }) => {
     });
   }
 
+  const getTabCount = (key) => Number(tabCounts[key]) || 0;
+
   const formatCount = (count) => {
-    if (count >= 1000) {
-      return `${(count / 1000).toFixed(1)}k`;
+    const value = Number(count) || 0;
+    if (value >= 1000) {
+      return `${(value / 1000).toFixed(1)}k`;
     }
-    return count;
+    return String(value);
   };
 
   const getStatusLabel = (status) => {
-    if (status === "first_followup") return "In Progress";
-    if (status === "not_reachable") return "Not Picking / Not Reachable";
+    const statusMap = {
+      first_followup: "In Progress",
+      followup: "Follow-up",
+      project_onboard: "Project Onboard",
+      not_reachable: "Not Picking / Not Reachable",
+      not_picking: "Not Picking / Busy / Others",
+      not_interested: "Not Interested / Not Needed",
+      lead: "Lead",
+      demo_shared: "Demo Shared",
+      appointment: "Appointment",
+      quotation: "Quotation",
+      proposal: "Proposal",
+      dropped: "Dropped",
+    };
     if (!status || status === "") return "None";
-    return status.charAt(0).toUpperCase() + status.slice(1);
+    return statusMap[status] || status;
   };
 
   const getSubTabValue = (subTab) => {
@@ -533,9 +629,9 @@ const Followup = ({ type = "Marketing" }) => {
       case "returned":
         return "second_followup";
       case "returnedDroped":
-        return "droped";
+        return "dropped";
       case "returnedConverted":
-        return "converted";
+        return "lead";
       default:
         return subTab;
     }
@@ -568,7 +664,7 @@ const Followup = ({ type = "Marketing" }) => {
                 {countsLoading ? (
                   <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
                 ) : (
-                  formatCount(tabCounts.current + tabCounts.deleted)
+                  formatCount(getTabCount("current") + getTabCount("deleted"))
                 )}
               </span>
             </button>
@@ -595,52 +691,21 @@ const Followup = ({ type = "Marketing" }) => {
                   <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
                 ) : (
                   formatCount(
-                    tabCounts.first_followup +
-                      tabCounts.second_followup +
-                      tabCounts.not_available +
-                      tabCounts.not_interested +
-                      tabCounts.droped
+                    getTabCount("first_followup") +
+                      getTabCount("followup") +
+                      getTabCount("project_onboard") +
+                      getTabCount("not_interested") +
+                      getTabCount("dropped")
                   )
                 )}
               </span>
             </button>
             <button
               onClick={() => {
-                setMainTab("Leads");
-                setSubTab("generated");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors flex items-center gap-[0.4vw] ${
-                mainTab === "Leads"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              Leads
-              <span
-                className={`text-[0.7vw] px-[0.5vw] py-[0.1vw] rounded-full ${
-                  mainTab === "Leads"
-                    ? "bg-black text-white"
-                    : "bg-gray-200 text-gray-600"
-                }`}
-              >
-                {countsLoading ? (
-                  <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  formatCount(
-                    tabCounts.converted +
-                      tabCounts.returned +
-                      tabCounts.returnedConverted +
-                      tabCounts.returnedDroped
-                  )
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                setMainTab("eixsting_clients");
+                setMainTab("existing_clients");
               }}
               className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${
-                mainTab === "eixsting_clients"
+                mainTab === "existing_clients"
                   ? "border-b-2 border-black text-black"
                   : "text-gray-600 hover:text-gray-900"
               }`}
@@ -667,7 +732,7 @@ const Followup = ({ type = "Marketing" }) => {
           </div>
         </div>
 
-        {mainTab !== "eixsting_clients" && (
+        {mainTab !== "existing_clients" && (
           <div className="bg-white rounded-xl overflow-hidden shadow-sm h-[6%] flex-shrink-0">
             <div className="flex border-b border-gray-200 overflow-x-auto h-full">
               {getSubTabs().map((tab) => (
@@ -677,9 +742,8 @@ const Followup = ({ type = "Marketing" }) => {
                   className={`px-[1.2vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors flex items-center gap-[0.4vw] ${
                     subTab === tab.key
                       ? "border-b-2 border-blue-600 text-blue-600"
-                      : tab.key === "first_followup" ||
-                        tab.key === "second_followup"
-                      ? "text-purple-600 hover:text-purple-900"
+                      : ["first_followup", "followup"].includes(tab.key)
+                      ? "text-gray-600 hover:text-gray-900"
                       : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
@@ -688,16 +752,15 @@ const Followup = ({ type = "Marketing" }) => {
                     className={`text-[0.65vw] px-[0.35vw] py-[0.2vw] rounded-full min-w-[1.5vw] text-center ${
                       subTab === tab.key
                         ? "bg-blue-600 text-white"
-                        : tab.key === "first_followup" ||
-                          tab.key === "second_followup"
-                        ? "text-purple-600 bg-purple-200 "
+                        : ["first_followup", "followup"].includes(tab.key)
+                        ? "bg-gray-200 text-gray-600 "
                         : "bg-gray-200 text-gray-600"
                     }`}
                   >
                     {countsLoading ? (
                       <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
                     ) : (
-                      formatCount(tabCounts[tab.countKey] || 0)
+                      formatCount(getTabCount(tab.countKey))
                     )}
                   </span>
                 </button>
@@ -708,7 +771,7 @@ const Followup = ({ type = "Marketing" }) => {
 
         <div
           className={`bg-white rounded-xl shadow-sm ${
-            mainTab !== "eixsting_clients" ? "h-[79%]" : "h-[94%]"
+            mainTab !== "existing_clients" ? "h-[88%]" : "h-[94%]"
           } flex flex-col`}
         >
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
@@ -801,22 +864,6 @@ const Followup = ({ type = "Marketing" }) => {
                         </div>
                       </div>
 
-                      {showFollowupFilters && (
-                        <div className="mb-[1vw]">
-                          <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
-                            Next Followup Date
-                          </label>
-                          <input
-                            type="date"
-                            value={nextFollowupDate}
-                            onChange={(e) =>
-                              setnextFollowupDate(e.target.value)
-                            }
-                            className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                      )}
-
                       {showStatusFilter && (
                         <div className="mb-[1vw]">
                           <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
@@ -836,11 +883,23 @@ const Followup = ({ type = "Marketing" }) => {
                         </div>
                       )}
 
-                      {[
-                        "first_followup",
-                        "second_followup",
-                        "returned",
-                      ].includes(subTab) && (
+                      {showFollowupFilters && (
+                        <div className="mb-[1vw]">
+                          <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                            Next Followup Date
+                          </label>
+                          <input
+                            type="date"
+                            value={nextFollowupDate}
+                            onChange={(e) =>
+                              setnextFollowupDate(e.target.value)
+                            }
+                            className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      )}
+
+                      {showFollowupFilters && (
                         <div className="mb-[0.5vw] pt-[0.2vw]">
                           <label className="flex items-center gap-[0.5vw] cursor-pointer">
                             <input
@@ -998,28 +1057,38 @@ const Followup = ({ type = "Marketing" }) => {
                       <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                         Customer
                       </th>
-                      {[
-                        "first_followup",
-                        "second_followup",
-                        "not_reachable",
-                        "returned",
-                      ].includes(subTab) && (
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                          Next followup date
-                        </th>
+                      {(mainTab === "followups") && (
+                        <>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                            Contact Person
+                          </th>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                            Contact Number
+                          </th>
+                        </>
                       )}
                       <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                         City
                       </th>
-
-                      {["first_followup", "generated", "returned"].includes(
-                        subTab
-                      ) && (
+                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        State
+                      </th>
+                      {mainTab === "followups" && subTab !== "first_followup" && (
                         <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Status
                         </th>
                       )}
-                      {!["generated", "returnedConverted"].includes(subTab) && (
+                      {mainTab === "followups" && !["not_interested", "dropped","project_onboard", "first_followup"].includes(subTab) && (
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Next followup date
+                        </th>
+                      )}
+                      {mainTab === "followups" && subTab !== "project_onboard" && (
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Followup
+                        </th>
+                      )}
+                      {mainTab !== "followups" && mainTab !== "existing_clients" && (
                         <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Actions
                         </th>
@@ -1028,10 +1097,10 @@ const Followup = ({ type = "Marketing" }) => {
                   </thead>
                   <tbody ref={tableBodyRef}>
                     {paginatedClients.map((client, index) => {
+                      const latestNextFollowupDate =
+                        getLatestNextFollowupDate(client);
                       const isMissed =
-                        client.nextFollowupDate &&
-                        new Date(client.nextFollowupDate) <
-                          new Date(new Date().setHours(0, 0, 0, 0));
+                        isMissedFollowupDate(latestNextFollowupDate);
 
                       return (
                         <tr
@@ -1052,103 +1121,111 @@ const Followup = ({ type = "Marketing" }) => {
                           <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
                             {client.customer_name}
                           </td>
-                          {[
-                            "first_followup",
-                            "second_followup",
-                            "not_reachable",
-                            "returned",
-                          ].includes(subTab) && (
-                            <td
-                              className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300`}
-                            >
-                              <div className="flex justify-center items-center gap-[0.3vw]">
-                                {client?.nextFollowupDate
-                                  ? client.nextFollowupDate
-                                      .split("-")
-                                      .reverse()
-                                      .join("-")
-                                  : "-"}
+                          {mainTab === "followups" && (
+                            <>
+                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                                {client.contactPersons?.[0]?.name || "-"}
+                              </td>
+                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                                {client.contactPersons?.[0]?.contactNumber || "-"}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {client.city}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {client.state}
+                          </td>
+                          {mainTab === "followups" && subTab !== "first_followup" && (
+                            <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                              {getStatusLabel(client.status)}
+                            </td>
+                          )}
+                          {mainTab === "followups" && !["not_interested", "dropped","project_onboard", "first_followup"].includes(subTab) && (
+                            <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300">
+                              <div className="flex flex-col items-center justify-center gap-[0.2vw]">
+                                <span className="whitespace-nowrap">
+                                  {latestNextFollowupDate
+                                    ? latestNextFollowupDate
+                                        .split("T")[0]
+                                        .split("-")
+                                        .reverse()
+                                        .join("-")
+                                    : "-"}
+                                </span>
                                 {isMissed && (
-                                  <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] ml-[1vw] rounded">
+                                  <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] rounded whitespace-nowrap">
                                     Missed
                                   </span>
                                 )}
                               </div>
                             </td>
                           )}
-
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                            {client.city}
-                          </td>
-
-                          {["first_followup", "generated", "returned"].includes(
-                            subTab
-                          ) && (
-                            <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                              {subTab === "generated"
-                                ? client.following === 1
-                                  ? "Following"
-                                  : "Not Started"
-                                : getStatusLabel(client.status)}
+                          {mainTab === "followups" && subTab !== "project_onboard" && (
+                            <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
+                              <button
+                                onClick={() => handleFollowup(client)}
+                                className="text-[0.85vw] text-blue-600 hover:text-blue-700 font-medium cursor-pointer transition flex items-center gap-[0.3vw]"
+                              >
+                                <PhoneCall size={"0.9vw"} />
+                                Followup
+                              </button>
                             </td>
                           )}
-                          {!["generated", "returnedConverted"].includes(
-                            subTab
-                          ) && (
+
+                          {mainTab === "clientsData" && (
                             <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
-                              {mainTab === "clientsData" ? (
-                                <div className="flex justify-center items-center gap-[0.3vw]">
-                                  {subTab === "deleted" ? (
-                                    // Only show Restore button for Project Head
-                                    isProjectHead && (
-                                      <button
-                                        onClick={() => handleRestore(client.id)}
-                                        className="px-[0.6vw] py-[0.3vw] my-[0.3vw] flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 cursor-pointer"
-                                        title="Restore"
-                                      >
-                                        <RefreshCw
-                                          size={"1.02vw"}
-                                          className="mr-[0.2vw]"
-                                        />
-                                        <span className="-mt-[0.2vw]">
-                                          Restore
-                                        </span>
-                                      </button>
-                                    )
+                              {subTab === "deleted" ? (
+                                <button
+                                  onClick={() => handleRestore(client.id)}
+                                  disabled={restoreInProgressId === client.id}
+                                  className="px-[0.6vw] py-[0.3vw] my-[0.3vw] cursor-pointer flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed transition"
+                                  title="Restore"
+                                >
+                                  {restoreInProgressId === client.id ? (
+                                    <>
+                                      <RefreshCw
+                                        size={"1.02vw"}
+                                        className="mr-[0.2vw] animate-spin"
+                                      />
+                                      Restoring...
+                                    </>
                                   ) : (
                                     <>
-                                      <button
-                                        className="p-[0.6vw] text-gray-600 hover:bg-gray-50 rounded-full transition-colors cursor-pointer"
-                                        title="Edit"
-                                        onClick={() => handleEdit(client)}
-                                      >
-                                        <Edit size={"1.02vw"} />
-                                      </button>
-                                      {/* Only show Delete button for Project Head */}
-                                      {isProjectHead && (
-                                        <button
-                                          onClick={() =>
-                                            handleDelete(client.id)
-                                          }
-                                          className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
-                                          title="Delete"
-                                        >
-                                          <Trash2 size={"1.02vw"} />
-                                        </button>
-                                      )}
+                                      <RefreshCw
+                                        size={"1.02vw"}
+                                        className="mr-[0.2vw]"
+                                      />
+                                      <span className="-mt-[0.2vw]">Restore</span>
                                     </>
                                   )}
-                                </div>
+                                </button>
                               ) : (
-                                <div className="flex justify-center">
+                                <div className="flex justify-center items-center gap-[0.3vw]">
                                   <button
-                                    onClick={() => handleFollowup(client)}
-                                    className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.86vw] items-center font-semibold text-blue-500 hover:bg-blue-50 transition-colors cursor-pointer"
-                                    title="Add Followup"
+                                    className="p-[0.6vw] text-gray-600 hover:bg-gray-50 rounded-full transition-colors cursor-pointer"
+                                    title="Edit"
+                                    onClick={() => handleEdit(client)}
                                   >
-                                    <PhoneCall size={"1vw"} />{" "}
-                                    <span>Followup</span>
+                                    <Edit size={"1.02vw"} />
                                   </button>
+                                  {deleteInProgressId === client.id ? (
+                                    <div className="p-[0.6vw] text-red-600 rounded-full transition-colors">
+                                      <RefreshCw
+                                        size={"1.02vw"}
+                                        className="animate-spin"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => openDeleteModal(client.id, client.company_name)}
+                                      className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={"1.02vw"} />
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -1195,6 +1272,78 @@ const Followup = ({ type = "Marketing" }) => {
         </div>
       </div>
 
+      {deleteModalOpen && (
+        <div
+          className="fixed inset-0 z-60 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+          onClick={closeDeleteModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-[32vw] max-w-[520px] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+         
+            <div className="p-[1.2vw] text-[0.95vw] text-gray-700 space-y-[0.8vw]">
+              <p>
+                {deleteClientName
+                  ? `Client: ${deleteClientName}`
+                  : "This client will be deleted."}
+              </p>
+              <p>
+                Permanent Delete will remove the client, all associated followups and contacts from the application and cannot be restored.
+              </p>
+              <p>
+                Soft Delete will only set the client as inactive, moving it to the Deleted tab where it can be restored later.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-[0.8vw] justify-end p-[1.2vw] border-t border-gray-200">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleteInProgressId !== null}
+                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-gray-700 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete("soft")}
+                disabled={deleteInProgressId !== null}
+                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition"
+              >
+                {deleteInProgressId === deleteClientId && deleteInProgressType === "soft" ? (
+                  <>
+                    <RefreshCw
+                      size={"1.02vw"}
+                      className="mr-[0.3vw] animate-spin"
+                    />
+                    Deleting...
+                  </>
+                ) : (
+                  "Soft Delete"
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete("permanent")}
+                disabled={deleteInProgressId !== null}
+                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed transition"
+              >
+                {deleteInProgressId === deleteClientId && deleteInProgressType === "permanent" ? (
+                  <>
+                    <RefreshCw
+                      size={"1.02vw"}
+                      className="mr-[0.3vw] animate-spin"
+                    />
+                    Deleting...
+                  </>
+                ) : (
+                  "Permanent Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <ClientAddModal
         isOpen={isModalOpen}
         onClose={handleModalClose}

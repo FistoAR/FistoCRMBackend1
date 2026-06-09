@@ -13,24 +13,120 @@ const upload = multer({
   dest: "uploads/",
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.ms-excel",
-      "text/csv",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+      "application/vnd.ms-excel",                                           // .xls
+      "text/csv",                                                            // .csv
+      "application/csv",
+      "application/octet-stream",
+      "application/excel",
+      "application/x-excel",
+      "application/x-msexcel",
+      "text/comma-separated-values",
+      "text/plain",
     ];
-    if (allowedTypes.includes(file.mimetype)) {
+    const ext = file.originalname.split(".").pop().toLowerCase();
+    const allowedExts = ["xlsx", "xls", "csv"];
+    if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type"));
+      cb(new Error("Invalid file type. Only .xlsx, .xls and .csv files are allowed."));
     }
   },
 });
 
+async function findDuplicateClient(clientData, contactPersonsList, excludeId = null) {
+  let query = `
+    SELECT c.id, c.company_name, c.customer_name, cp.name as cp_name, cp.contactNumber as cp_number, cp.email as cp_email, cp.designation as cp_designation
+    FROM ClientsData c
+    LEFT JOIN ContactPersons cp ON c.id = cp.clientID
+    WHERE c.active = 1
+  `;
+  let conditions = [];
+  let params = [];
+
+  if (clientData.company_name) {
+    conditions.push(`LOWER(REPLACE(c.company_name, ' ', '')) = LOWER(REPLACE(?, ' ', ''))`);
+    params.push(clientData.company_name);
+  }
+  if (clientData.customer_name) {
+    conditions.push(`LOWER(REPLACE(c.customer_name, ' ', '')) = LOWER(REPLACE(?, ' ', ''))`);
+    params.push(clientData.customer_name);
+  }
+
+  if (contactPersonsList && contactPersonsList.length > 0) {
+    let numbers = [];
+    if (typeof contactPersonsList[0] === 'string') {
+      numbers = contactPersonsList.map(n => String(n).replace(/\\s/g, ""));
+    } else {
+      numbers = contactPersonsList.map(cp => cp.contactNumber).filter(n => n).map(n => String(n).replace(/\\s/g, ""));
+    }
+    
+    if (numbers.length > 0) {
+      const placeholders = numbers.map(() => `REPLACE(cp.contactNumber, ' ', '') = ?`).join(' OR ');
+      conditions.push(`(${placeholders})`);
+      params.push(...numbers);
+    }
+  }
+
+  if (conditions.length === 0) return [];
+
+  query += ` AND (${conditions.join(' OR ')})`;
+
+  if (excludeId) {
+    query += ` AND c.id != ?`;
+    params.push(excludeId);
+  }
+
+  try {
+    const results = await queryWithRetry(query, params);
+    
+    if (results.length > 0) {
+      const clientsMap = {};
+      results.forEach(row => {
+        if (!clientsMap[row.id]) {
+          clientsMap[row.id] = {
+            id: row.id,
+            company_name: row.company_name,
+            customer_name: row.customer_name,
+            contactPersons: []
+          };
+        }
+        if (row.cp_number) {
+          if (!clientsMap[row.id].contactPersons.some(cp => cp.contactNumber === row.cp_number)) {
+            clientsMap[row.id].contactPersons.push({
+              name: row.cp_name,
+              contactNumber: row.cp_number,
+              email: row.cp_email,
+              designation: row.cp_designation
+            });
+          }
+        }
+      });
+      return Object.values(clientsMap);
+    }
+    return [];
+  } catch (error) {
+    console.error("Error finding duplicates:", error);
+    return [];
+  }
+}
+
 router.post("/", async (req, res) => {
   const { clientData, contactPersons } = req.body;
 
-  if (!clientData?.company_name || !clientData?.customer_name) {
+  if (!clientData?.company_name) {
     return res.status(400).json({
-      error: "Company name and customer name required",
+      error: "Company name is required",
+    });
+  }
+
+  // Duplicate Check
+  const duplicates = await findDuplicateClient(clientData, contactPersons, clientData.id || null);
+  if (duplicates.length > 0) {
+    return res.status(409).json({
+      success: false,
+      error: "Duplicate client found",
+      duplicates: duplicates,
     });
   }
 
@@ -149,6 +245,25 @@ router.post("/", async (req, res) => {
     }
   } finally {
     if (connection) connection.release();
+  }
+});
+
+router.post("/validate-duplicates", async (req, res) => {
+  try {
+    const { clientData, contactPersons } = req.body;
+    if (!clientData) {
+      return res.status(400).json({ error: "No client data provided" });
+    }
+
+    const duplicates = await findDuplicateClient(clientData, contactPersons, clientData.id || null);
+    
+    res.status(200).json({
+      success: true,
+      duplicates: duplicates
+    });
+  } catch (error) {
+    console.error("Validation error:", error);
+    res.status(500).json({ success: false, error: "Validation failed" });
   }
 });
 
@@ -297,8 +412,28 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       clientsData = parseExcel(filePath);
     }
 
-    const results = await insertClientsData(clientsData, employee_id);
     fs.unlinkSync(filePath);
+
+    if (!clientsData || clientsData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "The uploaded file is empty. Please add data rows and try again.",
+        empty: true,
+      });
+    }
+
+    const results = await insertClientsData(clientsData, employee_id);
+
+    if (results.duplicates && results.duplicates.length > 0) {
+      return res.status(206).json({
+        success: true,
+        message: "Upload completed with some duplicates skipped.",
+        inserted: results.inserted,
+        failed: results.failed,
+        total: clientsData.length,
+        duplicates: results.duplicates,
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -338,10 +473,34 @@ function parseExcel(filePath) {
 }
 
 async function insertClientsData(clientsData, employee_id) {
-  const results = { inserted: 0, failed: 0, errors: [] };
+  const results = { inserted: 0, failed: 0, errors: [], duplicates: [] };
 
   for (const row of clientsData) {
     try {
+      const company_name = row["Company name"] || row["company_name"] || "";
+      const customer_name = row["Customer Name"] || row["customer_name"] || "";
+      const phoneNumberString = String(row["Phone Number"] || "").trim();
+      
+      let phoneNumbers = [];
+      if (phoneNumberString && phoneNumberString.includes(",")) {
+        phoneNumbers = phoneNumberString.split(",").map((p) => p.trim()).filter((p) => p);
+      } else if (phoneNumberString) {
+        phoneNumbers = [phoneNumberString];
+      }
+
+      // Duplicate Check
+      const clientDataForCheck = { company_name, customer_name };
+      const duplicates = await findDuplicateClient(clientDataForCheck, phoneNumbers);
+      
+      if (duplicates.length > 0) {
+        results.failed++;
+        results.duplicates.push({
+          row: row,
+          existingRecords: duplicates
+        });
+        continue; // Skip inserting this duplicate
+      }
+
       const clientResult = await queryWithRetry(
         `INSERT INTO ClientsData 
          (employee_id, company_name, customer_name, industry_type, 
@@ -349,8 +508,8 @@ async function insertClientsData(clientsData, employee_id) {
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [
           employee_id,
-          row["Company name"] || row["company_name"] || "",
-          row["Customer Name"] || row["customer_name"] || "",
+          company_name,
+          customer_name,
           row["Industry Type"] || row["industry_type"] || "",
           row["Website"] || row["website"] || "",
           row["Address"] || row["address"] || "",
@@ -363,13 +522,7 @@ async function insertClientsData(clientsData, employee_id) {
 
       const clientId = clientResult.insertId;
 
-      const phoneNumberString = String(row["Phone Number"] || "").trim();
-
       if (phoneNumberString && phoneNumberString.includes(",")) {
-        const phoneNumbers = phoneNumberString
-          .split(",")
-          .map((p) => p.trim())
-          .filter((p) => p);
         const baseContactName = row["Contact Person"] || "Contact Person";
 
         for (let i = 0; i < phoneNumbers.length; i++) {
