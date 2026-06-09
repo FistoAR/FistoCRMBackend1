@@ -92,90 +92,70 @@ router.delete("/", async (req, res) => {
     const { employeeID, taskId, activityId } = req.body;
 
     if (!employeeID) {
-      return res.status(400).json({ success: false, message: "employeeID is required" });
-    }
-
-    const query = { employeeID };
-    if (taskId) query.taskId = taskId;
-    if (activityId) query.activityId = activityId;
-
-    const dayReport = await DayReport.findOne(query);
-    if (!dayReport) {
-      return res.status(404).json({ success: false, message: "Day report not found" });
-    }
-
-    // ✅ Scope to today only
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const todayDateFilter = { createdAt: { $gte: todayStart, $lte: todayEnd } };
-
-    let hasStartedWork = false;
-    let workDetails = null;
-
-    if (taskId && !activityId) {
-      const taskReport = await TaskReports.findOne({
-        taskId,
-        activityId: null,
-        ...todayDateFilter,         // ✅ only today's reports
-      }).lean();
-
-      const taskReportReview = await TaskReportsReview.findOne({
-        taskId,
-        activityId: null,
-        ...todayDateFilter,         // ✅ only today's reports
-      }).lean();
-
-      if (taskReport || taskReportReview) {
-        const percentage = taskReport?.percentage || taskReportReview?.percentage || 0;
-        if (percentage > 0) {
-          hasStartedWork = true;
-          workDetails = {
-            type: "task",
-            percentage,
-            message: `You have already submitted a report for this task today (${percentage}% completed). Cannot remove from today's tasks.`,
-          };
-        }
-      }
-    }
-
-    if (activityId) {
-      const activityReport = await TaskReports.findOne({
-        activityId,
-        ...todayDateFilter,         // ✅ only today's reports
-      }).lean();
-
-      const activityReportReview = await TaskReportsReview.findOne({
-        activityId,
-        ...todayDateFilter,         // ✅ only today's reports
-      }).lean();
-
-      if (activityReport || activityReportReview) {
-        const percentage = activityReport?.percentage || activityReportReview?.percentage || 0;
-        if (percentage > 0) {
-          hasStartedWork = true;
-          workDetails = {
-            type: "activity",
-            percentage,
-            message: `You have already submitted a report for this activity today (${percentage}% completed). Cannot remove from today's tasks.`,
-          };
-        }
-      }
-    }
-
-    if (hasStartedWork) {
-      return res.status(200).json({
+      return res.status(400).json({
         success: false,
-        canRemove: false,
-        message: workDetails.message,
-        data: workDetails,
+        message: "employeeID is required",
       });
     }
 
-    const deletedReport = await DayReport.findOneAndDelete(query);
-    res.status(200).json({
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const dayReportQuery = {
+      employeeID,
+      createdAt: {
+        $gte: todayStart,
+        $lte: todayEnd,
+      },
+    };
+
+    if (taskId) dayReportQuery.taskId = taskId;
+    if (activityId) dayReportQuery.activityId = activityId;
+
+    const dayReport = await DayReport.findOne(dayReportQuery);
+
+    if (!dayReport) {
+      return res.status(404).json({
+        success: false,
+        message: "Today's day report not found",
+      });
+    }
+
+    const reportQuery = {
+      createdAt: {
+        $gte: todayStart,
+        $lte: todayEnd,
+      },
+    };
+
+    if (activityId) {
+      reportQuery.activityId = activityId;
+    } else {
+      reportQuery.taskId = taskId;
+      reportQuery.activityId = null;
+    }
+
+    const [taskReport, reviewReport] = await Promise.all([
+      TaskReports.findOne(reportQuery).lean(),
+      TaskReportsReview.findOne(reportQuery).lean(),
+    ]);
+
+    if (taskReport || reviewReport) {
+      return res.status(200).json({
+        success: false,
+        canRemove: false,
+        message:
+          "Work report already exists for today. Day report cannot be removed.",
+      });
+    }
+
+    const deletedReport =
+      await DayReport.findOneAndDelete(dayReportQuery);
+
+    return res.status(200).json({
       success: true,
       canRemove: true,
       message: "Day report removed successfully",
@@ -183,7 +163,12 @@ router.delete("/", async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting day report:", error);
-    res.status(500).json({ success: false, message: "Failed to delete day report", error: error.message });
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete day report",
+      error: error.message,
+    });
   }
 });
 
