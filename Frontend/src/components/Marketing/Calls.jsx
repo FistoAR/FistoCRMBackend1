@@ -291,6 +291,8 @@ const Followup = ({ type = "Marketing" }) => {
       const response = await fetch(url);
       const data = await response.json();
 
+      console.log("Fetched clients data:", data);
+
       if (mainTab === "clientsData") {
         setClients(data.data || []);
       } else {
@@ -459,11 +461,13 @@ const Followup = ({ type = "Marketing" }) => {
     return isMissedFollowupDate(getLatestNextFollowupDate(client));
   };
 
-  const filterByTodayFollowup = (client) => {
-    if (subTab !== "followup") return true;
-    if (showMissedFollowups || nextFollowupDate) return true;
-    return isTodayFollowupDate(getLatestNextFollowupDate(client));
-  };
+  // const filterByTodayFollowup = (client) => {
+  //   if (subTab !== "followup") return true;
+  //   if (showMissedFollowups || nextFollowupDate) return true;
+  //   return isTodayFollowupDate(getLatestNextFollowupDate(client));
+  // };
+
+  const filterByTodayFollowup = (_client) => true;
 
   const filterByStatus = (client) => {
     if (!statusFilter) return true;

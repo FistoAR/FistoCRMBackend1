@@ -128,6 +128,7 @@ router.get("/", async (req, res) => {
   try {
     const { status, employee_id } = req.query;
 
+
     if (!status) {
       return res.status(400).json({ error: "Status query is required" });
     }
@@ -522,7 +523,7 @@ router.get("/counts", async (req, res) => {
 
     const counts = {
       first_followup: firstFollowupCount,
-      followup: todayFollowupCount,
+      followup: 0,
       project_onboard: 0,
       not_interested: 0,
       not_available: 0,
@@ -534,18 +535,17 @@ router.get("/counts", async (req, res) => {
     };
 
     followupCounts.forEach((row) => {
-      const count = Number(row.count) || 0;
-      if (row.status_group === "followup") {
-        return;
-      }
-      if (row.status_group === "droped") {
-        counts.dropped = count;
-      } else if (row.status_group === "converted") {
-        counts.lead = count;
-      } else if (counts.hasOwnProperty(row.status_group)) {
-        counts[row.status_group] = count;
-      }
-    });
+  const count = Number(row.count) || 0;
+  if (row.status_group === "followup") {
+    counts.followup = count; // ✅ now set correctly
+  } else if (row.status_group === "droped") {
+    counts.dropped = count;
+  } else if (row.status_group === "converted") {
+    counts.lead = count;
+  } else if (counts.hasOwnProperty(row.status_group)) {
+    counts[row.status_group] = count;
+  }
+});
 
     const notReachableQuery = `
       SELECT COUNT(DISTINCT f.clientID) as count
