@@ -1,4 +1,12 @@
 require("dotenv").config();
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (err, origin) => {
+  console.error(`❌ Caught exception: ${err}\n` + `Exception origin: ${origin}`);
+});
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
