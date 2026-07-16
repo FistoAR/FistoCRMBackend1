@@ -70,6 +70,7 @@ const DayTask = () => {
       const data = await response.json();
 
       if (data.success) {
+
         setTasks(data.data);
       }
     } catch (err) {
@@ -304,7 +305,7 @@ const DayTask = () => {
           !matchesDateFilter(task.startDate, task.endDate)
         ) {
           // Skip?
-        } else if (task.status === "Hold" || task.status === "Cancelled") {
+        } else if (task.taskStatus === "Hold" || task.taskStatus === "Cancelled") {
           // Completely avoid hold tasks in day task
           return;
         } else {

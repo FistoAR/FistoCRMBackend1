@@ -248,6 +248,17 @@ function AppContent() {
                   <Route path="employeeReports" element={<PHinternReports />} />
                   <Route path="report" element={<AdminReport />} />
                   <Route path="calendar" element={<AdminCalendar />} />
+                  <Route path="project" element={<Projects />}>
+                      <Route path="newProject" element={<NewProject />} />
+                      <Route
+                        path="projectOverview"
+                        element={<ProjectOverview />}
+                      >
+                        <Route path="overview" element={<Overview />} />
+                        <Route path="resources" element={<Resource />} />
+                      </Route>
+                      <Route path="dayTask" element={<DayTask />} />
+                    </Route>
                 </Route>
 
                 {/* ========== INTERN ROUTES ========== */}
