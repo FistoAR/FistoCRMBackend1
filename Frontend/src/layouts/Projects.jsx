@@ -13,6 +13,7 @@ const Projects = () => {
   const [allProjects, setAllProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 
   const [projectStatus, setProjectStatus] = useState("In Progress");
   const [indicatorStyle, setIndicatorStyle] = useState({});
@@ -152,8 +153,18 @@ const Projects = () => {
   }, [loggedEmpDetails.id, loggedEmpDetails.role]);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 500); // 500ms debounce delay
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchTerm]);
+
+  useEffect(() => {
     if (loggedEmpDetails.id) fetchProjects();
-  }, [searchTerm, loggedEmpDetails.id, selectedEmployee]);
+  }, [debouncedSearchTerm, loggedEmpDetails.id, selectedEmployee]);
 
   useEffect(() => {
     if (isBaseRoute && loggedEmpDetails.id) fetchProjects();
@@ -261,7 +272,7 @@ const Projects = () => {
       }
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project?search=${searchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
+        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
       );
       const data = await response.json();
       if (data.success) setAllProjects(data.data || []);
@@ -865,8 +876,29 @@ const Projects = () => {
                       placeholder="Search"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-[2vw] pr-[1vw] py-[0.4vw] rounded-full text-[0.8vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500"
+                      className="pl-[2vw] pr-[2.2vw] py-[0.4vw] rounded-full text-[0.8vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500 w-[14vw]"
                     />
+                    {searchTerm && (
+                      <button
+                        onClick={() => setSearchTerm("")}
+                        className="absolute right-[0.6vw] top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer flex items-center justify-center"
+                      >
+                        <svg
+                          className="w-[0.9vw] h-[0.9vw]"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M6 18L18 6M6 6l12 12"
+                          ></path>
+                        </svg>
+                      </button>
+                    )}
                   </div>
 
                   <div className="relative" ref={filterRef}>

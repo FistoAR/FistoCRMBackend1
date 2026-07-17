@@ -73,8 +73,29 @@ const ProjectBudget = ({ showToast }) => {
     projectCategory: "",
   });
 
+  const [proposedClients, setProposedClients] = useState([]);
+  const [showCompanyAutocomplete, setShowCompanyAutocomplete] = useState(false);
+
+  const fetchProposedClients = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/ManagementFollowups?status=proposed`);
+      const data = await res.json();
+      if (data.success) {
+        setProposedClients(data.data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching proposed clients:", err);
+    }
+  };
+
+  const pendingProposals = proposedClients.filter(pc => {
+    const company = pc.client_details?.company_name;
+    return !projects.some(p => p.companyName?.toLowerCase() === company?.toLowerCase());
+  });
+
   useEffect(() => {
     fetchProjects();
+    fetchProposedClients();
   }, []);
 
   useEffect(() => {
@@ -574,6 +595,11 @@ const ProjectBudget = ({ showToast }) => {
                 >
                   <Plus size={18} />
                   Add Project
+                  {pendingProposals.length > 0 && (
+                    <span className="bg-red-500 text-white text-[0.7vw] font-bold px-[0.45vw] py-[0.1vw] rounded-full animate-pulse">
+                      {pendingProposals.length}
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -1335,7 +1361,7 @@ const ProjectBudget = ({ showToast }) => {
 
             <div className="flex-1 overflow-y-auto p-[1.5vw]">
               <div className="grid grid-cols-2 gap-[1.2vw]">
-                <div>
+                <div className="relative">
                   <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
                     Company Name *
                   </label>
@@ -1343,15 +1369,55 @@ const ProjectBudget = ({ showToast }) => {
                     type="text"
                     name="companyName"
                     value={createFormData.companyName}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setCreateFormData({
                         ...createFormData,
                         companyName: e.target.value,
-                      })
-                    }
+                      });
+                      setShowCompanyAutocomplete(true);
+                    }}
+                    onFocus={() => setShowCompanyAutocomplete(true)}
+                    onBlur={() => {
+                      setTimeout(() => setShowCompanyAutocomplete(false), 200);
+                    }}
                     className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                     required
+                    autoComplete="off"
                   />
+                  {showCompanyAutocomplete && pendingProposals.filter(p =>
+                    p.client_details?.company_name
+                      ?.toLowerCase()
+                      .includes(createFormData.companyName.toLowerCase())
+                  ).length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[15vh] overflow-y-auto z-[60]">
+                      {pendingProposals
+                        .filter(p =>
+                          p.client_details?.company_name
+                            ?.toLowerCase()
+                            .includes(createFormData.companyName.toLowerCase())
+                        )
+                        .map((proposal) => {
+                          const client = proposal.client_details;
+                          return (
+                            <div
+                              key={client.id}
+                              onMouseDown={() => {
+                                setCreateFormData({
+                                  ...createFormData,
+                                  companyName: client.company_name,
+                                  customerName: client.customer_name,
+                                });
+                                setShowCompanyAutocomplete(false);
+                              }}
+                              className="px-[1vw] py-[0.5vw] hover:bg-blue-50 cursor-pointer text-[0.85vw] border-b border-gray-100 last:border-0 flex justify-between"
+                            >
+                              <span className="font-semibold text-gray-800">{client.company_name}</span>
+                              <span className="text-gray-500 text-[0.75vw]">{client.customer_name}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
 
                 <div>

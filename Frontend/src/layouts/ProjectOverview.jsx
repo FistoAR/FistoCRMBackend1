@@ -64,6 +64,7 @@ const ProjectOverview = () => {
     if (designation === "3D") return "/threeD/projects";
     if (designation === "Project Head") return "/projectHead/projects";
     if (designation === "Admin") return "/admin/project";
+    if (designation === "SBU") return "/sbu/projects";
     return "/projects";
   };
 

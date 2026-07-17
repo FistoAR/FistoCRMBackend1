@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { io } from "socket.io-client";
 import Logo from "../assets/NotificationLogo.png";
 import LargeLogo from "../assets/NotificationLargeLogo.png";
+import notificationAudio from "../assets/notificationAudio.wav";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -14,11 +15,9 @@ export default function useSocketNotifications() {
   const audioBufferRef = useRef(null);
   const [isLoading, setIsLoading] = useState(true);
   const recentNotificationsRef = useRef(new Set());
-  // ─── NEW: ref for reminder timer ───────────────────────────────
   const reminderTimerRef = useRef(null);
   const reminderIntervalRef = useRef(null);
 
-  // Get current employee ID
   const getCurrentEmployeeId = useCallback(() => {
     try {
       const storedUser =
@@ -43,7 +42,6 @@ export default function useSocketNotifications() {
     }
   }, []);
 
-  // ─── NEW: Get current user designation ─────────────────────────
   const getCurrentUserDesignation = useCallback(() => {
     try {
       const storedUser =
@@ -61,7 +59,6 @@ export default function useSocketNotifications() {
     }
   }, []);
 
-  // Fetch notifications from database
   const fetchNotifications = useCallback(async () => {
     const employeeId = getCurrentEmployeeId();
     if (!employeeId) return;
@@ -83,7 +80,6 @@ export default function useSocketNotifications() {
     }
   }, [getCurrentEmployeeId]);
 
-  // Save notification to database
   const saveNotificationToDatabase = useCallback(
     async (notification) => {
       const employeeId = getCurrentEmployeeId();
@@ -112,19 +108,18 @@ export default function useSocketNotifications() {
     [getCurrentEmployeeId],
   );
 
-  // Initialize audio
   const initAudioContext = useCallback(async () => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       audioContextRef.current = new AudioContext();
 
-      const response = await fetch("/fisto_crm/notificationAudio.wav");
+      const response = await fetch(notificationAudio);
       const arrayBuffer = await response.arrayBuffer();
       audioBufferRef.current =
         await audioContextRef.current.decodeAudioData(arrayBuffer);
     } catch (error) {
       console.warn("useSocketNotifications: Audio init failed:", error.message);
-      audioRef.current = new Audio("/fisto_crm/notificationAudio.wav");
+      audioRef.current = new Audio(notificationAudio);
       audioRef.current.volume = 0.7;
       audioRef.current.load();
     }
@@ -370,7 +365,7 @@ export default function useSocketNotifications() {
           path: "/socket.io/",
           transports: ["websocket", "polling"],
           reconnection: true,
-          reconnectionAttempts: 10,
+          reconnectionAttempts: Infinity,
           reconnectionDelay: 1000,
           reconnectionDelayMax: 5000,
           timeout: 20000,
@@ -380,9 +375,17 @@ export default function useSocketNotifications() {
 
         socketRef.current = socket;
 
+        let pingIntervalId = null;
+
         socket.on("connect", () => {
           setIsConnected(true);
           socket.emit("register", currentEmployeeId);
+          if (pingIntervalId) clearInterval(pingIntervalId);
+          pingIntervalId = setInterval(() => {
+            if (socket.connected) {
+              socket.emit("ping");
+            }
+          }, 25000);
         });
 
         socket.on("connect_error", (error) => {
@@ -393,15 +396,27 @@ export default function useSocketNotifications() {
         socket.on("disconnect", (reason) => {
           console.warn("⚠️ Socket disconnected:", reason);
           setIsConnected(false);
-          if (reason === "io server disconnect") {
-            socket.connect();
+          if (pingIntervalId) {
+            clearInterval(pingIntervalId);
+            pingIntervalId = null;
           }
+          socket.connect();
         });
 
         socket.on("reconnect", (attemptNumber) => {
           setIsConnected(true);
           socket.emit("register", currentEmployeeId);
         });
+
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === "visible") {
+            if (socket && !socket.connected) {
+              console.log("Tab active, reconnecting socket...");
+              socket.connect();
+            }
+          }
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
 
         // ──────────────────────────────────────────────────────────
         // All existing socket handlers remain unchanged below
@@ -493,6 +508,48 @@ export default function useSocketNotifications() {
             data.title || "🎯 New Task Assigned",
             body,
             notification,
+          );
+        });
+
+        socket.on("system_notification", async (data) => {
+          const employeeId = currentEmployeeId;
+          if (!employeeId || !data.receiverIds) return;
+
+          const normalizedEmployeeId = String(employeeId).trim().toLowerCase();
+          const isReceiver = data.receiverIds.some(id => String(id).trim().toLowerCase() === normalizedEmployeeId);
+          if (!isReceiver) {
+            return;
+          }
+
+          if (String(data.message?.senderId).trim().toLowerCase() === normalizedEmployeeId) {
+            return;
+          }
+
+          await playNotificationSound();
+
+          const notification = {
+            id: `msg_${data.message._id || Date.now()}`,
+            title: `💬 New Message in ${data.projectName}`,
+            type: "chat-message",
+            status: "unread",
+            data: {
+              message: data.message.message,
+              senderName: data.message.senderDetails?.name || "Someone",
+              projectId: data.projectId,
+              taskId: data.taskId,
+              activityId: data.activityId,
+            },
+            timestamp: data.message.timestamp || new Date().toISOString(),
+            read: false,
+          };
+
+          setNotifications((prev) => [notification, ...prev]);
+          await saveNotificationToDatabase(notification);
+
+          await showBrowserNotification(
+            `💬 Message from ${data.message.senderDetails?.name || "Someone"}`,
+            `[${data.projectName}] ${data.message.message}`,
+            notification
           );
         });
 
@@ -800,9 +857,13 @@ export default function useSocketNotifications() {
         });
 
         cleanup = () => {
+          document.removeEventListener("visibilitychange", handleVisibilityChange);
+          if (pingIntervalId) {
+            clearInterval(pingIntervalId);
+          }
           try {
             if (socket) {
-              // socket.disconnect();
+              socket.disconnect();
             }
           } catch (e) {
             console.warn("Error during socket disconnect:", e);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 
 import AssEmp from "../../assets/ProjectPages/overview/assEmp.webp";
 import TotalTask from "../../assets/ProjectPages/overview/totalTask.webp";
@@ -381,7 +382,9 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
   const [employeeCache, setEmployeeCache] = useState({});
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [imageErrors, setImageErrors] = useState({});
-  const [hoveredTask, setHoveredTask] = useState(null);
+  const tooltipRef = useRef(null);
+  const [tooltipItem, setTooltipItem] = useState(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   const fetchEmployeeData = async (employeeId) => {
     if (employeeCache[employeeId]) return employeeCache[employeeId];
@@ -428,6 +431,7 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
           startDate: day.startDate || "", startTime: day.startTime || "",
           endDate: day.endDate || new Date().toISOString().split("T")[0],
           endTime: day.endTime || "", status: "Completed",
+          reportedAt: day.createdAt || null,
         });
       });
 
@@ -442,6 +446,7 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
           startDate: "", startTime: u.startTime || "",
           endDate: new Date().toISOString().split("T")[0],
           endTime: u.endTime || "", status: u.status || "In Progress",
+          reportedAt: u.createdAt || null,
         });
       });
 
@@ -490,6 +495,48 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
     return new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "-");
   };
 
+  const formatTime12h = (t) => {
+    if (!t) return "";
+    try {
+      return new Date(`2000-01-01T${t}`).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    } catch (_) { return t; }
+  };
+
+  const renderTooltipPortal = () => {
+    if (!tooltipItem) return null;
+    const item = tooltipItem;
+    const GAP = 14;
+    const tooltipW = 220;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = mousePos.x + GAP;
+    let top = mousePos.y + GAP;
+    if (left + tooltipW > vw - 8) left = mousePos.x - tooltipW - GAP;
+    if (left < 8) left = 8;
+    const estH = 130;
+    if (top + estH > vh - 8) top = mousePos.y - estH - GAP;
+    if (top < 8) top = 8;
+    return createPortal(
+      <div ref={tooltipRef} style={{
+        position: "fixed", top, left,
+        backgroundColor: "#1F2937", color: "white",
+        padding: "8px 12px", borderRadius: "6px",
+        fontSize: "11px", zIndex: 99999,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.22)",
+        maxWidth: `${tooltipW}px`, whiteSpace: "normal",
+        wordBreak: "break-word", pointerEvents: "none",
+        lineHeight: "1.5"
+      }}>
+        {item.projectName && <div style={{ marginBottom: "4px" }}><strong style={{ color: "#9CA3AF" }}>Project: </strong>{item.projectName}</div>}
+        {item.taskName && item.taskName !== "No Task" && <div style={{ marginBottom: "4px" }}><strong style={{ color: "#9CA3AF" }}>Task: </strong>{item.taskName}</div>}
+        {item.isActivity && item.activityName && <div style={{ marginBottom: "4px" }}><strong style={{ color: "#9CA3AF" }}>Activity: </strong>{item.activityName}</div>}
+        {item.startDate && <div style={{ marginBottom: "4px" }}><strong style={{ color: "#9CA3AF" }}>Start: </strong>{item.startDate}{item.startTime && ` • ${formatTime12h(item.startTime)}`}</div>}
+        {item.endDate && <div><strong style={{ color: "#9CA3AF" }}>End: </strong>{item.endDate}{item.endTime && ` • ${formatTime12h(item.endTime)}`}</div>}
+      </div>,
+      document.body
+    );
+  };
+
   const renderList = () => {
     if (loading || loadingEmployees)
       return <div style={{ padding: "1.04vw", textAlign: "center", color: "#6B7280" }}>Loading tasks...</div>;
@@ -498,7 +545,7 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
 
     return todaysWorkItems.map((item) => {
       const showAvatar = item.avatar && !imageErrors[item.id];
-      const isHov = hoveredTask === item.id;
+      const isHov = tooltipItem?.id === item.id;
       const isNone = item.type === "noTask";
       return (
         <div key={item.id}
@@ -507,8 +554,9 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
             gap: "0.625vw", position: "relative", backgroundColor: isHov ? "#F9FAFB" : "transparent",
             transition: "background-color 0.2s ease", opacity: isNone ? 0.6 : 1
           }}
-          onMouseEnter={() => !isNone && setHoveredTask(item.id)}
-          onMouseLeave={() => setHoveredTask(null)}>
+          onMouseEnter={() => !isNone && setTooltipItem(item)}
+          onMouseMove={(e) => !isNone && setMousePos({ x: e.clientX, y: e.clientY })}
+          onMouseLeave={() => { setTooltipItem(null); }}>
           {showAvatar
             ? <img src={item.avatar} alt={item.employeeName}
               style={{ width: "2.08vw", height: "2.08vw", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
@@ -520,7 +568,7 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
               className="bg-blue-500">{item.initials}</div>
           }
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.42vw", marginBottom: "0.21vw" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.42vw", marginBottom: "0.21vw", flexWrap: "wrap" }}>
               <span style={{ fontWeight: "600", color: "#111827", fontSize: "0.78vw" }}>{item.employeeName}</span>
               <span style={{
                 fontSize: "0.6vw", padding: "0.1vw 0.42vw", borderRadius: "0.21vw",
@@ -528,6 +576,15 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
               }}>
                 {getTypeLabel(item.type)}
               </span>
+              {!isNone && item.reportedAt && (
+                <span style={{
+                  marginLeft: "auto", fontSize: ".72vw", color: "#0894ecff",
+                  backgroundColor: "#e9edf4ff", padding: "0.08vw 0.38vw",
+                  borderRadius: "0.21vw", fontWeight: "500", whiteSpace: "nowrap"
+                }}>
+                  {new Date(item.reportedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                </span>
+              )}
             </div>
             {!isNone && item.projectName && (
               <div style={{ fontSize: "0.67vw", color: "#6B7280", marginBottom: "0.1vw" }}>
@@ -545,22 +602,6 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
               </div>
             )}
           </div>
-          {isHov && !isNone && (
-            <div style={{
-              position: "absolute", top: "80%", right: "2.71vw", marginTop: "0.21vw",
-              backgroundColor: "#1F2937", color: "white", padding: "0.52vw 0.73vw",
-              borderRadius: "0.31vw", fontSize: "0.65vw", zIndex: 1000,
-              boxShadow: "0 0.21vw 0.52vw rgba(0,0,0,0.15)",
-              minWidth: "12vw", maxWidth: "18vw", whiteSpace: "normal", wordBreak: "break-word"
-            }}>
-              {item.projectName && <div style={{ marginBottom: "0.26vw" }}><strong style={{ color: "#9CA3AF" }}>Project: </strong>{item.projectName}</div>}
-              {item.taskName && item.taskName !== "No Task" && <div style={{ marginBottom: "0.26vw" }}><strong style={{ color: "#9CA3AF" }}>Task: </strong>{item.taskName}</div>}
-              {item.isActivity && item.activityName && <div style={{ marginBottom: "0.26vw" }}><strong style={{ color: "#9CA3AF" }}>Activity: </strong>{item.activityName}</div>}
-              {item.description && <div style={{ marginBottom: "0.26vw" }}><strong style={{ color: "#9CA3AF" }}>Description: </strong>{item.description}</div>}
-              {item.startDate && <div style={{ marginBottom: "0.26vw" }}><strong style={{ color: "#9CA3AF" }}>Start: </strong>{formatDate(item.startDate)}{item.startTime && ` at ${item.startTime}`}</div>}
-              {item.endDate && <div><strong style={{ color: "#9CA3AF" }}>End: </strong>{item.endDate}{item.endTime && ` at ${item.endTime}`}</div>}
-            </div>
-          )}
         </div>
       );
     });
@@ -574,6 +615,7 @@ const TodayTasksCard = ({ loading, apiBaseUrl, unscheduledTask = [], dayTask = [
       <div style={{ borderRadius: "0 0 0.42vw 0.42vw" }} className="overflow-y-auto min-h-0 max-h-[90%] bg-white text-gray-700">
         {renderList()}
       </div>
+      {renderTooltipPortal()}
     </div>
   );
 };

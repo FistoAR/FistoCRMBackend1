@@ -22,6 +22,20 @@ const createDirectories = () => {
 
 createDirectories();
 
+// Auto-run DB migration to add not_picking and not_interested enum values
+(async () => {
+  try {
+    console.log("Running migration: Altering status column in ManagementFollowups...");
+    await queryWithRetry(`
+      ALTER TABLE ManagementFollowups 
+      MODIFY COLUMN status enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested') NOT NULL
+    `);
+    console.log("Migration successful: status column altered.");
+  } catch (err) {
+    console.error("Migration error (altering status column):", err);
+  }
+})();
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     let folder = "";
@@ -144,6 +158,8 @@ router.post(
       isMarketing,
     } = req.body;
 
+    const dbStatus = status === "inProgress" ? "inprogress" : status;
+
     if (!clientID || !status) {
       return res.status(400).json({
         error: "Client ID and status are required",
@@ -220,7 +236,7 @@ router.post(
           managementClientId,
           marketingClientId,
           contactPersonId || null,
-          status,
+          dbStatus,
           remarks || null,
           nextFollowup || null,
           JSON.stringify(fileData.quotation),
@@ -670,20 +686,25 @@ router.get("/counts", async (req, res) => {
     ]);
 
     const counts = {
-      followup: noFollowupCount,
-      leads: 0,
+      first_followup: noFollowupCount,
+      inprogress: 0,
+      billing: 0,
+      lead: 0,
+      not_interested: 0,
       droped: 0,
       current: currentClientsResult[0]?.count || 0,
       deleted: deletedClientsResult[0]?.count || 0,
     };
 
     followupCounts.forEach((row) => {
-      if (
-        ["inprogress", "meeting", "proposed", "billing"].includes(row.status)
-      ) {
-        counts.followup += row.count;
+      if (["inprogress", "meeting", "proposed", "not_picking"].includes(row.status)) {
+        counts.inprogress += row.count;
+      } else if (row.status === "billing") {
+        counts.billing = row.count;
       } else if (row.status === "lead") {
-        counts.leads = row.count;
+        counts.lead = row.count;
+      } else if (row.status === "not_interested") {
+        counts.not_interested = row.count;
       } else if (row.status === "droped") {
         counts.droped = row.count;
       }
@@ -844,18 +865,65 @@ router.get("/", async (req, res) => {
   try {
     const { status, employee_id } = req.query;
 
-    if (!status) {
-      return res.status(400).json({ error: "Status query is required" });
-    }
-
-    const validStatuses = ["followup", "lead", "droped", "all"];
+    const validStatuses = [
+      "followup", "lead", "droped", "all",
+      "inprogress", "meeting", "proposed", "billing", "first_followup",
+      "not_picking", "not_interested"
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: "Invalid status parameter" });
     }
 
+    if (status === "first_followup") {
+      const firstFollowupQuery = `
+        SELECT 
+          c.id AS clientID,
+          c.company_name,
+          c.customer_name,
+          c.industry_type,
+          c.website,
+          c.address,
+          c.city,
+          c.state,
+          c.reference,
+          c.requirements,
+          c.contactPersons,
+          c.created_at AS client_created_at,
+          c.updated_at AS client_updated_at
+        FROM ClientsDataManagement c
+        LEFT JOIN ManagementFollowups f ON c.id = f.clientID
+        WHERE c.active = 1 AND f.clientID IS NULL
+        ${employee_id ? "AND c.employee_id = ?" : ""}
+        ORDER BY c.created_at DESC
+      `;
+      const params = employee_id ? [employee_id] : [];
+      const rows = await queryWithRetry(firstFollowupQuery, params);
+      
+      const data = rows.map(r => ({
+        client_details: {
+          id: r.clientID,
+          company_name: r.company_name,
+          customer_name: r.customer_name,
+          industry_type: r.industry_type,
+          website: r.website,
+          address: r.address,
+          city: r.city,
+          state: r.state,
+          reference: r.reference,
+          requirements: r.requirements,
+          contactPersons: typeof r.contactPersons === "string" ? JSON.parse(r.contactPersons) : r.contactPersons,
+          created_at: r.client_created_at,
+          updated_at: r.client_updated_at
+        },
+        latest_status: null
+      }));
+
+      return res.status(200).json({ success: true, data });
+    }
+
     let dbStatuses = [];
-    if (status === "followup") {
-      dbStatuses = ["inprogress", "meeting", "proposed", "billing"];
+    if (status === "followup" || status === "inprogress") {
+      dbStatuses = ["inprogress", "meeting", "proposed", "not_picking"];
     } else if (status === "lead") {
       dbStatuses = ["lead"];
     } else if (status === "droped") {
@@ -868,7 +936,11 @@ router.get("/", async (req, res) => {
         "billing",
         "lead",
         "droped",
+        "not_picking",
+        "not_interested",
       ];
+    } else {
+      dbStatuses = [status];
     }
 
     const statusPlaceholders = dbStatuses.map(() => "?").join(",");
@@ -976,9 +1048,18 @@ router.get("/", async (req, res) => {
         SELECT 
           m.*,
           f.clientID,
-          f.status AS followup_status
+          f.status AS followup_status,
+          mom.attendeesClient,
+          mom.attendeesOurSide,
+          mom.agenda AS mom_agenda,
+          mom.outcomes AS mom_outcomes,
+          mom.conductedDate AS mom_conductedDate,
+          mom.startTime AS mom_startTime,
+          mom.endTime AS mom_endTime,
+          mom.documentPath AS mom_documentPath
         FROM ManagementMeetings m
         LEFT JOIN ManagementFollowups f ON m.followupID = f.id
+        LEFT JOIN ManagementMeetingMOM mom ON m.id = mom.meetingId
         WHERE f.clientID IN (${placeholders})
         ORDER BY m.date DESC, m.time DESC
       `;
@@ -1100,9 +1181,9 @@ router.patch("/meetings/:meetingId/status", async (req, res) => {
   const { meetingId } = req.params;
   const { status } = req.body;
 
-  if (!status || !["inprogress", "completed"].includes(status)) {
+  if (!status || !["inprogress", "completed", "cancelled"].includes(status)) {
     return res.status(400).json({ 
-      error: "Invalid status. Must be 'inprogress' or 'completed'" 
+      error: "Invalid status. Must be 'inprogress', 'completed' or 'cancelled'" 
     });
   }
 
@@ -1121,5 +1202,101 @@ router.patch("/meetings/:meetingId/status", async (req, res) => {
     res.status(500).json({ error: "Failed to update meeting status" });
   }
 });
+
+// Record Minutes of Meeting
+const multerMOM = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      const momPath = path.join(__dirname, "..", "..", "Images", "Management", "MOM");
+      if (!fs.existsSync(momPath)) fs.mkdirSync(momPath, { recursive: true });
+      cb(null, momPath);
+    },
+    filename: function (req, file, cb) {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + path.extname(file.originalname));
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+router.post("/meetings/:meetingId/mom", multerMOM.single("document"), async (req, res) => {
+  const { meetingId } = req.params;
+  const {
+    attendeesClient,
+    attendeesOurSide,
+    agenda,
+    outcomes,
+    conductedDate,
+    startTime,
+    endTime,
+  } = req.body;
+
+  const documentPath = req.file ? req.file.path : null;
+
+  try {
+    // Check if mom_records table columns exist (auto-migrate)
+    await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS ManagementMeetingMOM (
+        id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        meetingId INT(11) NOT NULL,
+        attendeesClient TEXT DEFAULT NULL,
+        attendeesOurSide TEXT DEFAULT NULL,
+        agenda TEXT DEFAULT NULL,
+        outcomes TEXT DEFAULT NULL,
+        conductedDate VARCHAR(50) DEFAULT NULL,
+        startTime VARCHAR(50) DEFAULT NULL,
+        endTime VARCHAR(50) DEFAULT NULL,
+        documentPath TEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (meetingId) REFERENCES ManagementMeetings(id) ON DELETE CASCADE
+      )
+    `);
+
+    await queryWithRetry(
+      `INSERT INTO ManagementMeetingMOM 
+        (meetingId, attendeesClient, attendeesOurSide, agenda, outcomes, conductedDate, startTime, endTime, documentPath)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        meetingId,
+        attendeesClient || null,
+        attendeesOurSide || null,
+        agenda || null,
+        outcomes || null,
+        conductedDate || null,
+        startTime || null,
+        endTime || null,
+        documentPath,
+      ]
+    );
+
+    // Mark meeting as completed
+    await queryWithRetry(
+      `UPDATE ManagementMeetings SET status = 'completed' WHERE id = ?`,
+      [meetingId]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Minutes of Meeting recorded successfully",
+    });
+  } catch (err) {
+    console.error("Error recording MOM:", err);
+    res.status(500).json({ error: "Failed to record MOM" });
+  }
+});
+
+// Migrate ManagementMeetings status to include 'cancelled'
+(async () => {
+  try {
+    await queryWithRetry(`
+      ALTER TABLE ManagementMeetings 
+      MODIFY COLUMN status enum('inprogress','completed','cancelled') NOT NULL DEFAULT 'inprogress'
+    `);
+    console.log("Migration: ManagementMeetings status column updated.");
+  } catch (err) {
+    console.error("Migration error (ManagementMeetings status):", err.message);
+  }
+})();
 
 module.exports = router;

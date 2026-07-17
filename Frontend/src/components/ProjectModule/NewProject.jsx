@@ -105,6 +105,8 @@ export default function NewProject() {
 
   const isAdminLevel = ["Admin", "SBU", "Project Head"].includes(employeeRole);
 
+  const isFormDisabled = fetchingProject || loading;
+
   useEffect(() => {
     if (location.state?.isEditMode && location.state?.projectId) {
       setIsEditMode(true);
@@ -365,6 +367,7 @@ export default function NewProject() {
     if (designation === "3D") return "/threeD/projects";
     if (designation === "Project Head") return "/projectHead/projects";
     if (designation === "Admin") return "/admin/project";
+    if (designation === "SBU") return "/sbu/projects";
     return "/projects";
   };
 
@@ -1178,7 +1181,8 @@ export default function NewProject() {
         {activeTab === "form" && (
           <>
             <div className="h-[87%] max-h-[87%] overflow-y-auto px-[1vw] py-[0.8vw] pr-[15%]">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-[1vw] mb-[1vw]">
+              <fieldset disabled={isFormDisabled} className="w-full space-y-[1vw] border-none p-0 m-0 contents">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-[1vw] mb-[1vw]">
                 <div ref={companyRef} className="relative">
                   <div className="flex gap-[0.5vw] mb-[0.5vw] justify-between">
                     <label className="block text-[0.85vw] text-gray-700">
@@ -1231,9 +1235,9 @@ export default function NewProject() {
                   ) : (
                     <>
                       <div
-                        className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer flex items-center justify-between"
+                        className={`w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 flex items-center justify-between ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                         onClick={() =>
-                          setShowCompanyDropdown(!showCompanyDropdown)
+                          !isFormDisabled && setShowCompanyDropdown(!showCompanyDropdown)
                         }
                       >
                         <span
@@ -1418,9 +1422,9 @@ export default function NewProject() {
                     Department <span className="text-red-500">*</span>
                   </label>
                   <div
-                    className="w-full border border-gray-600 rounded-[0.8vw] px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer min-h-[2vw] flex items-center flex-wrap gap-[0.3vw]"
+                    className={`w-full border border-gray-600 rounded-[0.8vw] px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 min-h-[2vw] flex items-center flex-wrap gap-[0.3vw] ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                     onClick={() =>
-                      setShowDepartmentDropdown(!showDepartmentDropdown)
+                      !isFormDisabled && setShowDepartmentDropdown(!showDepartmentDropdown)
                     }
                   >
                     {formData.department.length === 0 ? (
@@ -1436,7 +1440,7 @@ export default function NewProject() {
                             className="w-[0.9vw] h-[0.9vw] cursor-pointer hover:text-red-600"
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeDepartment(dept.id);
+                              if (!isFormDisabled) removeDepartment(dept.id);
                             }}
                           />
                         </span>
@@ -1486,9 +1490,9 @@ export default function NewProject() {
                       Priority
                     </label>
                     <div
-                      className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer flex items-center justify-between"
+                      className={`w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 flex items-center justify-between ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                       onClick={() =>
-                        setShowPriorityDropdown(!showPriorityDropdown)
+                        !isFormDisabled && setShowPriorityDropdown(!showPriorityDropdown)
                       }
                     >
                       <span
@@ -1535,34 +1539,24 @@ export default function NewProject() {
                     <label className="block text-[0.85vw] text-gray-700 mb-[0.5vw]">
                       Project Status
                     </label>
-                    {originalStatus === "Canceled" ? (
-                      <div className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 bg-gray-100 cursor-not-allowed flex items-center">
-                        <span
-                          className={`px-[0.5vw] py-[0.1vw] rounded-full text-[0.75vw] font-medium ${getStatusColor(originalStatus)}`}
-                        >
-                          {originalStatus}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <select
-                          className="appearance-none w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                          value={formData.status}
-                          onChange={(e) => handleStatusChange(e.target.value)}
-                        >
-                          {statusOptions.map((status) => (
-                            <option
-                              key={status.value}
-                              value={status.value}
-                              disabled={status.value === originalStatus}
-                            >
-                              {status.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-500 pointer-events-none" />
-                      </div>
-                    )}
+                    <div className="relative">
+                      <select
+                        className="appearance-none w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                        value={formData.status}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                      >
+                        {statusOptions.map((status) => (
+                          <option
+                            key={status.value}
+                            value={status.value}
+                            disabled={status.value === originalStatus}
+                          >
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-500 pointer-events-none" />
+                    </div>
                     {formData.status !== originalStatus && (
                       <p className="text-[0.7vw] text-gray-600 mt-[0.2vw] ml-[0.3vw]">
                         Status will change from "{originalStatus}" to "
@@ -1649,6 +1643,7 @@ export default function NewProject() {
                     </div>
                   </div>
                 )}
+              </fieldset>
             </div>
 
             <div className="flex items-center justify-end pr-[1vw] h-[7%] pb-[0.5vw] gap-[1vw]">
@@ -1658,19 +1653,17 @@ export default function NewProject() {
               >
                 Cancel
               </button>
-              {originalStatus === "Canceled" ? null : (
-                <button
-                  className="bg-black hover:bg-gray-900 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer disabled:opacity-60"
-                  onClick={handleSave}
-                  disabled={loading}
-                >
-                  {( !isEditMode && isRequestOnlyUser )
-                    ? "Request"
-                    : isEditMode
-                      ? "Update"
-                      : "Save"}
-                </button>
-              )}
+              <button
+                className="bg-black hover:bg-gray-900 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer disabled:opacity-60"
+                onClick={handleSave}
+                disabled={loading || fetchingProject}
+              >
+                {( !isEditMode && isRequestOnlyUser )
+                  ? "Request"
+                  : isEditMode
+                    ? "Update"
+                    : "Save"}
+              </button>
             </div>
           </>
         )}

@@ -1400,7 +1400,9 @@ router.get("/employee-tasks", async (req, res) => {
           const projectDeadline = getEffectiveDeadline(project);
 
           if (projectPercentage === 100) {
-            const projectTaskIds = tasks.map((t) => t._id.toString());
+            const projectTaskIds = tasks
+              .filter((t) => t.status !== "Cancelled")
+              .map((t) => t._id.toString());
             const reportsForProject = allReports.filter((r) =>
               projectTaskIds.includes(r.taskId)
             );

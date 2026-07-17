@@ -110,27 +110,33 @@ const calculateTaskPercentage = (activities) => {
     return 0;
   }
 
-  const totalPercentage = activities.reduce((sum, activity) => {
+  const activeActivities = activities.filter((act) => act.status !== "Cancelled");
+  if (activeActivities.length === 0) {
+    return 0;
+  }
+
+  const totalPercentage = activeActivities.reduce((sum, activity) => {
     return sum + (activity.percentage || 0);
   }, 0);
 
-  return Math.round(totalPercentage / activities.length);
+  return Math.round(totalPercentage / activeActivities.length);
 };
 
 const updateProjectPercentage = async (projectId) => {
   try {
     const allTasks = await Tasks.find({ projectId }).lean();
+    const activeTasks = allTasks.filter((task) => task.status !== "Cancelled");
 
-    if (!allTasks || allTasks.length === 0) {
+    if (!activeTasks || activeTasks.length === 0) {
       await Project_Details.findByIdAndUpdate(projectId, { percentage: 0 });
       return;
     }
 
-    const totalPercentage = allTasks.reduce((sum, task) => {
+    const totalPercentage = activeTasks.reduce((sum, task) => {
       return sum + (task.percentage || 0);
     }, 0);
 
-    const projectPercentage = Math.round(totalPercentage / allTasks.length);
+    const projectPercentage = Math.round(totalPercentage / activeTasks.length);
 
     await Project_Details.findByIdAndUpdate(projectId, {
       percentage: projectPercentage,

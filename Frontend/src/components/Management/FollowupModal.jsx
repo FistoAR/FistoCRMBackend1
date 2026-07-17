@@ -130,8 +130,8 @@ const FollowupModal = ({
     }
 
     if (
-      ["inProgress", "meeting", "proposed", "second_followup"].includes(status) &&
-      !["lead", "droped"].includes(status)
+      ["inProgress", "meeting", "proposed", "second_followup", "not_picking"].includes(status) &&
+      !["lead", "droped", "not_interested"].includes(status)
     ) {
       if (nextFollowup === "") {
         notify({
@@ -562,7 +562,7 @@ const FollowupModal = ({
               )}
 
               <div className="mb-[1.5vw] flex gap-[1vw]">
-                {subTab === "followup" && (
+                {subTab !== "droped" && (
                   <div className="w-[50%]">
                     <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
                       Status <span className="text-red-500">*</span>
@@ -578,6 +578,8 @@ const FollowupModal = ({
                       {isMarketing && (
                         <option value="second_followup">Return to Marketing</option>
                       )}
+                      <option value="not_picking">Not Picking / Busy / Others</option>
+                      <option value="not_interested">Not Interested</option>
                       <option value="inProgress">In Progress</option>
                       <option value="meeting">Meetings</option>
                       <option value="proposed">Shared Proposal</option>
@@ -606,7 +608,7 @@ const FollowupModal = ({
                   </div>
                 )}
 
-                {!["droped", "lead"].includes(status) && (
+                {!["droped", "lead", "not_interested"].includes(status) && (
                   <div
                     className={` ${
                       status === "meeting" ? " w-[30%]" : " w-[50%]"

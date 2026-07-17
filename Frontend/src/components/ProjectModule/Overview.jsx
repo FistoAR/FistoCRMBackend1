@@ -110,6 +110,29 @@ export default function Overview() {
       currentDate.setHours(0, 0, 0, 0);
     }
 
+    const calculateHoldDuration = (statusHistory) => {
+      if (!statusHistory || !Array.isArray(statusHistory)) return 0;
+      let totalHoldMs = 0;
+      let holdStartTime = null;
+
+      statusHistory.forEach((historyItem) => {
+        if (historyItem.status === "Hold" && !holdStartTime) {
+          holdStartTime = new Date(historyItem.createdAt);
+        } else if (historyItem.status !== "Hold" && holdStartTime) {
+          const holdEndTime = new Date(historyItem.createdAt);
+          totalHoldMs += holdEndTime.getTime() - holdStartTime.getTime();
+          holdStartTime = null;
+        }
+      });
+
+      if (holdStartTime) {
+        const now = new Date();
+        totalHoldMs += now.getTime() - holdStartTime.getTime();
+      }
+
+      return totalHoldMs;
+    };
+
     tasks.forEach((task) => {
       const hasActivities =
         task.activities &&
@@ -126,6 +149,10 @@ export default function Overview() {
           }
         }
 
+        if (task.status === "Cancelled") {
+          return;
+        }
+
         total++;
         const percentage = task.percentage || 0;
         const endDate = new Date(task.endDate);
@@ -133,10 +160,13 @@ export default function Overview() {
         const [endHour, endMinute] = endTime.split(":").map(Number);
         endDate.setHours(endHour, endMinute, 59, 999);
 
+        const holdPeriodMs = calculateHoldDuration(task.statusHistory);
+        const effectiveEndDate = new Date(endDate.getTime() + holdPeriodMs);
+
         if (percentage === 100) {
           if (task.latestReportDate) {
             const completionDate = new Date(task.latestReportDate);
-            if (completionDate > endDate) {
+            if (completionDate > effectiveEndDate) {
               delayed++;
             } else {
               completed++;
@@ -144,7 +174,7 @@ export default function Overview() {
           } else {
             completed++;
           }
-        } else if (currentDate > endDate) {
+        } else if (currentDate > effectiveEndDate) {
           overdue++;
         } else if (percentage > 0) {
           ongoing++;
@@ -162,6 +192,10 @@ export default function Overview() {
             }
           }
 
+          if (activity.status === "Cancelled") {
+            return;
+          }
+
           total++;
           const percentage = activity.percentage || 0;
           const endDate = new Date(activity.endDate);
@@ -169,11 +203,14 @@ export default function Overview() {
           const [endHour, endMinute] = endTime.split(":").map(Number);
           endDate.setHours(endHour, endMinute, 59, 999);
 
+          const holdPeriodMs = calculateHoldDuration(activity.statusHistory || task.statusHistory);
+          const effectiveEndDate = new Date(endDate.getTime() + holdPeriodMs);
+
           if (percentage === 100) {
             const completionDate =
               activity.completedDate || activity.latestReportDate;
             if (completionDate) {
-              if (new Date(completionDate) > endDate) {
+              if (new Date(completionDate) > effectiveEndDate) {
                 delayed++;
               } else {
                 completed++;
@@ -181,7 +218,7 @@ export default function Overview() {
             } else {
               completed++;
             }
-          } else if (currentDate > endDate) {
+          } else if (currentDate > effectiveEndDate) {
             overdue++;
           } else if (percentage > 0) {
             ongoing++;
@@ -229,6 +266,11 @@ export default function Overview() {
       setRole(userRole);
       setTeamHead(isTeamHead);
       setCurrentUserId(userId);
+      if (["Admin", "SBU", "Project Head"].includes(userRole)) {
+        setShowYours(false);
+      } else {
+        setShowYours(true);
+      }
 
       if (!projectId) {
         setError("No project ID provided");

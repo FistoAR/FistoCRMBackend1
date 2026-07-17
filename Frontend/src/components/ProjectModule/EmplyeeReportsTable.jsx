@@ -1334,7 +1334,7 @@ export default function EmployeeTaskTable({
                   const isDisabled =
                     task.status === "Completed" ||
                     task.status === "underReview" ||
-                    task.status === "Hold" ||
+                    (task.status === "Hold" && !isInTodayReport(task)) ||
                     ["Hold", "Canceled"].includes(projectTab);
                   const isReportDisabled = isInTodayReport(task);
                   const addReport = isReportDisabled && !isDisabled;
@@ -1353,7 +1353,7 @@ export default function EmployeeTaskTable({
                       }`}
                     >
                       <td className="px-[0.6vw] py-[0.6vw] border border-gray-300">
-                        {index + 1}
+                        {startIndex + index + 1}
                       </td>
                       <td className="px-[0.6vw] py-[0.6vw] max-w-[5vw] border border-gray-300 text-left">
                         {task.isActivityReport ? (
