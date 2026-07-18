@@ -1,0 +1,74 @@
+# Workspace Style Guidelines
+
+## General Standards
+- Use `DD/MM/YYYY` as the default date format.
+- Use Indian Standard Time (IST) for all timestamps in the UI.
+- Store all dates in UTC in the database and convert to IST in the frontend.
+- Use 24-hour time format (`HH:mm:ss`).
+- Use UTF-8 encoding everywhere.
+
+## Backend Standards
+- **Performance**:
+  - Prefer O(1) lookups whenever possible using Maps, HashMaps, or indexed database queries.
+  - Avoid unnecessary nested loops (O(n²)).
+  - Keep API response time below 300ms for normal requests.
+  - Add proper database indexes.
+  - Use pagination for large datasets.
+  - Never fetch unnecessary columns.
+
+## API Standards
+- Follow RESTful APIs.
+- Use proper HTTP status codes:
+  - `200 OK`
+  - `201 Created`
+  - `400 Bad Request`
+  - `401 Unauthorized`
+  - `403 Forbidden`
+  - `404 Not Found`
+  - `409 Conflict`
+  - `500 Internal Server Error`
+- **Response Format**:
+  - Success:
+    ```json
+    {
+      "success": true,
+      "message": "Data fetched successfully",
+      "data": {}
+    }
+    ```
+  - Error:
+    ```json
+    {
+      "success": false,
+      "message": "Invalid credentials"
+    }
+    ```
+- **Validation**:
+  - Validate every request.
+  - Never trust frontend data.
+  - Sanitize all inputs.
+  - Prevent SQL Injection / NoSQL Injection.
+  - Escape HTML where required.
+
+## Logging
+- Log errors only.
+- Never expose stack traces to users.
+- Maintain request logs.
+- Store audit logs for important operations.
+
+## Frontend Standards
+- Use React functional components.
+- Use Hooks only.
+- Avoid prop drilling; use Context API or Redux when needed.
+- Lazy-load heavy components.
+- Optimize images.
+- Show loading indicators for API requests.
+- Display meaningful error messages.
+
+## Code Quality
+- Follow ESLint and Prettier rules.
+- Avoid duplicate code (DRY).
+- Keep functions small and focused (single responsibility).
+- Use meaningful variable names.
+- Add comments only for complex logic.
+- Remove unused imports, variables, and code.

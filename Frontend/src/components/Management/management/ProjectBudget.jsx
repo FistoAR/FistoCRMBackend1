@@ -28,7 +28,7 @@ const toDateInputValue = (value) => {
   return d.toISOString().slice(0, 10);
 };
 
-const ProjectBudget = ({ showToast }) => {
+const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   const [projects, setProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -62,7 +62,8 @@ const ProjectBudget = ({ showToast }) => {
   const handleNext = () => setCurrentPage((p) => Math.min(totalPages, p + 1));
 
   const [payments, setPayments] = useState([]);
-  const [documents, setDocuments] = useState({ po: [], invoice: [] });
+  const [documents, setDocuments] = useState({ po: [], invoice: [], quotation: [] });
+  const [followupDocuments, setFollowupDocuments] = useState([]);
   const [perDayAmount, setPerDayAmount] = useState({ amount: 0, days: 0 });
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -74,6 +75,8 @@ const ProjectBudget = ({ showToast }) => {
   });
 
   const [proposedClients, setProposedClients] = useState([]);
+  const [onboardedProjects, setOnboardedProjects] = useState([]);
+  const [selectedOnboardedProjectId, setSelectedOnboardedProjectId] = useState(null);
   const [showCompanyAutocomplete, setShowCompanyAutocomplete] = useState(false);
 
   const fetchProposedClients = async () => {
@@ -93,10 +96,40 @@ const ProjectBudget = ({ showToast }) => {
     return !projects.some(p => p.companyName?.toLowerCase() === company?.toLowerCase());
   });
 
+  const fetchOnboardedProjects = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/ManagementFollowups/onboarded-projects`);
+      const data = await res.json();
+      console.log("Onboarded Projects API Response:", data);
+      if (data.success) {
+        setOnboardedProjects(data.data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching onboarded projects:", err);
+    }
+  };
+
+  const pendingOnboardedProjects = onboardedProjects.filter(p => p.budget_status === "pending");
+
   useEffect(() => {
     fetchProjects();
     fetchProposedClients();
+    fetchOnboardedProjects();
   }, []);
+
+  // Auto-open create modal when navigated from onboard confirmation
+  useEffect(() => {
+    if (prefillProject) {
+      setCreateFormData({
+        companyName: prefillProject.companyName || "",
+        customerName: prefillProject.customerName || "",
+        projectName: prefillProject.projectName || "",
+        projectCategory: prefillProject.projectCategory || "",
+      });
+      setShowCreateModal(true);
+      if (onPrefillConsumed) onPrefillConsumed();
+    }
+  }, [prefillProject]);
 
   useEffect(() => {
     if (
@@ -440,6 +473,12 @@ const ProjectBudget = ({ showToast }) => {
       }
     });
 
+    documents.quotation.forEach((doc) => {
+      if (doc.file) {
+        formDataToSend.append("quotation", doc.file);
+      }
+    });
+
     try {
       const res = await fetch(`${API_BASE_URL}/budget/save-project`, {
         method: "POST",
@@ -485,7 +524,8 @@ const ProjectBudget = ({ showToast }) => {
           ),
         });
         setPayments(projectDetails.payments || []);
-        setDocuments(projectDetails.documents || { po: [], invoice: [] });
+        setDocuments(projectDetails.documents || { po: [], invoice: [], quotation: [] });
+        setFollowupDocuments(projectDetails.followupDocuments || []);
       }
     } else {
       resetForm();
@@ -505,7 +545,8 @@ const ProjectBudget = ({ showToast }) => {
       complicationDate: "",
     });
     setPayments([]);
-    setDocuments({ po: [], invoice: [] });
+    setDocuments({ po: [], invoice: [], quotation: [] });
+    setFollowupDocuments([]);
     setCurrentProject(null);
     setPerDayAmount({ amount: 0, days: 0 });
   };
@@ -544,6 +585,23 @@ const ProjectBudget = ({ showToast }) => {
       if (data.success) {
         showToast("Success", "Project created successfully");
         setShowCreateModal(false);
+        
+        // Find matching pending onboarded project to update its budget status to 'entered'
+        const matchedProject = pendingOnboardedProjects.find(
+          (p) =>
+            p.company_name?.toLowerCase() === companyName?.toLowerCase() &&
+            p.project_name?.toLowerCase() === projectName?.toLowerCase()
+        );
+        const targetOnboardId = selectedOnboardedProjectId || matchedProject?.id;
+
+        if (targetOnboardId) {
+          await fetch(`${API_BASE_URL}/ManagementFollowups/onboard/${targetOnboardId}/budget-status`, {
+            method: "PATCH",
+          }).catch(() => {});
+          setSelectedOnboardedProjectId(null);
+          await fetchOnboardedProjects();
+        }
+
         // Reset form
         setCreateFormData({
           companyName: "",
@@ -595,9 +653,9 @@ const ProjectBudget = ({ showToast }) => {
                 >
                   <Plus size={18} />
                   Add Project
-                  {pendingProposals.length > 0 && (
+                  {pendingOnboardedProjects.length > 0 && (
                     <span className="bg-red-500 text-white text-[0.7vw] font-bold px-[0.45vw] py-[0.1vw] rounded-full animate-pulse">
-                      {pendingProposals.length}
+                      {pendingOnboardedProjects.length}
                     </span>
                   )}
                 </button>
@@ -847,7 +905,130 @@ const ProjectBudget = ({ showToast }) => {
                     Documents
                   </h3>
                 </div>
-                <div className="grid grid-cols-2 gap-[1vw]">
+                <div className="grid grid-cols-3 gap-[1vw]">
+                  {/* Quotation */}
+                  <div>
+                    <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                      Quotation
+                    </label>
+                    <div>
+                      <input
+                        type="file"
+                        id="quotationFile"
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                        multiple
+                        onChange={(e) => handleFileUpload(e, "quotation")}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          document.getElementById("quotationFile").click()
+                        }
+                        className="flex items-center gap-[0.5vw] w-full border border-gray-300 rounded-lg px-[0.8vw] py-[0.5vw] text-[0.85vw] hover:bg-gray-50 transition cursor-pointer"
+                      >
+                        <Upload size={16} />
+                        Upload New Quotation
+                      </button>
+
+                      {documents.quotation && documents.quotation.filter(isExistingDocument).length > 0 && (
+                        <div className="mt-[0.8vw]">
+                          <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                            📁 Saved Quotation
+                          </div>
+                          <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
+                            {documents.quotation
+                              .filter(isExistingDocument)
+                              .map((doc, idx) => (
+                                <div
+                                  key={doc.docId || `quotation-saved-${idx}`}
+                                  className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
+                                >
+                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium">
+                                    {doc.name}
+                                  </span>
+                                  <div className="flex items-center gap-[0.3vw]">
+                                    {doc.path && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => viewDocument(doc.path)}
+                                          className="text-green-600 hover:text-green-800 p-[0.2vw] hover:bg-green-100 rounded cursor-pointer"
+                                          title="View"
+                                        >
+                                          <Eye size={18} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            downloadDocument(doc.path, doc.name)
+                                          }
+                                          className="text-blue-600 hover:text-blue-800 p-[0.2vw] hover:bg-blue-100 rounded cursor-pointer"
+                                          title="Download"
+                                        >
+                                          <Download  size={18} />
+                                        </button>
+                                      </>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeDocument(
+                                          "quotation",
+                                          documents.quotation.findIndex(
+                                            (d) => d.docId === doc.docId
+                                          )
+                                        )
+                                      }
+                                      className="text-red-500 hover:text-red-700 p-[0.2vw] hover:bg-red-100 rounded cursor-pointer"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={18} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {documents.quotation && documents.quotation.filter(isNewDocument).length > 0 && (
+                        <div className="mt-[0.8vw]">
+                          <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                            ⏳ Pending Quotation
+                          </div>
+                          <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
+                            {documents.quotation
+                              .filter(isNewDocument)
+                              .map((doc, idx) => (
+                                <div
+                                  key={`quotation-new-${idx}`}
+                                  className="flex items-center justify-between p-[0.5vw] bg-blue-50 rounded border border-blue-200"
+                                >
+                                  <span className="text-[0.8vw] text-blue-700 truncate flex-1">
+                                    {doc.name}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      removeDocument(
+                                        "quotation",
+                                        documents.quotation.findIndex((d) => d === doc)
+                                      )
+                                    }
+                                    className="text-red-500 hover:text-red-700 cursor-pointer"
+                                    title="Remove"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* PO */}
                   <div>
                     <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
@@ -1097,6 +1278,59 @@ const ProjectBudget = ({ showToast }) => {
                     </div>
                   </div>
                 </div>
+
+                {/* Followup Proposal Documents */}
+                {followupDocuments && followupDocuments.length > 0 && (
+                  <div className="mt-[1vw] border-t border-gray-100 pt-[1vw]">
+                    <div className="flex items-center gap-[0.5vw] mb-[0.6vw]">
+                      <FileText size="1vw" className="text-blue-500" />
+                      <span className="text-[0.85vw] font-semibold text-gray-700">
+                        Followup Proposal Documents
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-[0.8vw] max-h-[16vh] overflow-y-auto pr-[0.2vw]">
+                      {followupDocuments.map((doc, idx) => (
+                        <div
+                          key={`followup-doc-${idx}`}
+                          className="flex items-center justify-between p-[0.6vw] bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                        >
+                          <div className="flex flex-col flex-1 min-w-0">
+                            <span className="text-[0.8vw] text-gray-800 font-medium truncate">
+                              {doc.name}
+                            </span>
+                            <span className="text-[0.65vw] text-gray-400 uppercase font-semibold">
+                              {doc.type}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-[0.3vw] ml-[0.5vw]">
+                            {doc.path && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => viewDocument(doc.path)}
+                                  className="text-gray-600 hover:text-blue-600 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
+                                  title="View"
+                                >
+                                  <Eye size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    downloadDocument(doc.path, doc.name)
+                                  }
+                                  className="text-gray-600 hover:text-blue-600 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
+                                  title="Download"
+                                >
+                                  <Download size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Budget */}
@@ -1384,35 +1618,36 @@ const ProjectBudget = ({ showToast }) => {
                     required
                     autoComplete="off"
                   />
-                  {showCompanyAutocomplete && pendingProposals.filter(p =>
-                    p.client_details?.company_name
+                  {showCompanyAutocomplete && pendingOnboardedProjects.filter(p =>
+                    p.company_name
                       ?.toLowerCase()
                       .includes(createFormData.companyName.toLowerCase())
                   ).length > 0 && (
                     <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[15vh] overflow-y-auto z-[60]">
-                      {pendingProposals
+                      {pendingOnboardedProjects
                         .filter(p =>
-                          p.client_details?.company_name
+                          p.company_name
                             ?.toLowerCase()
                             .includes(createFormData.companyName.toLowerCase())
                         )
-                        .map((proposal) => {
-                          const client = proposal.client_details;
+                        .map((project) => {
                           return (
                             <div
-                              key={client.id}
+                              key={project.id}
                               onMouseDown={() => {
                                 setCreateFormData({
-                                  ...createFormData,
-                                  companyName: client.company_name,
-                                  customerName: client.customer_name,
+                                  companyName: project.company_name,
+                                  customerName: project.customer_name || "",
+                                  projectName: project.project_name || "",
+                                  projectCategory: project.category || "",
                                 });
+                                setSelectedOnboardedProjectId(project.id);
                                 setShowCompanyAutocomplete(false);
                               }}
                               className="px-[1vw] py-[0.5vw] hover:bg-blue-50 cursor-pointer text-[0.85vw] border-b border-gray-100 last:border-0 flex justify-between"
                             >
-                              <span className="font-semibold text-gray-800">{client.company_name}</span>
-                              <span className="text-gray-500 text-[0.75vw]">{client.customer_name}</span>
+                              <span className="font-semibold text-gray-800">{project.company_name}</span>
+                              <span className="text-gray-500 text-[0.75vw]">{project.project_name}</span>
                             </div>
                           );
                         })}

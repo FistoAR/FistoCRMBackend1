@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Trash2,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
   Calendar,
   X,
   Download,
+  UserCheck,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -30,6 +32,7 @@ const Followup = () => {
   const [mainTab, setMainTab] = useState("followups");
   const [subTab, setSubTab] = useState("first_followup");
   const [clients, setClients] = useState([]);
+  const [leadSubTab, setLeadSubTab] = useState("pending");
   const [clientsHistory, setClientsHistory] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [meetingSubTab, setMeetingSubTab] = useState("scheduled");
@@ -159,6 +162,7 @@ const Followup = () => {
     deleted: 0,
   });
 
+  const navigate = useNavigate();
   const [isOnboardModalOpen, setIsOnboardModalOpen] = useState(false);
   const [onboardClient, setOnboardClient] = useState(null);
   const [onboardFormData, setOnboardFormData] = useState({
@@ -167,7 +171,10 @@ const Followup = () => {
     startDate: "",
     endDate: "",
     reviewDate: "",
+    status: "project_onboard",
+    remarks: "",
   });
+  const [budgetConfirm, setBudgetConfirm] = useState({ open: false, projectData: null });
 
   const handleOnboardClick = (client) => {
     setOnboardClient(client);
@@ -177,46 +184,131 @@ const Followup = () => {
       startDate: "",
       endDate: "",
       reviewDate: "",
+      status: "project_onboard",
+      remarks: "",
     });
     setIsOnboardModalOpen(true);
   };
 
   const handleOnboardSubmit = async () => {
-    if (!onboardFormData.projectName || !onboardFormData.category || !onboardFormData.startDate || !onboardFormData.endDate || !onboardFormData.reviewDate) {
-      alert("Please fill in all required fields!");
-      return;
+    if (onboardFormData.status === "project_onboard") {
+      if (!onboardFormData.projectName || !onboardFormData.category || !onboardFormData.startDate || !onboardFormData.endDate) {
+        showToast("Warning", "Please fill in all required fields!");
+        return;
+      }
+    } else {
+      if (!onboardFormData.remarks) {
+        showToast("Warning", "Please enter remarks/reason!");
+        return;
+      }
     }
 
     try {
-      const response = await fetch(`${API_URL}/projectDetails/request`, {
+      if (onboardFormData.status === "project_onboard") {
+        // Save onboard details to ManagementOnboardedProjects
+        const onboardRes = await fetch(`${API_URL}/ManagementFollowups/onboard`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId: onboardClient.id,
+            companyName: onboardClient.company_name,
+            customerName: onboardClient.customer_name || "",
+            projectName: onboardFormData.projectName,
+            category: onboardFormData.category,
+            startDate: onboardFormData.startDate,
+            endDate: onboardFormData.endDate,
+            reviewDate: onboardFormData.reviewDate,
+            remarks: onboardFormData.remarks || "Onboarded from Management Leads",
+            onboardedBy: employeeId,
+          }),
+        });
+        const onboardData = await onboardRes.json();
+        if (!onboardRes.ok) {
+          showToast("Error", onboardData.message || "Failed to save onboard details.");
+          return;
+        }
+
+        // Also create a project request
+        await fetch(`${API_URL}/projectDetails/request`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyName: onboardClient.company_name,
+            projectName: onboardFormData.projectName,
+            category: onboardFormData.category,
+            department: ["Development"],
+            startDate: onboardFormData.startDate,
+            endDate: onboardFormData.endDate,
+            reviewDate: onboardFormData.reviewDate,
+            employeeID: employeeId,
+            description: "Onboarded from Management Leads"
+          }),
+        }).catch(() => {}); // non-blocking
+      }
+
+      // Update ManagementFollowups status
+      const formData = new FormData();
+      formData.append("employee_id", employeeId);
+      formData.append("clientID", onboardClient.id);
+      let contactPersonId = "";
+      try {
+        const contacts = typeof onboardClient.contactPersons === "string"
+          ? JSON.parse(onboardClient.contactPersons)
+          : onboardClient.contactPersons;
+        if (contacts && contacts[0]) contactPersonId = contacts[0].id || "";
+      } catch (e) {}
+      formData.append("contactPersonId", contactPersonId);
+      formData.append("status", onboardFormData.status);
+      formData.append("remarks", onboardFormData.remarks || (onboardFormData.status === "project_onboard" ? "Onboarded from Management Leads" : "Cancelled from Management Leads"));
+
+      const followupRes = await fetch(`${API_URL}/ManagementFollowups`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          companyName: onboardClient.company_name,
-          projectName: onboardFormData.projectName,
-          category: onboardFormData.category,
-          department: ["Development"],
-          startDate: onboardFormData.startDate,
-          endDate: onboardFormData.endDate,
-          reviewDate: onboardFormData.reviewDate,
-          employeeID: employeeId,
-          description: "Onboarded from Management Leads"
-        }),
+        body: formData,
       });
 
-      const data = await response.json();
-      if (response.ok) {
-        alert("Project onboarded successfully!");
+      if (followupRes.ok) {
         setIsOnboardModalOpen(false);
+        fetchClients();
+        fetchCounts();
+
+        if (onboardFormData.status === "project_onboard") {
+          showToast("Success", "Project onboarded successfully! 🎉");
+          // Show budget confirmation dialog
+          setBudgetConfirm({
+            open: true,
+            projectData: {
+              companyName: onboardClient.company_name,
+              customerName: onboardClient.customer_name || "",
+              projectName: onboardFormData.projectName,
+              projectCategory: onboardFormData.category,
+            },
+          });
+        } else {
+          showToast("Success", "Lead cancelled successfully!");
+        }
       } else {
-        alert(data.message || "Failed to onboard project.");
+        showToast("Error", "Failed to update status.");
       }
     } catch (error) {
       console.error("Error onboarding project:", error);
-      alert("Failed to onboard project.");
+      showToast("Error", "Failed to onboard project.");
     }
+  };
+
+  const handleBudgetConfirmYes = () => {
+    const data = budgetConfirm.projectData;
+    setBudgetConfirm({ open: false, projectData: null });
+    // Navigate to the management page – derive role from current URL
+    // pathname looks like: /fisto_crm/admin/followup → parts[2] = 'admin'
+    const pathParts = window.location.pathname.split("/").filter(Boolean);
+    // pathParts[0] = 'fisto_crm', pathParts[1] = role ('admin', etc.)
+    const role = pathParts.length >= 2 ? pathParts[1] : "admin";
+    navigate(`/${role}/management`, {
+      state: {
+        openTab: "Project Budget",
+        prefillProject: data,
+      },
+    });
   };
   const [countsLoading, setCountsLoading] = useState(false);
 
@@ -274,13 +366,14 @@ const Followup = () => {
         clearTimeout(fetchTimeoutRef.current);
       }
     };
-  }, [mainTab, subTab, employeeId]);
+  }, [mainTab, subTab, leadSubTab, employeeId]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [
     mainTab,
     subTab,
+    leadSubTab,
     searchTerm,
     startDate,
     endDate,
@@ -291,6 +384,7 @@ const Followup = () => {
 
   useEffect(() => {
     clearAllFilters();
+    setLeadSubTab("pending");
   }, [mainTab, subTab]);
 
   const fetchCounts = async () => {
@@ -362,7 +456,13 @@ const Followup = () => {
           url = `${API_URL}/clientAddManagement?employee_id=${employeeId}`;
         }
       } else if (mainTab === "followups") {
-        url = `${API_URL}/ManagementFollowups?status=${subTab}&employee_id=${employeeId}`;
+        let statusParam = subTab;
+        if (subTab === "lead") {
+          if (leadSubTab === "pending") statusParam = "lead";
+          else if (leadSubTab === "onboarded") statusParam = "project_onboard";
+          else if (leadSubTab === "cancelled") statusParam = "cancelled";
+        }
+        url = `${API_URL}/ManagementFollowups?status=${statusParam}&employee_id=${employeeId}`;
       }
 
       console.log("Fetching clients from URL:", url);
@@ -788,6 +888,7 @@ const Followup = () => {
 
   const handleSuccess = () => {
     fetchClients();
+    fetchMeetings();
     fetchCounts();
   };
 
@@ -1048,6 +1149,38 @@ const Followup = () => {
               <span className="text-[0.85vw] text-gray-500">
                 ({mainTab === "meetings" ? meetings.length : filteredClients.length})
               </span>
+              {mainTab === "followups" && subTab === "lead" && (
+                <div className="flex gap-[0.5vw] ml-[1vw] items-center">
+                  {[
+                    { key: "pending", label: "Pending", countKey: "lead_pending" },
+                    { key: "onboarded", label: "Onboarded", countKey: "lead_onboarded" },
+                    { key: "cancelled", label: "Cancelled", countKey: "lead_cancelled" }
+                  ].map((nest) => {
+                    const isActive = leadSubTab === nest.key;
+                    const count = tabCounts[nest.countKey] || 0;
+                    return (
+                      <button
+                        key={nest.key}
+                        onClick={() => setLeadSubTab(nest.key)}
+                        className={`px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-semibold transition-colors cursor-pointer flex items-center gap-[0.3vw] ${
+                          isActive
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        }`}
+                      >
+                        {nest.label}
+                        <span
+                          className={`text-[0.58vw] px-[0.25vw] py-[0.05vw] rounded-full ${
+                            isActive ? "bg-white text-blue-600 font-bold" : "bg-gray-200 text-gray-700 font-bold"
+                          }`}
+                        >
+                          {formatCount(count)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-[0.7vw]">
               <div className="relative">
@@ -1073,7 +1206,7 @@ const Followup = () => {
                 )}
               </div>
 
-              {mainTab !== "meetings" && (
+              {(mainTab === "followups" || mainTab === "meetings" || mainTab === "clientsData") && (
                 <div className="relative" ref={filterRef}>
                   <button
                     onClick={() => setShowFilterDropdown(!showFilterDropdown)}
@@ -1290,9 +1423,36 @@ const Followup = () => {
             ) : mainTab === "meetings" ? (
               (() => {
                 const filteredMeetings = meetings.filter((m) => {
-                  if (meetingSubTab === "scheduled") return m.status !== "completed" && m.status !== "cancelled";
-                  if (meetingSubTab === "completed") return m.status === "completed";
-                  if (meetingSubTab === "cancelled") return m.status === "cancelled";
+                  if (meetingSubTab === "scheduled") {
+                    if (m.status === "completed" || m.status === "cancelled") return false;
+                  } else if (meetingSubTab === "completed") {
+                    if (m.status !== "completed") return false;
+                  } else if (meetingSubTab === "cancelled") {
+                    if (m.status !== "cancelled") return false;
+                  }
+
+                  if (startDate || endDate) {
+                    if (!m.date) return false;
+                    const meetingDate = new Date(m.date);
+                    meetingDate.setHours(0, 0, 0, 0);
+
+                    const start = startDate ? new Date(startDate) : null;
+                    if (start) start.setHours(0, 0, 0, 0);
+
+                    const end = endDate ? new Date(endDate) : null;
+                    if (end) end.setHours(23, 59, 59, 999);
+
+                    if (start && end) {
+                      if (meetingDate < start || meetingDate > end) return false;
+                    } else if (start) {
+                      const dayEnd = new Date(start);
+                      dayEnd.setHours(23, 59, 59, 999);
+                      if (meetingDate < start || meetingDate > dayEnd) return false;
+                    } else if (end) {
+                      if (meetingDate > end) return false;
+                    }
+                  }
+
                   return true;
                 });
 
@@ -1310,15 +1470,18 @@ const Followup = () => {
                           <thead className="bg-[#E2EBFF] sticky top-0">
                             <tr>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">S.NO</th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Created Date</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Company</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Contact Person</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Phone</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Title</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Date</th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Scheduled Date</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Time</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Type</th>
                               <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Agenda</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Actions</th>
+                              {meetingSubTab !== "cancelled" && (
+                                <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Actions</th>
+                              )}
                             </tr>
                           </thead>
                           <tbody>
@@ -1333,9 +1496,12 @@ const Followup = () => {
                               return (
                                 <tr key={meeting.id} className="hover:bg-gray-50 transition-colors">
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">{index + 1}</td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">
+                                    {meeting.created_at ? formatDateToIST(meeting.created_at).split(",")[0] : "-"}
+                                  </td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 font-medium">{meeting.client_details?.company_name || "-"}</td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{primaryContact.name || "-"}</td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{primaryContact.phone || "-"}</td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{primaryContact.contactNumber || "-"}</td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{meeting.title || "-"}</td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">
                                     {meeting.date ? new Date(meeting.date).toLocaleDateString("en-GB").split("/").join("-") : "-"}
@@ -1345,35 +1511,37 @@ const Followup = () => {
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-600 border border-gray-300 max-w-[12vw]">
                                     <div className="line-clamp-2" title={meeting.agenda}>{meeting.agenda || "-"}</div>
                                   </td>
-                                  <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
-                                    <div className="flex justify-center gap-[0.4vw] flex-wrap">
-                                      {meetingSubTab === "scheduled" && (
-                                        <>
+                                  {meetingSubTab !== "cancelled" && (
+                                    <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
+                                      <div className="flex justify-center gap-[0.4vw] flex-wrap">
+                                        {meetingSubTab === "scheduled" && (
+                                          <>
+                                            <button
+                                              onClick={() => handleOpenMOM(meeting)}
+                                              className="px-[0.6vw] py-[0.3vw] bg-blue-600 text-white rounded-full text-[0.75vw] hover:bg-blue-700 cursor-pointer font-medium"
+                                            >
+                                              Record
+                                            </button>
+                                            <button
+                                              onClick={() => handleUpdateMeetingStatus(meeting.id, "cancelled")}
+                                              className="px-[0.6vw] py-[0.3vw] bg-red-50 text-red-600 border border-red-200 rounded-full text-[0.75vw] hover:bg-red-100 cursor-pointer font-medium"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </>
+                                        )}
+                                        {meetingSubTab === "completed" && (
                                           <button
-                                            onClick={() => handleOpenMOM(meeting)}
-                                            className="px-[0.6vw] py-[0.3vw] bg-blue-600 text-white rounded-full text-[0.75vw] hover:bg-blue-700 cursor-pointer font-medium"
+                                            onClick={() => exportMOMToPDF(meeting)}
+                                            className="px-[0.6vw] py-[0.3vw] bg-green-600 text-white rounded-full text-[0.75vw] hover:bg-green-700 cursor-pointer font-medium flex items-center gap-[0.2vw]"
                                           >
-                                            Record
+                                            <Download size={"0.75vw"} />
+                                            Download
                                           </button>
-                                          <button
-                                            onClick={() => handleUpdateMeetingStatus(meeting.id, "cancelled")}
-                                            className="px-[0.6vw] py-[0.3vw] bg-red-50 text-red-600 border border-red-200 rounded-full text-[0.75vw] hover:bg-red-100 cursor-pointer font-medium"
-                                          >
-                                            Cancel
-                                          </button>
-                                        </>
-                                      )}
-                                      {meetingSubTab === "completed" && (
-                                        <button
-                                          onClick={() => exportMOMToPDF(meeting)}
-                                          className="px-[0.6vw] py-[0.3vw] bg-green-600 text-white rounded-full text-[0.75vw] hover:bg-green-700 cursor-pointer font-medium flex items-center gap-[0.2vw]"
-                                        >
-                                          <Download size={"0.75vw"} />
-                                          Download
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
+                                        )}
+                                      </div>
+                                    </td>
+                                  )}
                                 </tr>
                               );
                             })}
@@ -1428,16 +1596,13 @@ const Followup = () => {
                         Company
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Customer
+                        Contact Person
+                      </th>
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                        Contact Number
                       </th>
                       {(mainTab === "clientsData" || subTab === "first_followup") && (
                         <>
-                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                            Contact Person
-                          </th>
-                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                            Phone Number
-                          </th>
                           <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                             Email ID
                           </th>
@@ -1464,7 +1629,7 @@ const Followup = () => {
                           Next followup date
                         </th>
                       )}
-                      {true && (
+                      {!(subTab === "lead" && leadSubTab === "onboarded") && (
                         <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                           Actions
                         </th>
@@ -1477,6 +1642,15 @@ const Followup = () => {
                         client.nextFollowupDate &&
                         new Date(client.nextFollowupDate) <
                           new Date(new Date().setHours(0, 0, 0, 0));
+
+                      let contacts = [];
+                      try {
+                        contacts = typeof client.contactPersons === "string"
+                          ? JSON.parse(client.contactPersons)
+                          : client.contactPersons;
+                      } catch (e) {}
+                      if (!Array.isArray(contacts)) contacts = [];
+                      const mainContact = contacts[0] || {};
 
                       return (
                         <tr
@@ -1497,40 +1671,27 @@ const Followup = () => {
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                             {client.customer_name}
                           </td>
-                          {(mainTab === "clientsData" || subTab === "first_followup") && (() => {
-                            let contacts = [];
-                            try {
-                              contacts = typeof client.contactPersons === "string"
-                                ? JSON.parse(client.contactPersons)
-                                : client.contactPersons;
-                            } catch (e) {}
-                            if (!Array.isArray(contacts)) contacts = [];
-                            const mainContact = contacts[0] || {};
-                            return (
-                              <>
-                                <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                                  {mainContact.name || "-"}
-                                </td>
-                                <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                                  {mainContact.phone || "-"}
-                                </td>
-                                <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                                  {mainContact.email || "-"}
-                                </td>
-                                <td
-                                  className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200 cursor-pointer hover:bg-blue-50/50 transition-colors"
-                                  onMouseEnter={() => setHoveredRemark(client.requirements || "-")}
-                                  onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-                                  onMouseLeave={() => { setHoveredRemark(null); setCopiedRemark(false); }}
-                                  onClick={() => handleCopyRemark(client.requirements)}
-                                >
-                                  <div className="max-w-[12vw] truncate block">
-                                    {client.requirements || "-"}
-                                  </div>
-                                </td>
-                              </>
-                            );
-                          })()}
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
+                            {mainContact.contactNumber || mainContact.phone || "-"}
+                          </td>
+                          {(mainTab === "clientsData" || subTab === "first_followup") && (
+                            <>
+                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
+                                {mainContact.email || "-"}
+                              </td>
+                              <td
+                                className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200 cursor-pointer hover:bg-blue-50/50 transition-colors"
+                                onMouseEnter={() => setHoveredRemark(client.requirements || "-")}
+                                onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+                                onMouseLeave={() => { setHoveredRemark(null); setCopiedRemark(false); }}
+                                onClick={() => handleCopyRemark(client.requirements)}
+                              >
+                                <div className="max-w-[12vw] truncate block">
+                                  {client.requirements || "-"}
+                                </div>
+                              </td>
+                            </>
+                          )}
 
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
                             {client.city}
@@ -1573,7 +1734,7 @@ const Followup = () => {
                               </div>
                             </td>
                           )}
-                          {true && (
+                          {!(subTab === "lead" && leadSubTab === "onboarded") && (
                             <td className="px-[0.4vw] py-[0.52vw] border border-gray-200">
                               {mainTab === "clientsData" ? (
                                 <div className="flex justify-center items-center gap-[0.3vw]">
@@ -1611,22 +1772,24 @@ const Followup = () => {
                                   )}
                                 </div>
                               ) : (
-                                <div className="flex justify-center items-center gap-[0.5vw]">
-                                  <button
-                                    onClick={() => handleFollowup(client)}
-                                    className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.8vw] items-center font-semibold text-blue-500 hover:bg-blue-55/50 transition-colors cursor-pointer"
-                                    title="Add Followup"
-                                  >
-                                    <PhoneCall size={"0.8vw"} />{" "}
-                                    <span>Followup</span>
-                                  </button>
-                                  {subTab === "lead" && (
+                                 <div className="flex justify-center items-center gap-[0.5vw]">
+                                  {subTab !== "lead" && (
+                                    <button
+                                      onClick={() => handleFollowup(client)}
+                                      className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.8vw] items-center font-semibold text-blue-500 hover:bg-blue-55/50 transition-colors cursor-pointer"
+                                      title="Add Followup"
+                                    >
+                                      <PhoneCall size={"0.8vw"} />{" "}
+                                      <span>Followup</span>
+                                    </button>
+                                  )}
+                                  {subTab === "lead" && (leadSubTab === "pending" || leadSubTab === "cancelled") && (
                                     <button
                                       onClick={() => handleOnboardClick(client)}
-                                      className="px-[0.6vw] py-[0.3vw] rounded-lg flex gap-[0.4vw] text-[0.8vw] items-center font-semibold text-green-600 hover:bg-green-50 border border-green-200 transition-colors cursor-pointer"
+                                      className="px-[0.6vw] py-[0.3vw] rounded-lg flex gap-[0.4vw] text-[0.8vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
                                       title="Onboard Project"
                                     >
-                                      <Plus size={"0.8vw"} />{" "}
+                                      <UserCheck size={"0.8vw"} />{" "}
                                       <span>Onboard</span>
                                     </button>
                                   )}
@@ -1710,6 +1873,7 @@ const Followup = () => {
         clientData={followupClient}
         clientHistory={clientsHistory}
         subTab={subTab}
+        refreshData={handleSuccess}
       />
       {renderRemarksTooltip()}
 
@@ -1732,70 +1896,102 @@ const Followup = () => {
             <div className="flex flex-col gap-[1vw]">
               <div>
                 <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Project Name *
+                  Status *
                 </label>
-                <input
-                  type="text"
-                  value={onboardFormData.projectName}
-                  onChange={(e) => setOnboardFormData({ ...onboardFormData, projectName: e.target.value })}
-                  className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                <select
+                  value={onboardFormData.status}
+                  onChange={(e) => setOnboardFormData({ ...onboardFormData, status: e.target.value })}
+                  className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] cursor-pointer focus:ring-2 focus:ring-blue-500"
                   required
-                />
+                >
+                  <option value="project_onboard">Onboard</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
 
-              <div>
-                <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Type (Category) *
-                </label>
-                <input
-                  type="text"
-                  value={onboardFormData.category}
-                  onChange={(e) => setOnboardFormData({ ...onboardFormData, category: e.target.value })}
-                  className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
+              {onboardFormData.status === "project_onboard" ? (
+                <>
+                  <div>
+                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                      Project Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={onboardFormData.projectName}
+                      onChange={(e) => setOnboardFormData({ ...onboardFormData, projectName: e.target.value })}
+                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-[1vw]">
+                  <div>
+                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                      Type (Category) *
+                    </label>
+                    <input
+                      type="text"
+                      value={onboardFormData.category}
+                      onChange={(e) => setOnboardFormData({ ...onboardFormData, category: e.target.value })}
+                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-[1vw]">
+                    <div>
+                      <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                        Expected Start Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={onboardFormData.startDate}
+                        onChange={(e) => setOnboardFormData({ ...onboardFormData, startDate: e.target.value })}
+                        className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                        Expected End Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={onboardFormData.endDate}
+                        onChange={(e) => setOnboardFormData({ ...onboardFormData, endDate: e.target.value })}
+                        className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                      Review Date
+                    </label>
+                    <input
+                      type="date"
+                      value={onboardFormData.reviewDate}
+                      onChange={(e) => setOnboardFormData({ ...onboardFormData, reviewDate: e.target.value })}
+                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </>
+              ) : (
                 <div>
                   <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Expected Start Date *
+                    Remarks / Reason *
                   </label>
-                  <input
-                    type="date"
-                    value={onboardFormData.startDate}
-                    onChange={(e) => setOnboardFormData({ ...onboardFormData, startDate: e.target.value })}
+                  <textarea
+                    value={onboardFormData.remarks}
+                    onChange={(e) => setOnboardFormData({ ...onboardFormData, remarks: e.target.value })}
+                    rows={4}
                     className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter reason for cancellation..."
                     required
                   />
                 </div>
-
-                <div>
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Expected End Date *
-                  </label>
-                  <input
-                    type="date"
-                    value={onboardFormData.endDate}
-                    onChange={(e) => setOnboardFormData({ ...onboardFormData, endDate: e.target.value })}
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Review Date *
-                </label>
-                <input
-                  type="date"
-                  value={onboardFormData.reviewDate}
-                  onChange={(e) => setOnboardFormData({ ...onboardFormData, reviewDate: e.target.value })}
-                  className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-[1vw] mt-[1.5vw] border-t border-gray-200 pt-[1vw]">
@@ -1807,9 +2003,9 @@ const Followup = () => {
               </button>
               <button
                 onClick={handleOnboardSubmit}
-                className="px-[1.2vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 text-[0.85vw] transition font-medium cursor-pointer"
+                className="px-[1.2vw] py-[0.6vw] bg-[#2563EB] text-white rounded-lg hover:bg-blue-700 text-[0.85vw] transition font-semibold cursor-pointer"
               >
-                Onboard Project
+                {onboardFormData.status === "project_onboard" ? "Onboard Project" : "Submit"}
               </button>
             </div>
           </div>
@@ -1951,6 +2147,77 @@ const Followup = () => {
           </div>
         </div>
       )}
+
+      {/* Budget Confirmation Dialog */}
+      {budgetConfirm.open && budgetConfirm.projectData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl w-[42vw] overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-[1.8vw] py-[1.2vw]">
+              <div className="flex items-center gap-[0.6vw]">
+                <div className="w-[2.2vw] h-[2.2vw] bg-white/20 rounded-full flex items-center justify-center">
+                  <UserCheck size={"1.1vw"} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-[1.05vw] font-bold text-white">Project Onboarded Successfully! 🎉</h2>
+                  <p className="text-[0.78vw] text-blue-100 mt-[0.1vw]">The lead has been moved to Onboarded status</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-[1.8vw] py-[1.5vw]">
+              {/* Project Details Summary */}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-[1vw] mb-[1.2vw]">
+                <p className="text-[0.78vw] font-semibold text-blue-700 mb-[0.6vw] uppercase tracking-wide">Project Details</p>
+                <div className="grid grid-cols-2 gap-[0.5vw]">
+                  <div>
+                    <span className="text-[0.75vw] text-gray-500">Company</span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.companyName}</p>
+                  </div>
+                  <div>
+                    <span className="text-[0.75vw] text-gray-500">Customer</span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.customerName || "-"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[0.75vw] text-gray-500">Project</span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.projectName}</p>
+                  </div>
+                  <div>
+                    <span className="text-[0.75vw] text-gray-500">Category</span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.projectCategory}</p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[0.9vw] text-gray-700 font-medium mb-[0.4vw]">
+                Would you like to enter the budget details for this project now?
+              </p>
+              <p className="text-[0.8vw] text-gray-500">
+                Clicking <strong className="text-blue-600">Yes, Enter Budget</strong> will take you to Project Budget and open the Add Project form with details pre-filled.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-[0.8vw] px-[1.8vw] pb-[1.5vw]">
+              <button
+                onClick={() => setBudgetConfirm({ open: false, projectData: null })}
+                className="px-[1.4vw] py-[0.6vw] border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-[0.85vw] font-medium transition cursor-pointer"
+              >
+                Later
+              </button>
+              <button
+                onClick={handleBudgetConfirmYes}
+                className="px-[1.4vw] py-[0.6vw] bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-[0.85vw] font-semibold transition cursor-pointer flex items-center gap-[0.4vw]"
+              >
+                <UserCheck size={"0.85vw"} />
+                Yes, Enter Budget
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <Notification
           title={toast.title}

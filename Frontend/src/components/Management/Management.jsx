@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Calendar } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 import Notification from "../ToastProp";
 import Budget from "./management/Budget";
@@ -9,8 +10,22 @@ import CompanyBudget from "./management/CompanyBudget";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 const Management = () => {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState("Budget");
   const [toast, setToast] = useState(null);
+  const [prefillProject, setPrefillProject] = useState(null);
+
+  // Read navigation state – e.g. after onboarding a lead from Followup
+  useEffect(() => {
+    if (location.state?.openTab) {
+      setActiveTab(location.state.openTab);
+    }
+    if (location.state?.prefillProject) {
+      setPrefillProject(location.state.prefillProject);
+    }
+    // Clear state from history so re-visiting doesn't re-trigger
+    window.history.replaceState({}, "");
+  }, []);
 
   const showToast = (title, message) => {
     setToast({ title, message });
@@ -26,7 +41,11 @@ const Management = () => {
 
       case "Project Budget":
         return (
-            <ProjectBudget showToast={showToast} />
+            <ProjectBudget
+              showToast={showToast}
+              prefillProject={prefillProject}
+              onPrefillConsumed={() => setPrefillProject(null)}
+            />
         );
 
       case "Company Budget":

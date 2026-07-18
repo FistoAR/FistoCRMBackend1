@@ -9,9 +9,12 @@ import {
   PhoneCall,
   ChevronUp,
   ChevronDown,
+  FileText,
 } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import { useConfirm } from "../ConfirmContext";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const FollowupModal = ({
   isOpen,
@@ -21,6 +24,7 @@ const FollowupModal = ({
   clientHistory,
   subTab,
   isMarketing,
+  refreshData,
 }) => {
 
   const { notify } = useNotification();
@@ -58,6 +62,204 @@ const FollowupModal = ({
   const [meetButton, setMeetButton] = useState("Company");
   const API_URL = import.meta.env.VITE_API_BASE_URL;
 
+  const [showRecordMOMForm, setShowRecordMOMForm] = useState(false);
+  const [momForm, setMomForm] = useState({
+    attendeesClient: "",
+    attendeesOurSide: "",
+    agenda: "",
+    outcomes: "",
+    conductedDate: "",
+    startTime: "",
+    endTime: "",
+  });
+
+  const exportMOMToPDF = (meeting) => {
+    try {
+      const doc = new jsPDF();
+      
+      doc.setFillColor(226, 235, 255);
+      doc.rect(0, 0, 210, 40, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(26, 54, 93);
+      doc.text("Minutes of Meeting (MOM)", 14, 25);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      const generatedDate = new Date().toLocaleString("en-IN");
+      doc.text(`Exported: ${generatedDate}`, 145, 15);
+
+      doc.setFontSize(11);
+      doc.setTextColor(50, 50, 50);
+      doc.setFont("helvetica", "bold");
+      doc.text("Meeting Details", 14, 50);
+      doc.setFont("helvetica", "normal");
+
+      const companyName = clientData.company_name || "-";
+      const meetingTitle = meeting.title || "-";
+      const scheduledDate = meeting.date ? new Date(meeting.date).toLocaleDateString("en-GB").split("/").join("-") : "-";
+      const scheduledTime = meeting.time || "-";
+      const meetingType = meeting.type || "-";
+
+      autoTable(doc, {
+        startY: 55,
+        body: [
+          ["Company Name", companyName, "Meeting Title", meetingTitle],
+          ["Scheduled Date", scheduledDate, "Scheduled Time", scheduledTime],
+          ["Meeting Type", meetingType, "", ""],
+        ],
+        theme: "plain",
+        styles: { fontSize: 10, cellPadding: 2 },
+        columnStyles: {
+          0: { fontStyle: "bold", textColor: [100, 100, 100], width: 35 },
+          1: { width: 60 },
+          2: { fontStyle: "bold", textColor: [100, 100, 100], width: 35 },
+          3: { width: 60 },
+        },
+      });
+
+      const currentY = doc.lastAutoTable.finalY + 10;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("Minutes of Meeting Details", 14, currentY);
+
+      autoTable(doc, {
+        startY: currentY + 5,
+        body: [
+          ["Conducted Date", meeting.mom_conductedDate || scheduledDate],
+          ["Meeting Timing", `${meeting.mom_startTime || "-"} to ${meeting.mom_endTime || "-"}`],
+          ["Attendees (Client Side)", meeting.attendeesClient || "-"],
+          ["Attendees (Our Side)", meeting.attendeesOurSide || "-"],
+          ["Agenda Discussed", meeting.mom_agenda || meeting.agenda || "-"],
+          ["Outcomes & Decisions", meeting.mom_outcomes || "-"],
+        ],
+        theme: "grid",
+        styles: { fontSize: 10, cellPadding: 4, overflow: "linebreak" },
+        columnStyles: {
+          0: { fontStyle: "bold", textColor: [50, 50, 50], fillColor: [245, 247, 250], width: 50 },
+          1: { width: 140 },
+        },
+      });
+
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text("Fisto CRM - Management Module", 14, 285);
+        doc.text(`Page ${i} of ${pageCount}`, 180, 285);
+      }
+
+      const filename = `MOM_${companyName.replace(/\s+/g, "_")}_${scheduledDate}.pdf`;
+      doc.save(filename);
+      notify({ type: "success", title: "Success", message: "MOM PDF downloaded successfully!" });
+    } catch (error) {
+      console.error("PDF generation error:", error);
+      notify({ type: "error", title: "Error", message: "Failed to export PDF." });
+    }
+  };
+
+  const handleUpdateMeetingStatus = async (meetingId, newStatus) => {
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/ManagementFollowups/meetings/${meetingId}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
+
+      if (response.ok) {
+        notify({
+          title: "Success",
+          message: `Meeting status updated to ${newStatus}!`,
+        });
+        if (refreshData) refreshData();
+      } else {
+        const errData = await response.json();
+        notify({
+          title: "Error",
+          message: errData.error || "Failed to update meeting status.",
+        });
+      }
+    } catch (error) {
+      console.error("Error updating meeting status:", error);
+      notify({
+        title: "Error",
+        message: "Failed to update meeting status.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitMOM = async () => {
+    if (
+      !momForm.attendeesClient.trim() ||
+      !momForm.attendeesOurSide.trim() ||
+      !momForm.agenda.trim() ||
+      !momForm.outcomes.trim() ||
+      !momForm.conductedDate ||
+      !momForm.startTime ||
+      !momForm.endTime
+    ) {
+      notify({
+        title: "Warning",
+        message: "Please fill all required MOM details",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append("attendeesClient", momForm.attendeesClient);
+      formDataToSend.append("attendeesOurSide", momForm.attendeesOurSide);
+      formDataToSend.append("agenda", momForm.agenda);
+      formDataToSend.append("outcomes", momForm.outcomes);
+      formDataToSend.append("conductedDate", momForm.conductedDate);
+      formDataToSend.append("startTime", momForm.startTime);
+      formDataToSend.append("endTime", momForm.endTime);
+
+      const latestMeeting = meetings && meetings.length > 0 ? meetings[meetings.length - 1] : null;
+      if (!latestMeeting) return;
+
+      const response = await fetch(`${API_URL}/ManagementFollowups/meetings/${latestMeeting.id}/mom`, {
+        method: "POST",
+        body: formDataToSend,
+      });
+
+      if (response.ok) {
+        notify({
+          title: "Success",
+          message: "Minutes of Meeting recorded successfully!",
+        });
+        setShowRecordMOMForm(false);
+        if (refreshData) refreshData();
+      } else {
+        const errData = await response.json();
+        notify({
+          title: "Error",
+          message: errData.error || "Failed to save MOM.",
+        });
+      }
+    } catch (err) {
+      console.error("Error submitting MOM:", err);
+      notify({
+        title: "Error",
+        message: "Failed to submit MOM. Please try again.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen && clientData) {
       setSelectedContacts("");
@@ -67,6 +269,16 @@ const FollowupModal = ({
       setStatus("");
       setShowHistory(false);
       setHistoryTab("followups");
+      setShowRecordMOMForm(false);
+      setMomForm({
+        attendeesClient: "",
+        attendeesOurSide: "",
+        agenda: "",
+        outcomes: "",
+        conductedDate: new Date().toISOString().split("T")[0],
+        startTime: "",
+        endTime: "",
+      });
 
       setMeetingData({
         title: "",
@@ -417,6 +629,161 @@ const FollowupModal = ({
                 </div>
               </div>
 
+              {/* Meeting Status Card Block */}
+              {(() => {
+                const isMeetingFollowup = clientData.status === "meeting" || clientData.status === "Meetings";
+                if (!isMeetingFollowup) return null;
+                const latestMeeting = meetings && meetings.length > 0 ? meetings[meetings.length - 1] : null;
+                if (!latestMeeting) return null;
+
+                if (latestMeeting.status === "completed") {
+                  return (
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between mb-4">
+                      <div>
+                        <p className="text-[0.92vw] text-green-800 font-semibold">Meeting is Completed</p>
+                        <p className="text-[0.82vw] text-green-600">The Minutes of Meeting (MOM) has been recorded.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => exportMOMToPDF(latestMeeting)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[0.85vw] font-semibold cursor-pointer transition-colors"
+                      >
+                        <Download size={16} /> Download MOM
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (latestMeeting.status === "cancelled") {
+                  return (
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4">
+                      <p className="text-[0.92vw] text-gray-800 font-semibold">Meeting is Cancelled</p>
+                      <p className="text-[0.82vw] text-gray-600">This meeting was marked as cancelled.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4 mb-4">
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[0.92vw] text-amber-800 font-semibold">Meeting is Pending / In Progress</p>
+                          <p className="text-[0.82vw] text-amber-600">Please record the meeting details or cancel it to submit this followup.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateMeetingStatus(latestMeeting.id, "cancelled")}
+                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-[0.85vw] font-medium cursor-pointer transition-colors"
+                          >
+                            Cancel Meeting
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowRecordMOMForm(true)}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[0.85vw] font-semibold cursor-pointer transition-colors"
+                          >
+                            Record Meeting
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {showRecordMOMForm && (
+                      <div className="p-4 border border-gray-200 rounded-lg bg-gray-50/50 space-y-4">
+                        <h4 className="text-[0.95vw] font-semibold text-gray-850 border-b pb-2">Record Minutes of Meeting (MOM)</h4>
+                        <div className="grid grid-cols-2 gap-4 text-[0.92vw]">
+                          <div>
+                            <label className="block text-gray-700 font-medium mb-1">Attendees (Client Side) *</label>
+                            <input
+                              type="text"
+                              value={momForm.attendeesClient}
+                              onChange={(e) => setMomForm({ ...momForm, attendeesClient: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                              placeholder="e.g. Client Name, Manager"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-gray-700 font-medium mb-1">Attendees (Our Side) *</label>
+                            <input
+                              type="text"
+                              value={momForm.attendeesOurSide}
+                              onChange={(e) => setMomForm({ ...momForm, attendeesOurSide: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                              placeholder="e.g. Our Team Members"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-gray-700 font-medium mb-1">Conducted Date *</label>
+                            <input
+                              type="date"
+                              value={momForm.conductedDate}
+                              onChange={(e) => setMomForm({ ...momForm, conductedDate: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-gray-700 font-medium mb-1">Start Time *</label>
+                              <input
+                                type="time"
+                                value={momForm.startTime}
+                                onChange={(e) => setMomForm({ ...momForm, startTime: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-gray-700 font-medium mb-1">End Time *</label>
+                              <input
+                                type="time"
+                                value={momForm.endTime}
+                                onChange={(e) => setMomForm({ ...momForm, endTime: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                              />
+                            </div>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-gray-700 font-medium mb-1">Agenda *</label>
+                            <textarea
+                              value={momForm.agenda}
+                              onChange={(e) => setMomForm({ ...momForm, agenda: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white h-20 resize-none"
+                              placeholder="Discussed items..."
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-gray-700 font-medium mb-1">Outcomes *</label>
+                            <textarea
+                              value={momForm.outcomes}
+                              onChange={(e) => setMomForm({ ...momForm, outcomes: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white h-20 resize-none"
+                              placeholder="Decisions made..."
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowRecordMOMForm(false)}
+                            className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-[0.85vw] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSubmitMOM}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[0.85vw] font-semibold cursor-pointer hover:bg-blue-700"
+                          >
+                            Submit MOM
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="mb-[1.5vw]">
                 <label className="block text-[0.95vw] font-medium text-gray-800 mb-[0.5vw]">
                   Select Contact Person(s){" "}
@@ -562,7 +929,42 @@ const FollowupModal = ({
               )}
 
               <div className="mb-[1.5vw] flex gap-[1vw]">
-                {subTab !== "droped" && (
+                {subTab === "lead" ? (
+                  <div className="w-[50%]">
+                    <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
+                      Status <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                      className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] cursor-pointer border border-gray-300 rounded-lg focus:ring-black"
+                    >
+                      <option value="" disabled>
+                        Select Status
+                      </option>
+                      <option value="project_onboard">Onboard</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                ) : (subTab === "billing" || subTab === "droped") ? (
+                  <div className="w-[50%]">
+                    <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
+                      Status <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                      className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] cursor-pointer border border-gray-300 rounded-lg focus:ring-black"
+                    >
+                      <option value="" disabled>
+                        Select Status
+                      </option>
+                      <option value="billing">Payment Proposal</option>
+                      <option value="lead">Lead</option>
+                      <option value="droped">Drop</option>
+                    </select>
+                  </div>
+                ) : (
                   <div className="w-[50%]">
                     <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
                       Status <span className="text-red-500">*</span>
@@ -590,24 +992,6 @@ const FollowupModal = ({
                   </div>
                 )}
 
-                {subTab === "droped" && (
-                  <div className="w-[50%]">
-                    <label className="block text-[0.95vw] font-medium text-gray-700 mb-[0.5vw]">
-                      Status <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                      className="w-full px-[0.8vw] py-[0.5vw] text-[0.92vw] cursor-pointer border border-gray-300 rounded-lg focus:ring-black"
-                    >
-                      <option value="" disabled>
-                        Select Status
-                      </option>
-                      <option value="lead">Lead</option>
-                    </select>
-                  </div>
-                )}
-
                 {!["droped", "lead", "not_interested"].includes(status) && (
                   <div
                     className={` ${
@@ -620,7 +1004,7 @@ const FollowupModal = ({
                           Date / Next followup date
                           <span className="text-red-500"> *</span>
                         </>
-                      ) : status === "billing" ? (
+                      ) : ["billing", "lead", "droped", "project_onboard", "cancelled"].includes(status) ? (
                         "Next followup date"
                       ) : (
                         <>
@@ -1132,10 +1516,18 @@ const FollowupModal = ({
                               {formatDateTime(record.created_at)}
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
-                              {record.contact_person_name || "-"}
+                              {record.contact_person_name || (() => {
+                                const contactId = record.contactPersonID || record.contactPersonId || record.contact_person_id || record.contact_person;
+                                const match = clientData.contactPersons?.find(c => String(c.id) === String(contactId));
+                                return match ? match.name : "-";
+                              })()}
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
-                              {record.contactNumber || "-"}
+                              {record.contactNumber || (() => {
+                                const contactId = record.contactPersonID || record.contactPersonId || record.contact_person_id || record.contact_person;
+                                const match = clientData.contactPersons?.find(c => String(c.id) === String(contactId));
+                                return match ? match.contactNumber || match.phone : "-";
+                              })()}
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
                               {formatDate(record.nextFollowupDate)}
@@ -1182,22 +1574,28 @@ const FollowupModal = ({
                       <thead className="bg-blue-50">
                         <tr>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Title
+                            Created Date
                           </th>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Date
+                            Scheduled Date
                           </th>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
                             Time
                           </th>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                            Title
+                          </th>
+                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
+                            Type
+                          </th>
+                          <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
                             Agenda
                           </th>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Link
+                            Status
                           </th>
                           <th className="px-[0.8vw] py-[0.5vw] text-left text-[0.92vw] font-medium text-gray-700">
-                            Attendees
+                            Download
                           </th>
                         </tr>
                       </thead>
@@ -1207,15 +1605,20 @@ const FollowupModal = ({
                             key={index}
                             className="border-t border-gray-200 hover:bg-gray-50"
                           >
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] font-medium text-gray-900">
-                              {meeting.title}
+                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
+                              {meeting.created_at ? formatDateTime(meeting.created_at).split(",")[0] : "-"}
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
                               {formatDate(meeting.date)}
                             </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600">
-                              {formatTime(meeting.startTime)} -{" "}
-                              {formatTime(meeting.endTime)}
+                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-650">
+                              {meeting.time || (meeting.startTime ? `${formatTime(meeting.startTime)} - ${formatTime(meeting.endTime)}` : "-")}
+                            </td>
+                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] font-medium text-gray-900">
+                              {meeting.title}
+                            </td>
+                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-650">
+                              {meeting.type || "-"}
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[12vw]">
                               <div
@@ -1226,26 +1629,32 @@ const FollowupModal = ({
                               </div>
                             </td>
                             <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw]">
-                              {meeting.link ? (
-                                <a
-                                  href={meeting.link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline"
+                              {meeting.status === "completed" ? (
+                                <span className="px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-[0.75vw] font-semibold">
+                                  Completed
+                                </span>
+                              ) : meeting.status === "cancelled" ? (
+                                <span className="px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded-full text-[0.75vw] font-semibold">
+                                  Cancelled
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[0.75vw] font-semibold">
+                                  Scheduled
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw]">
+                              {meeting.status === "completed" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => exportMOMToPDF(meeting)}
+                                  className="flex items-center gap-1 px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-[0.75vw] font-semibold cursor-pointer transition-colors"
                                 >
-                                  Join
-                                </a>
+                                  <Download size={12} /> MOM
+                                </button>
                               ) : (
                                 "-"
                               )}
-                            </td>
-                            <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-600 max-w-[10vw]">
-                              <div
-                                className="line-clamp-1"
-                                title={meeting.attendees}
-                              >
-                                {meeting.attendees || "-"}
-                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1266,6 +1675,7 @@ const FollowupModal = ({
                   <PaymentFollowupHistory
                     paymentFollowup={paymentFollowup}
                     formatDateTime={formatDateTime}
+                    clientData={clientData}
                   />
                 </div>
               )}
@@ -1301,22 +1711,29 @@ const FollowupModal = ({
             >
               Cancel
             </button>
-            {!showHistory && (
-              <button
-                onClick={handleSubmit}
-                disabled={loading || selectedContacts === "" || !remarks.trim()}
-                className="px-[1.2vw] py-[0.5vw] text-[0.96vw] cursor-pointer text-white bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-[0.3vw]"
-              >
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-[1vw] w-[1vw] border-b-2 border-white"></div>
-                    <span>Submitting...</span>
-                  </>
-                ) : (
-                  "Submit Followup"
-                )}
-              </button>
-            )}
+            {!showHistory && (() => {
+              const isMeetingFollowup = clientData.status === "meeting" || clientData.status === "Meetings";
+              const latestMeeting = meetings && meetings.length > 0 ? meetings[meetings.length - 1] : null;
+              const isMeetingPending = isMeetingFollowup && latestMeeting && latestMeeting.status !== "completed" && latestMeeting.status !== "cancelled";
+              const requiresNextFollowup = ["inProgress", "meeting", "proposed", "second_followup", "not_picking"].includes(status);
+              const isDateMissing = requiresNextFollowup && nextFollowup === "";
+              return (
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading || selectedContacts === "" || !remarks.trim() || isMeetingPending || isDateMissing}
+                  className="px-[1.2vw] py-[0.5vw] text-[0.96vw] cursor-pointer text-white bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-[0.3vw]"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-[1vw] w-[1vw] border-b-2 border-white"></div>
+                      <span>Submitting...</span>
+                    </>
+                  ) : (
+                    "Submit Followup"
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -1396,7 +1813,7 @@ const FilePreview = ({ file, onRemove }) => {
   );
 };
 
-const PaymentFollowupHistory = ({ paymentFollowup, formatDateTime }) => {
+const PaymentFollowupHistory = ({ paymentFollowup, formatDateTime, clientData }) => {
   const parseFiles = (jsonString) => {
     try {
       return JSON.parse(jsonString || "[]");
@@ -1450,7 +1867,18 @@ const PaymentFollowupHistory = ({ paymentFollowup, formatDateTime }) => {
                 {formatDateTime(record.created_at)}
               </td>
               <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw] text-gray-900">
-                {record.contact_person_name || "-"}
+                {(() => {
+                  const contactId = record.contactPersonID || record.contactPersonId || record.contact_person_id || record.contact_person;
+                  const match = clientData.contactPersons?.find(c => String(c.id) === String(contactId));
+                  const name = record.contact_person_name || (match ? match.name : "-");
+                  const number = record.contactNumber || (match ? match.contactNumber || match.phone : null);
+                  return (
+                    <div>
+                      <div className="font-semibold">{name}</div>
+                      {number && <div className="text-[0.75vw] text-gray-500">{number}</div>}
+                    </div>
+                  );
+                })()}
               </td>
               <td className="px-[0.8vw] py-[0.6vw] text-[0.88vw]">
                 {quotations.length > 0 ? (
@@ -1513,27 +1941,48 @@ const FileDownloadButton = ({ file }) => {
     }
   };
 
-  const getFileIcon = () => {
+  const renderFilePreview = () => {
     const ext = file.originalName?.split(".").pop()?.toLowerCase() || "";
     if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
-      return "🖼️";
+      return (
+        <img
+          src={`${API_URL}/${file.path}`}
+          className="w-[1.3vw] h-[1.3vw] object-cover rounded border border-gray-200 flex-shrink-0"
+          alt=""
+          onError={(e) => {
+            e.target.style.display = 'none';
+          }}
+        />
+      );
     } else if (ext === "pdf") {
-      return "📄";
+      return (
+        <span className="flex items-center justify-center bg-red-50 text-red-600 px-1 py-0.5 rounded text-[0.6vw] font-bold border border-red-200 leading-none flex-shrink-0">
+          PDF
+        </span>
+      );
     } else if (["doc", "docx"].includes(ext)) {
-      return "📝";
+      return (
+        <span className="flex items-center justify-center bg-blue-50 text-blue-600 px-1 py-0.5 rounded text-[0.6vw] font-bold border border-blue-200 leading-none flex-shrink-0">
+          DOC
+        </span>
+      );
     }
-    return "📎";
+    return (
+      <span className="flex items-center justify-center bg-gray-100 text-gray-500 px-1 py-0.5 rounded text-[0.6vw] font-bold border border-gray-200 leading-none flex-shrink-0">
+        FILE
+      </span>
+    );
   };
 
   return (
     <button
       onClick={handleDownload}
-      className="flex items-center gap-[0.3vw] px-[0.4vw] py-[0.2vw] bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-300 rounded transition-colors text-[0.72vw] text-gray-700 hover:text-blue-700 cursor-pointer mb-[0.3vw]"
+      className="flex items-center gap-[0.4vw] px-[0.4vw] py-[0.2vw] bg-white border border-gray-200 hover:bg-blue-50 hover:border-blue-300 rounded transition-colors text-[0.72vw] text-gray-700 hover:text-blue-700 cursor-pointer mb-[0.3vw] min-w-0"
       title={`Download ${file.originalName}`}
     >
-      <span>{getFileIcon()}</span>
+      {renderFilePreview()}
       <span className="max-w-[6vw] truncate">{file.originalName}</span>
-      <Download size={"0.75vw"} />
+      <Download size={"0.75vw"} className="flex-shrink-0" />
     </button>
   );
 };

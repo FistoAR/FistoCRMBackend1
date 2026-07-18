@@ -167,7 +167,7 @@ router.get("/projects/:id", (req, res) => {
 
       let budgetData = null;
       let paymentsData = [];
-      let documentsData = { po: [], invoice: [] };
+      let documentsData = { po: [], invoice: [], quotation: [] };
 
       if (budgets.length > 0) {
         const budget = budgets[0];
@@ -177,12 +177,11 @@ router.get("/projects/:id", (req, res) => {
 
           let rawDocuments = budget.documents
             ? JSON.parse(budget.documents)
-            : { po: [], invoice: [] };
+            : { po: [], invoice: [], quotation: [] };
 
           documentsData = {
             po: (rawDocuments.po || []).map((doc) => ({
               ...doc,
-              // keep existing docId, only ensure path/name/size
               path:
                 doc.path ||
                 (doc.fileName
@@ -203,6 +202,17 @@ router.get("/projects/:id", (req, res) => {
               size: doc.size || 0,
               uploadedAt: doc.uploadedAt || new Date().toISOString(),
             })),
+            quotation: (rawDocuments.quotation || []).map((doc) => ({
+              ...doc,
+              path:
+                doc.path ||
+                (doc.fileName
+                  ? `/Images/ProjectBudget/Quotation/${doc.fileName}`
+                  : null),
+              name: doc.name || doc.originalName || "Unknown Document",
+              size: doc.size || 0,
+              uploadedAt: doc.uploadedAt || new Date().toISOString(),
+            })),
           };
         } catch (parseErr) {
           console.error("JSON parse error:", parseErr);
@@ -218,18 +228,59 @@ router.get("/projects/:id", (req, res) => {
         };
       }
 
-      console.log("✅ Documents with paths:", documentsData);
+      // Fetch proposal documents submitted during followups
+      const followupDocsQuery = `
+        SELECT mf.quotation, mf.purchaseOrder, mf.invoice
+        FROM ManagementFollowups mf
+        LEFT JOIN clientAddManagement c ON mf.clientID = c.id
+        LEFT JOIN MarketingClients mc ON mf.marketing_client_id = mc.id
+        WHERE c.company_name = ? OR mc.company_name = ?
+      `;
 
-      res.status(200).json({
-        success: true,
-        message: "Project details fetched successfully",
-        project: {
-          ...projects[0],
-          budget: budgetData,
-          payments: paymentsData,
-          documents: documentsData,
-        },
-      });
+      db.pool.query(
+        followupDocsQuery,
+        [projects[0].companyName, projects[0].companyName],
+        (followupErr, followupRows) => {
+          let followupDocuments = [];
+          if (!followupErr && followupRows) {
+            followupRows.forEach((row) => {
+              ["quotation", "purchaseOrder", "invoice"].forEach((field) => {
+                if (row[field]) {
+                  try {
+                    const arr = JSON.parse(row[field]);
+                    if (Array.isArray(arr)) {
+                      arr.forEach((doc) => {
+                        followupDocuments.push({
+                          name: doc.originalName || doc.name || "Followup Document",
+                          path: doc.path ? `/${doc.path}` : null,
+                          size: doc.size || 0,
+                          uploadedAt: doc.uploadedAt || new Date().toISOString(),
+                          type: field,
+                        });
+                      });
+                    }
+                  } catch (e) {}
+                }
+              });
+            });
+          }
+
+          console.log("✅ Documents with paths:", documentsData);
+          console.log("✅ Followup proposal documents:", followupDocuments);
+
+          res.status(200).json({
+            success: true,
+            message: "Project details fetched successfully",
+            project: {
+              ...projects[0],
+              budget: budgetData,
+              payments: paymentsData,
+              documents: documentsData,
+              followupDocuments: followupDocuments,
+            },
+          });
+        }
+      );
     });
   });
 });
@@ -263,7 +314,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
       console.error("Error fetching existing documents:", getErr);
     }
 
-    let existingDocuments = { po: [], invoice: [] };
+    let existingDocuments = { po: [], invoice: [], quotation: [] };
 
     if (existingData && existingData.length > 0 && existingData[0].documents) {
       try {
@@ -274,7 +325,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
     }
 
     const processNewDocuments = () => {
-      const newDocs = { po: [], invoice: [] };
+      const newDocs = { po: [], invoice: [], quotation: [] };
 
       if (req.files) {
         if (req.files.po) {
@@ -296,6 +347,16 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
             uploadedAt: new Date().toISOString(),
           }));
         }
+
+        if (req.files.quotation) {
+          newDocs.quotation = req.files.quotation.map((file) => ({
+            name: file.originalname,
+            fileName: file.filename,
+            path: `/Images/ProjectBudget/Quotation/${file.filename}`,
+            size: file.size,
+            uploadedAt: new Date().toISOString(),
+          }));
+        }
       }
 
       return newDocs;
@@ -306,12 +367,14 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
     let mergedDocuments = {
       po: [...(existingDocuments.po || []), ...newDocuments.po],
       invoice: [...(existingDocuments.invoice || []), ...newDocuments.invoice],
+      quotation: [...(existingDocuments.quotation || []), ...newDocuments.quotation],
     };
 
     // ensure docId on all documents
     mergedDocuments = {
       po: ensureDocIds(mergedDocuments.po, "po"),
       invoice: ensureDocIds(mergedDocuments.invoice, "invoice"),
+      quotation: ensureDocIds(mergedDocuments.quotation, "quotation"),
     };
 
     console.log("Existing Documents:", existingDocuments);
@@ -453,7 +516,7 @@ router.delete("/projects/:projectId/document", (req, res) => {
       });
     }
 
-    let docs = { po: [], invoice: [] };
+    let docs = { po: [], invoice: [], quotation: [] };
 
     try {
       docs = JSON.parse(rows[0].documents);

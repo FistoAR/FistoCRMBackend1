@@ -52,7 +52,7 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
       return (
         <Link
           to={to}
-          className="flex items-center justify-between px-3 py-2 bg-white border border-slate-100 shadow-sm rounded-xl text-zinc-900 font-semibold text-[0.82vw] w-full transition-all duration-150"
+          className="flex items-center justify-between px-3 py-2 bg-white border border-slate-100 shadow-sm rounded-xl text-zinc-900 font-semibold text-[0.85vw] w-full transition-all duration-150"
         >
           <div className="flex items-center gap-[0.8vw]">
             <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-gradient-to-r from-zinc-900 to-black text-white text-[0.7vw] font-bold">
@@ -69,7 +69,7 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
       return (
         <Link
           to={to}
-          className="flex items-center px-3 py-2 text-slate-500 hover:text-slate-800 hover:bg-white/50 rounded-xl text-[0.82vw] w-full gap-[0.8vw] transition-all duration-150"
+          className="flex items-center px-3 py-2 text-slate-500 hover:text-slate-800 hover:bg-white/50 rounded-xl text-[0.85vw] w-full gap-[0.8vw] transition-all duration-150"
         >
           <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-100 text-slate-400 text-[0.7vw] font-semibold">
             {formattedNum}

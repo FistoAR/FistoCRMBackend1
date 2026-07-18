@@ -22,13 +22,13 @@ const createDirectories = () => {
 
 createDirectories();
 
-// Auto-run DB migration to add not_picking and not_interested enum values
+// Auto-run DB migration to add status enum values including project_onboard and cancelled
 (async () => {
   try {
     console.log("Running migration: Altering status column in ManagementFollowups...");
     await queryWithRetry(`
       ALTER TABLE ManagementFollowups 
-      MODIFY COLUMN status enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested') NOT NULL
+      MODIFY COLUMN status enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested','project_onboard','cancelled') NOT NULL
     `);
     console.log("Migration successful: status column altered.");
   } catch (err) {
@@ -690,6 +690,9 @@ router.get("/counts", async (req, res) => {
       inprogress: 0,
       billing: 0,
       lead: 0,
+      lead_pending: 0,
+      lead_onboarded: 0,
+      lead_cancelled: 0,
       not_interested: 0,
       droped: 0,
       current: currentClientsResult[0]?.count || 0,
@@ -702,13 +705,19 @@ router.get("/counts", async (req, res) => {
       } else if (row.status === "billing") {
         counts.billing = row.count;
       } else if (row.status === "lead") {
-        counts.lead = row.count;
+        counts.lead_pending = row.count;
+      } else if (row.status === "project_onboard") {
+        counts.lead_onboarded = row.count;
+      } else if (row.status === "cancelled") {
+        counts.lead_cancelled = row.count;
       } else if (row.status === "not_interested") {
         counts.not_interested = row.count;
       } else if (row.status === "droped") {
         counts.droped = row.count;
       }
     });
+
+    counts.lead = counts.lead_pending + counts.lead_onboarded + counts.lead_cancelled;
 
     res.status(200).json({
       success: true,
@@ -868,7 +877,7 @@ router.get("/", async (req, res) => {
     const validStatuses = [
       "followup", "lead", "droped", "all",
       "inprogress", "meeting", "proposed", "billing", "first_followup",
-      "not_picking", "not_interested"
+      "not_picking", "not_interested", "project_onboard", "cancelled"
     ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: "Invalid status parameter" });
@@ -1298,5 +1307,109 @@ router.post("/meetings/:meetingId/mom", multerMOM.single("document"), async (req
     console.error("Migration error (ManagementMeetings status):", err.message);
   }
 })();
+
+// Create ManagementOnboardedProjects table if not exists
+(async () => {
+  try {
+    await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS ManagementOnboardedProjects (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        company_name VARCHAR(255) NOT NULL,
+        customer_name VARCHAR(255),
+        project_name VARCHAR(255) NOT NULL,
+        category VARCHAR(255) NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        review_date DATE NULL,
+        remarks TEXT,
+        budget_status ENUM('pending','entered') NOT NULL DEFAULT 'pending',
+        onboarded_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log("Migration: ManagementOnboardedProjects table ready.");
+    
+    // Alter existing table column if it was NOT NULL previously
+    await queryWithRetry(`
+      ALTER TABLE ManagementOnboardedProjects MODIFY COLUMN review_date DATE NULL
+    `);
+    console.log("Migration: review_date column altered to nullable.");
+  } catch (err) {
+    console.error("Migration error (ManagementOnboardedProjects):", err.message);
+  }
+})();
+
+// POST - Save onboard project details
+router.post("/onboard", async (req, res) => {
+  try {
+    const {
+      clientId,
+      companyName,
+      customerName,
+      projectName,
+      category,
+      startDate,
+      endDate,
+      reviewDate,
+      remarks,
+      onboardedBy,
+    } = req.body;
+
+    if (!clientId || !companyName || !projectName || !category || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "clientId, companyName, projectName, category, startDate, and endDate are required",
+      });
+    }
+
+    await queryWithRetry(
+      `INSERT INTO ManagementOnboardedProjects
+        (client_id, company_name, customer_name, project_name, category, start_date, end_date, review_date, remarks, budget_status, onboarded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [clientId, companyName, customerName || "", projectName, category, startDate, endDate, reviewDate || null, remarks || "", onboardedBy || ""]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Onboard details saved successfully",
+    });
+  } catch (err) {
+    console.error("Error saving onboard details:", err);
+    res.status(500).json({ success: false, message: "Failed to save onboard details" });
+  }
+});
+
+// GET - List all onboarded projects
+router.get("/onboarded-projects", async (req, res) => {
+  console.log("GET /api/ManagementFollowups/onboarded-projects called");
+  try {
+    const rows = await queryWithRetry(
+      `SELECT * FROM ManagementOnboardedProjects ORDER BY created_at DESC`
+    );
+    console.log("Found onboarded projects count:", rows.length);
+    res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error("Error fetching onboarded projects:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch onboarded projects" });
+  }
+});
+
+// PATCH - Update budget_status to 'entered'
+router.patch("/onboard/:id/budget-status", async (req, res) => {
+  const { id } = req.params;
+  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called`);
+  try {
+    await queryWithRetry(
+      `UPDATE ManagementOnboardedProjects SET budget_status = 'entered' WHERE id = ?`,
+      [id]
+    );
+    res.status(200).json({ success: true, message: "Budget status updated" });
+  } catch (err) {
+    console.error("Error updating budget status:", err);
+    res.status(500).json({ success: false, message: "Failed to update budget status" });
+  }
+});
 
 module.exports = router;
