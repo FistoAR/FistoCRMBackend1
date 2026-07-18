@@ -51,7 +51,15 @@ import AdminManagement from "./components/Management/Management";
 import AdminFollowup from "./components/Management/Followup";
 import MarketingLeeds from "./components/Management/MarketingLeeds";
 import AdminMarketing from "./components/Management/Marketing";
-import AdminHR from "./components/Management/HR";
+import AdminHR, {
+  HREmployeeDetails,
+  HRAddDesignation,
+  HRRequests,
+  HRSalaryCalculation,
+  HRInterviewSchedules,
+  HRQuotes,
+  HRMaid
+} from "./components/Management/HR";
 import AdminReport from "./components/Management/Report";
 import AdminCalendar from "./components/Management/Calendar";
 
@@ -116,9 +124,9 @@ function NavBarWithTitle({ socketData }) {
 
 function MainLayout({ children, socketData }) {
   return (
-    <div className="flex max-w-[100vw] max-h-[100vh]">
+    <div className="flex w-screen h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 bg-gray-100 min-h-screen px-[1.2vw] py-[0.4vh] max-w-[85%] min-w-[85%] overflow-hidden">
+      <main className="flex-1 flex flex-col bg-gray-100 h-full overflow-hidden px-[1.2vw] py-[0.4vh]">
         <NavBarWithTitle socketData={socketData} />
         <div className="flex-1 overflow-y-auto mt-[1vh] pr-[0.3vw]">
           {children}
@@ -244,7 +252,16 @@ function AppContent() {
                   <Route path="marketingLeeds" element={<MarketingLeeds />} />
                   <Route path="marketing" element={<AdminMarketing />} />
                   <Route path="taskCalendar" element={<EmployeeCalendar />} />
-                  <Route path="hr" element={<AdminHR />} />
+                  <Route path="hr/*" element={<AdminHR />}>
+                    <Route index element={<Navigate to="employeeDetails" replace />} />
+                    <Route path="employeeDetails" element={<HREmployeeDetails />} />
+                    <Route path="addDesignation" element={<HRAddDesignation />} />
+                    <Route path="request" element={<HRRequests />} />
+                    <Route path="salaryCalculation" element={<HRSalaryCalculation />} />
+                    <Route path="interviewSchedules" element={<HRInterviewSchedules />} />
+                    <Route path="quotes" element={<HRQuotes />} />
+                    <Route path="maid" element={<HRMaid />} />
+                  </Route>
                   <Route path="employeeReports" element={<PHinternReports />} />
                   <Route path="report" element={<AdminReport />} />
                   <Route path="calendar" element={<AdminCalendar />} />

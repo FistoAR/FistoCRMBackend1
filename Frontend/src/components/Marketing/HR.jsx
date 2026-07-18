@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Calendar } from "lucide-react";
+import { Link, Outlet, useLocation } from "react-router-dom";
 
 import Notification from "../ToastProp";
 import AddDesignation from "./HR/AddDesignation";
@@ -12,10 +13,107 @@ import InteviewSchedules from "./HR/Interview";
 import Quotes from "./HR/Quotes";
 import Maid from "./HR/Maid";
 
+import { useOutletContext } from "react-router-dom";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+// Sub-components to be exported and loaded by Router
+export const HREmployeeDetails = () => {
+  const { employees, loading, handleEditEmployee, handleDeleteEmployee, setShowAddEmployeeModal, setEditingEmployee } = useOutletContext();
+  return (
+    <EmployeeOverview
+      employees={employees}
+      loading={loading}
+      onEdit={handleEditEmployee}
+      onDelete={handleDeleteEmployee}
+      onAddEmployee={() => {
+        setEditingEmployee(null);
+        setShowAddEmployeeModal(true);
+      }}
+    />
+  );
+};
+
+export const HRAddDesignation = () => {
+  return (
+    <div className="h-full flex">
+      <AddDesignation />
+    </div>
+  );
+};
+
+export const HRRequests = () => {
+  const { leaveRequests, permissionRequests, employees, loading, fetchAllData, showToast } = useOutletContext();
+  return (
+    <RequestsTab
+      leaveRequests={leaveRequests}
+      permissionRequests={permissionRequests}
+      employees={employees}
+      loading={loading}
+      fetchAllData={fetchAllData}
+      showToast={showToast}
+    />
+  );
+};
+
+export const HRSalaryCalculation = () => {
+  const { loading, setLoading, selectedMonthYear, setSelectedMonthYear, handleViewSalaryEmployee, showToast } = useOutletContext();
+  return (
+    <SalaryCalculationTab
+      loading={loading}
+      setLoading={setLoading}
+      selectedMonthYear={selectedMonthYear}
+      setSelectedMonthYear={setSelectedMonthYear}
+      handleViewEmployee={handleViewSalaryEmployee}
+      showToast={showToast}
+    />
+  );
+};
+
+export const HRInterviewSchedules = () => {
+  const { loading, setLoading, selectedMonthYear, setSelectedMonthYear, handleViewSalaryEmployee, showToast } = useOutletContext();
+  return (
+    <InteviewSchedules
+      loading={loading}
+      setLoading={setLoading}
+      selectedMonthYear={selectedMonthYear}
+      setSelectedMonthYear={setSelectedMonthYear}
+      handleViewEmployee={handleViewSalaryEmployee}
+      showToast={showToast}
+    />
+  );
+};
+
+export const HRQuotes = () => {
+  const { loading, setLoading, selectedMonthYear, setSelectedMonthYear, handleViewSalaryEmployee, showToast } = useOutletContext();
+  return (
+    <Quotes
+      loading={loading}
+      setLoading={setLoading}
+      selectedMonthYear={selectedMonthYear}
+      setSelectedMonthYear={setSelectedMonthYear}
+      handleViewEmployee={handleViewSalaryEmployee}
+      showToast={showToast}
+    />
+  );
+};
+
+export const HRMaid = () => {
+  const { loading, setLoading, selectedMonthYear, setSelectedMonthYear, handleViewSalaryEmployee, showToast } = useOutletContext();
+  return (
+    <Maid
+      loading={loading}
+      setLoading={setLoading}
+      selectedMonthYear={selectedMonthYear}
+      setSelectedMonthYear={setSelectedMonthYear}
+      handleViewEmployee={handleViewSalaryEmployee}
+      showToast={showToast}
+    />
+  );
+};
+
 const HR = () => {
-  const [activeTab, setActiveTab] = useState("Employee Details");
+  const { pathname } = useLocation();
   const [employees, setEmployees] = useState([]);
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
@@ -119,99 +217,15 @@ const HR = () => {
     setShowSalaryModal(true);
   };
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case "Employee Details":
-        return (
-          <EmployeeOverview
-            employees={employees}
-            loading={loading}
-            onEdit={handleEditEmployee}
-            onDelete={handleDeleteEmployee}
-            onAddEmployee={() => {
-              setEditingEmployee(null);
-              setShowAddEmployeeModal(true);
-            }}
-          />
-        );
-
-      case "Add Designation":
-        return (
-          <div className="h-full flex">
-            <AddDesignation />
-          </div>
-        );
-
-      case "Requests":
-        return (
-          <RequestsTab
-            leaveRequests={leaveRequests}
-            permissionRequests={permissionRequests}
-            employees={employees}
-            loading={loading}
-            fetchAllData={fetchAllData}
-            showToast={showToast}
-          />
-        );
-
-      case "Salary Calculation":
-        return (
-          <SalaryCalculationTab
-            loading={loading}
-            setLoading={setLoading}
-            selectedMonthYear={selectedMonthYear}
-            setSelectedMonthYear={setSelectedMonthYear}
-            handleViewEmployee={handleViewSalaryEmployee}
-            showToast={showToast}
-          />
-        );
-
-      case "Interview Schedules":
-        return (
-          <InteviewSchedules
-            loading={loading}
-            setLoading={setLoading}
-            selectedMonthYear={selectedMonthYear}
-            setSelectedMonthYear={setSelectedMonthYear}
-            handleViewEmployee={handleViewSalaryEmployee}
-            showToast={showToast}
-          />
-        );
-
-      case "Quotes":
-        return (
-          <Quotes
-            loading={loading}
-            setLoading={setLoading}
-            selectedMonthYear={selectedMonthYear}
-            setSelectedMonthYear={setSelectedMonthYear}
-            handleViewEmployee={handleViewSalaryEmployee}
-            showToast={showToast}
-          />
-        );
-
-      case "Maid":
-        return (
-          <Maid
-            loading={loading}
-            setLoading={setLoading}
-            selectedMonthYear={selectedMonthYear}
-            setSelectedMonthYear={setSelectedMonthYear}
-            handleViewEmployee={handleViewSalaryEmployee}
-            showToast={showToast}
-          />
-        );
-
-      default:
-        return (
-          <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500 p-[2vw]">
-            <Calendar className="w-[4vw] h-[4vw] mb-[1vw] text-gray-300" />
-            <p className="text-[1.2vw] font-medium mb-[0.5vw]">{activeTab}</p>
-            <p className="text-[1vw] text-gray-400">Coming Soon...</p>
-          </div>
-        );
-    }
-  };
+  const tabs = [
+    { label: "Employee Details", path: "employeeDetails" },
+    { label: "Add Designation", path: "addDesignation" },
+    { label: "Request", path: "request" },
+    { label: "Salary Calculation", path: "salaryCalculation" },
+    { label: "Interview Schedules", path: "interviewSchedules" },
+    { label: "Quotes", path: "quotes" },
+    { label: "Maid", path: "maid" }
+  ];
 
   return (
     <div className="text-black min-h-[92%] max-h-[100%] w-[100%] max-w-[100%] overflow-hidden">
@@ -224,36 +238,23 @@ const HR = () => {
       )}
 
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
-        <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[6%] flex-shrink-0">
-          <div className="flex border-b border-gray-200 h-full w-[80vw]">
-            {[
-              "Employee Details",
-              "Add Designation",
-              "Requests",
-              "Salary Calculation",
-              "Interview Schedules",
-              "Quotes",
-              "Maid"
-            ].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => {
-                  setActiveTab(tab);
-                }}
-                className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors flex-1 ${
-                  activeTab === tab
-                    ? "border-b-2 border-black text-black"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm h-[93%] flex flex-col overflow-hidden">
-          {renderTabContent()}
+        <div className="bg-white rounded-xl shadow-sm flex flex-col overflow-hidden h-full">
+          <Outlet context={{
+            employees,
+            loading,
+            setLoading,
+            handleEditEmployee,
+            handleDeleteEmployee,
+            setShowAddEmployeeModal,
+            setEditingEmployee,
+            leaveRequests,
+            permissionRequests,
+            fetchAllData,
+            showToast,
+            selectedMonthYear,
+            setSelectedMonthYear,
+            handleViewSalaryEmployee
+          }} />
         </div>
       </div>
 
