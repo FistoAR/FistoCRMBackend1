@@ -145,7 +145,7 @@ function AppContent() {
   const socketData = useSocketNotifications();
 
   return (
-    <Router >
+    <Router basename="/fisto_crm/">
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/mobileRequest" element={<MobileRequest />} />

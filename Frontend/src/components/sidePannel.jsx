@@ -213,7 +213,13 @@ const getMenuConfig = (designation, prefix) => ({
     { path: `/${prefix}/taskCalendar`, icon: CalendarIcon, label: "Task's Calendar" },
     { path: `/${prefix}/employeeReports`, icon: AddReportIcon, label: "Employee Reports" },
     { path: `/${prefix}/employeeRequest`, icon: CallsIcon, label: "Employee request" },
-    { path: `/${prefix}/hrActivities`, icon: hrActivityIcon, label: "HR Activities" },
+    { path: "/admin/hr/employeeDetails", icon: hrActivityIcon, label: "Employee Details" },
+    { path: "/admin/hr/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
+    { path: "/admin/hr/request", icon: hrActivityIcon, label: "Request" },
+    { path: "/admin/hr/salaryCalculation", icon: hrActivityIcon, label: "Salary Calculation" },
+    { path: "/admin/hr/interviewSchedules", icon: hrActivityIcon, label: "Interview Schedules" },
+    { path: "/admin/hr/quotes", icon: hrActivityIcon, label: "Quotes" },
+    { path: "/admin/hr/maid", icon: hrActivityIcon, label: "Maid" },
     { path: `/${prefix}/addReports`, icon: MessageIcon, label: "Marketing Task" },
     { path: `/${prefix}/resource`, icon: ActivityIcon, label: "Marketing Resource" },
     { path: `/${prefix}/analytics`, icon: AnalyticsIcon, label: "Marketing Analytics" },
@@ -367,7 +373,7 @@ export default function Sidebar() {
 
     // Deduplicate items by their resolved display label (allowing Analytics once in Marketing and once in Projects)
     const seenLabels = new Set();
-    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR"].includes(designation);
+    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR", "Project Head"].includes(designation);
 
     return items
       .filter((item) => {
@@ -375,7 +381,8 @@ export default function Sidebar() {
           const marketingLabels = [
             "Followups", "Followup's", "Calls", "Budgets", "Management",
             "Marketing Team Leads", "Marketing Leeds", "Marketing Analytics",
-            "Marketing Resources", "Resources", "Resource", "Marketing Resource"
+            "Marketing Resources", "Resources", "Resource", "Marketing Resource",
+            "Marketing Task"
           ];
           if (item.path === "/admin/marketing" || item.path === "/marketing/calls") return false;
           if (marketingLabels.includes(item.label)) return false;
@@ -401,7 +408,7 @@ export default function Sidebar() {
   // Dynamic sorting and grouping of user's original menu items
   const sortedAndGroupedMenu = useMemo(() => {
     const dashboardItem = originalMenuItems.find((item) => item.label === "Dashboard");
-    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR"].includes(designation);
+    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR", "Project Head"].includes(designation);
     
     // Group 2: MARKETING Items (Only compiled for Marketing Department or Admin)
     let marketingItems = [];
@@ -420,6 +427,7 @@ export default function Sidebar() {
         "Resources",
         "Resource",
         "Marketing Resource",
+        "Marketing Task",
       ];
       marketingItems = originalMenuItems.filter((item) => {
         // Exclude project analytics from marketing category
@@ -434,7 +442,8 @@ export default function Sidebar() {
         "Budgets",
         "Marketing Analytics",
         "Marketing Team Leads",
-        "Marketing Resources"
+        "Marketing Resources",
+        "Marketing Task"
       ];
       marketingItems.sort((a, b) => {
         const aLabel = getDisplayLabel(a.label);
@@ -485,6 +494,8 @@ export default function Sidebar() {
       "Interview Schedules",
       "Quotes",
       "Maid",
+      "HR Activities",
+      "HR activities"
     ];
     const hrItems = originalMenuItems.filter((item) => hrLabels.includes(item.label));
 
