@@ -12,8 +12,8 @@ import {
   X,
   Download,
 } from "lucide-react";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import ClientAddModal from "./ClientAdd";
 import ClientUploadModal from "./ClientUpload";
 import FollowupModal from "./FollowupModal";
@@ -487,7 +487,7 @@ const Followup = () => {
       const scheduledTime = meeting.time || "-";
       const meetingType = meeting.type || "-";
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: 55,
         body: [
           ["Company Name", companyName, "Meeting Title", meetingTitle],
@@ -510,7 +510,7 @@ const Followup = () => {
       doc.setFontSize(11);
       doc.text("Minutes of Meeting Details", 14, currentY);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: currentY + 5,
         body: [
           ["Conducted Date", meeting.mom_conductedDate || scheduledDate],
