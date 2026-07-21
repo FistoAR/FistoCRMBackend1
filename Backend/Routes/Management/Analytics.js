@@ -55,25 +55,37 @@ router.get("/overview", async (req, res) => {
   try {
     const { employee_id, from_date, to_date } = req.query;
 
+    // Helper for date condition building
+    const buildDateClause = (colName, fDate, tDate) => {
+      if (fDate && !tDate) return `AND DATE(${colName}) = ?`;
+      if (fDate && tDate) return `AND DATE(${colName}) >= ? AND DATE(${colName}) <= ?`;
+      if (!fDate && tDate) return `AND DATE(${colName}) <= ?`;
+      return "";
+    };
+
+    const pushDateParams = (paramArr, fDate, tDate) => {
+      if (fDate && !tDate) paramArr.push(fDate);
+      else if (fDate && tDate) paramArr.push(fDate, tDate);
+      else if (!fDate && tDate) paramArr.push(tDate);
+    };
+
     // 1. Total Customers
     const totalCustomersQuery = `
       SELECT COUNT(*) as total 
       FROM ClientsDataManagement 
       WHERE active = 1
-      ${from_date ? "AND DATE(created_at) >= ?" : ""}
-      ${to_date ? "AND DATE(created_at) <= ?" : ""}
+      ${buildDateClause("created_at", from_date, to_date)}
       ${employee_id ? "AND employee_id = ?" : ""}
     `;
     
     const totalParams = [];
-    if (from_date) totalParams.push(from_date);
-    if (to_date) totalParams.push(to_date);
+    pushDateParams(totalParams, from_date, to_date);
     if (employee_id) totalParams.push(employee_id);
     
     const totalCustomersResult = await queryWithRetry(totalCustomersQuery, totalParams);
     const totalCustomers = totalCustomersResult[0].total;
 
-    // 2. Get latest status for each client
+    // 2. Get latest status for each client created in the date range
     const latestStatusQuery = `
       SELECT 
         f1.clientID,
@@ -84,25 +96,16 @@ router.get("/overview", async (req, res) => {
       INNER JOIN (
         SELECT clientID, MAX(id) as max_id
         FROM ManagementFollowups
-        WHERE 1=1
-        ${from_date ? "AND DATE(created_at) >= ?" : ""}
-        ${to_date ? "AND DATE(created_at) <= ?" : ""}
-        ${employee_id ? "AND employee_id = ?" : ""}
         GROUP BY clientID
       ) f2 ON f1.clientID = f2.clientID AND f1.id = f2.max_id
       INNER JOIN ClientsDataManagement c ON f1.clientID = c.id
       WHERE c.active = 1
-      ${from_date ? "AND DATE(c.created_at) >= ?" : ""}
-      ${to_date ? "AND DATE(c.created_at) <= ?" : ""}
+      ${buildDateClause("c.created_at", from_date, to_date)}
       ${employee_id ? "AND c.employee_id = ?" : ""}
     `;
     
     const latestParams = [];
-    if (from_date) latestParams.push(from_date);
-    if (to_date) latestParams.push(to_date);
-    if (employee_id) latestParams.push(employee_id);
-    if (from_date) latestParams.push(from_date);
-    if (to_date) latestParams.push(to_date);
+    pushDateParams(latestParams, from_date, to_date);
     if (employee_id) latestParams.push(employee_id);
     
     const latestStatuses = await queryWithRetry(latestStatusQuery, latestParams);
@@ -114,27 +117,29 @@ router.get("/overview", async (req, res) => {
       LEFT JOIN ManagementFollowups f ON c.id = f.clientID
       WHERE f.clientID IS NULL 
         AND c.active = 1
-        ${from_date ? "AND DATE(c.created_at) >= ?" : ""}
-        ${to_date ? "AND DATE(c.created_at) <= ?" : ""}
+        ${buildDateClause("c.created_at", from_date, to_date)}
         ${employee_id ? "AND c.employee_id = ?" : ""}
     `;
     
     const noFollowupParams = [];
-    if (from_date) noFollowupParams.push(from_date);
-    if (to_date) noFollowupParams.push(to_date);
+    pushDateParams(noFollowupParams, from_date, to_date);
     if (employee_id) noFollowupParams.push(employee_id);
     
     const noFollowupResult = await queryWithRetry(noFollowupQuery, noFollowupParams);
     const noFollowupCount = noFollowupResult[0].count;
 
     // Initialize counters
-    let firstFollowupCount = 0;
-    let followupListCount = 0;
+    let freshDataCount = noFollowupCount;
+    let notPickingCount = 0;
+    let inProgressCount = 0;
+    let meetingCount = 0;
     let proposedCount = 0;
-    let projectOnboardCount = 0;
-    let cancelledCount = 0;
+    let billingCount = 0;
+    let leadInprogressCount = 0;
+    let leadOnboardedCount = 0;
     let notInterestedCount = 0;
     let dropCount = 0;
+    let cancelledCount = 0;
 
     let totalMissedFollowups = 0;
 
@@ -143,25 +148,36 @@ router.get("/overview", async (req, res) => {
 
     latestStatuses.forEach((row) => {
       const isMissed = row.nextFollowupDate && new Date(row.nextFollowupDate) < today;
-      if (isMissed && !['project_onboard', 'dropped', 'droped'].includes(row.status)) {
+      if (isMissed && !['lead', 'project_onboard', 'dropped', 'droped', 'cancelled'].includes(row.status)) {
         totalMissedFollowups++;
       }
 
       switch (row.status) {
+        case "not_picking":
+          notPickingCount++;
+          break;
+        case "inProgress":
         case "first_followup":
-          firstFollowupCount++;
+        case "second_followup":
+          inProgressCount++;
           break;
-        case "followup_list":
-          followupListCount++;
-          break;
-        case "not_interested":
-          notInterestedCount++;
+        case "meeting":
+          meetingCount++;
           break;
         case "proposed":
           proposedCount++;
           break;
+        case "billing":
+          billingCount++;
+          break;
+        case "lead":
+          leadInprogressCount++;
+          break;
         case "project_onboard":
-          projectOnboardCount++;
+          leadOnboardedCount++;
+          break;
+        case "not_interested":
+          notInterestedCount++;
           break;
         case "cancelled":
           cancelledCount++;
@@ -170,41 +186,48 @@ router.get("/overview", async (req, res) => {
         case "droped":
           dropCount++;
           break;
+        default:
+          break;
       }
     });
 
-    const totalFollowups = firstFollowupCount + followupListCount;
-    const totalLeads = proposedCount + projectOnboardCount + cancelledCount;
-    const totalOthers = dropCount + notInterestedCount;
+    const activeFollowupsTotal = notPickingCount + inProgressCount + meetingCount + totalMissedFollowups;
+    const leadsTotal = proposedCount + billingCount + leadInprogressCount + leadOnboardedCount;
+    const cancelledDroppedTotal = dropCount + cancelledCount;
 
     const response = {
       success: true,
       data: {
         totalCustomers: totalCustomers,
         freshData: {
-          total: noFollowupCount,
+          total: freshDataCount,
         },
         followups: {
-          total: totalFollowups,
+          total: activeFollowupsTotal,
         },
         leads: {
-          total: totalLeads,
+          total: leadsTotal,
         },
         others: {
-          total: totalOthers,
+          total: notInterestedCount,
+        },
+        cancelledDropped: {
+          total: cancelledDroppedTotal,
         },
         totalMissedFollowups: totalMissedFollowups,
         distribution: [
-          { name: "Fresh Data (No Followup)", value: noFollowupCount },
-          { name: "First Follow Up", value: firstFollowupCount },
-          { name: "Followup List", value: followupListCount },
-          { name: "Payment Proposal", value: proposedCount },
-          { name: "Onboarded", value: projectOnboardCount },
-          { name: "Cancelled", value: cancelledCount },
+          { name: "Not Picking / Busy / Others", value: notPickingCount },
           { name: "Not Interested", value: notInterestedCount },
-          { name: "Drop", value: dropCount },
+          { name: "In Progress", value: inProgressCount },
+          { name: "Shared Proposal", value: proposedCount },
+          { name: "Meetings", value: meetingCount },
           { name: "Missed Follow Up", value: totalMissedFollowups },
-        ].filter(item => item.value > 0 || item.name === "Fresh Data (No Followup)"), // keep fresh data showing even if 0, hide others if 0 to keep chart clean
+          { name: "Payment Proposal", value: billingCount },
+          { name: "Lead Inprogress", value: leadInprogressCount },
+          { name: "Lead Onboarded", value: leadOnboardedCount },
+          { name: "Lead Cancelled", value: cancelledCount },
+          { name: "Dropped", value: dropCount },
+        ],
         dateRange: {
           from: from_date || null,
           to: to_date || null
@@ -343,7 +366,7 @@ router.get("/timeline", async (req, res) => {
   }
 });
 
-// ✅ Get report data for Management
+// ✅ Get report data for Management with history
 router.get("/report", async (req, res) => {
   try {
     const { employee_id } = req.query;
@@ -354,49 +377,33 @@ router.get("/report", async (req, res) => {
         c.company_name,
         c.customer_name,
         c.contactPersons,
+        c.city,
+        c.state,
         c.created_at,
+        fu.id AS followup_id,
         fu.status,
         fu.remarks,
-        fu.followupDate,
-        fu.nextFollowupDate AS nextFollowupDate,
-        e.employee_name AS employee_name,
-        CASE fu.status
-          WHEN 'project_onboard' THEN 'Onboarded'
-          WHEN 'proposed' THEN 'Payment Proposal'
-          WHEN 'first_followup' THEN 'First Followup'
-          WHEN 'followup_list' THEN 'Followup List'
-          WHEN 'not_interested' THEN 'Not Interested'
-          WHEN 'cancelled' THEN 'Cancelled'
-          WHEN 'dropped' THEN 'Drop'
-          ELSE 'No Status'
-        END AS statusLabel
+        fu.created_at AS followupDate,
+        fu.nextFollowupDate,
+        cp.name AS contact_person_name,
+        cp.contactNumber AS contact_person_phone,
+        e.employee_name AS employee_name
       FROM ClientsDataManagement c
       LEFT JOIN employees_details e ON c.employee_id = e.employee_id
-      LEFT JOIN (
-        SELECT
-          f1.clientID,
-          f1.status,
-          f1.remarks,
-          f1.created_at AS followupDate,
-          f1.nextFollowupDate
-        FROM ManagementFollowups f1
-        INNER JOIN (
-          SELECT clientID, MAX(id) AS max_id
-          FROM ManagementFollowups
-          ${employee_id ? "WHERE employee_id = ?" : ""}
-          GROUP BY clientID
-        ) f2 ON f1.clientID = f2.clientID AND f1.id = f2.max_id
-        ${employee_id ? "WHERE f1.employee_id = ?" : ""}
-      ) fu ON fu.clientID = c.id
+      LEFT JOIN ManagementFollowups fu ON fu.clientID = c.id
+      LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
       WHERE c.active = 1
       ${employee_id ? "AND c.employee_id = ?" : ""}
-      ORDER BY c.created_at DESC
+      ORDER BY c.created_at DESC, fu.created_at DESC
     `;
 
-    const reportParams = employee_id ? [employee_id, employee_id, employee_id] : [];
+    const reportParams = employee_id ? [employee_id] : [];
     const rows = await queryWithRetry(sql, reportParams);
 
-    const processedRows = rows.map((row) => {
+    // Group rows by clientID
+    const clientMap = new Map();
+
+    rows.forEach((row) => {
       let phone = "-";
       let contactName = "-";
       if (row.contactPersons) {
@@ -413,19 +420,60 @@ router.get("/report", async (req, res) => {
         }
       }
 
+      const cityStr = row.city && row.city !== "-" ? row.city : "";
+      const stateStr = row.state && row.state !== "-" ? row.state : "";
+      let location = "-";
+      if (cityStr && stateStr) {
+        location = `${cityStr}, ${stateStr}`;
+      } else if (cityStr) {
+        location = cityStr;
+      } else if (stateStr) {
+        location = stateStr;
+      }
+
+      if (!clientMap.has(row.clientID)) {
+        clientMap.set(row.clientID, {
+          clientID: row.clientID,
+          company_name: row.company_name,
+          customer_name: row.customer_name,
+          phone: phone,
+          contactName: contactName,
+          city: row.city || "-",
+          state: row.state || "-",
+          location: location,
+          created_at: row.created_at,
+          employee_name: row.employee_name || "-",
+          history: [],
+        });
+      }
+
+      const clientObj = clientMap.get(row.clientID);
+
+      if (row.followup_id) {
+        clientObj.history.push({
+          id: row.followup_id,
+          status: row.status || "first_followup",
+          remarks: row.remarks || "-",
+          followupDate: row.followupDate || row.created_at,
+          nextFollowupDate: row.nextFollowupDate,
+          contact_person_name: row.contact_person_name || contactName,
+          contact_person_phone: row.contact_person_phone || phone,
+        });
+      }
+    });
+
+    const processedRows = Array.from(clientMap.values()).map((client) => {
+      const latestFollowup = client.history[0] || {};
+      const statusValue = latestFollowup.status || "first_followup";
+      const remarks = latestFollowup.remarks || "-";
+      const followupDate = latestFollowup.followupDate || client.created_at;
+
       return {
-        clientID: row.clientID,
-        company_name: row.company_name,
-        customer_name: row.customer_name,
-        phone: phone,
-        contactName: contactName,
-        created_at: row.created_at,
-        status: row.status,
-        remarks: row.remarks,
-        followupDate: row.followupDate,
-        nextFollowupDate: row.nextFollowupDate,
-        employee_name: row.employee_name,
-        statusLabel: row.statusLabel,
+        ...client,
+        status: statusValue,
+        remarks: remarks,
+        followupDate: followupDate,
+        nextFollowupDate: latestFollowup.nextFollowupDate,
       };
     });
 
@@ -437,6 +485,153 @@ router.get("/report", async (req, res) => {
       error: "Failed to fetch report",
       message: err.message,
     });
+  }
+});
+
+// ✅ Get all meetings from ManagementMeetings table with client details
+router.get("/meetings", async (req, res) => {
+  try {
+    const { employee_id, from_date, to_date, status } = req.query;
+
+    const params = [];
+    let filters = "";
+
+    if (from_date && !to_date) {
+      filters += " AND DATE(m.date) = ?";
+      params.push(from_date);
+    } else if (from_date && to_date) {
+      filters += " AND DATE(m.date) >= ? AND DATE(m.date) <= ?";
+      params.push(from_date, to_date);
+    } else if (!from_date && to_date) {
+      filters += " AND DATE(m.date) <= ?";
+      params.push(to_date);
+    }
+    if (status && status !== "all") {
+      filters += " AND m.status = ?";
+      params.push(status);
+    }
+    if (employee_id) {
+      filters += " AND c.employee_id = ?";
+      params.push(employee_id);
+    }
+
+    const sql = `
+      SELECT
+        m.id,
+        m.followupID,
+        m.title,
+        m.date,
+        m.time,
+        m.type,
+        m.agenda,
+        m.link,
+        m.location AS meeting_location,
+        m.status,
+        m.created_at,
+        m.updated_at,
+        fu.remarks,
+        fu.contactPersonID,
+        c.id AS clientID,
+        c.company_name,
+        c.customer_name,
+        c.contactPersons AS client_contact_persons,
+        c.city,
+        c.state,
+        cp.name AS contact_person_name,
+        cp.contactNumber AS contact_person_phone,
+        cp.designation AS contact_person_designation,
+        e.employee_name,
+        mom.attendeesClient AS mom_attendees_client,
+        mom.attendeesOurSide AS mom_attendees_our_side,
+        mom.agenda AS mom_agenda,
+        mom.outcomes AS mom_outcomes,
+        mom.conductedDate AS mom_conducted_date,
+        mom.startTime AS mom_start_time,
+        mom.endTime AS mom_end_time,
+        mom.documentPath AS mom_document_path
+      FROM ManagementMeetings m
+      JOIN ManagementFollowups fu ON m.followupID = fu.id
+      JOIN ClientsDataManagement c ON fu.clientID = c.id
+      LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
+      LEFT JOIN employees_details e ON c.employee_id = e.employee_id
+      LEFT JOIN ManagementMeetingMOM mom ON m.id = mom.meetingId
+      WHERE c.active = 1
+      ${filters}
+      ORDER BY m.date DESC, m.time DESC
+    `;
+
+    const rows = await queryWithRetry(sql, params);
+
+    const data = rows.map((row) => {
+      let contactName = row.contact_person_name;
+      let contactPhone = row.contact_person_phone;
+      let contactDesignation = row.contact_person_designation;
+
+      if ((!contactName || contactName === "-") && row.client_contact_persons) {
+        try {
+          const contacts = typeof row.client_contact_persons === "string"
+            ? JSON.parse(row.client_contact_persons)
+            : row.client_contact_persons;
+          if (Array.isArray(contacts) && contacts.length > 0) {
+            // First try matching contactPersonID if present
+            const matched = row.contactPersonID
+              ? contacts.find(c => String(c.id) === String(row.contactPersonID)) || contacts[0]
+              : contacts[0];
+
+            contactName = matched.name || matched.contactName || contactName;
+            contactPhone = matched.phone || matched.contactNumber || matched.mobile || contactPhone;
+            contactDesignation = matched.designation || contactDesignation;
+          }
+        } catch (e) {
+          console.error("Error parsing client_contact_persons JSON:", e);
+        }
+      }
+
+      const cityStr = row.city && row.city !== "-" ? row.city : "";
+      const stateStr = row.state && row.state !== "-" ? row.state : "";
+      let location = "-";
+      if (cityStr && stateStr) location = `${cityStr}, ${stateStr}`;
+      else if (cityStr) location = cityStr;
+      else if (stateStr) location = stateStr;
+
+      return {
+        id: row.id,
+        followupID: row.followupID,
+        title: row.title || "-",
+        date: row.date,
+        time: row.time || "-",
+        type: row.type || "-",
+        agenda: row.agenda || "-",
+        link: row.link || null,
+        meeting_location: row.meeting_location || "-",
+        status: row.status,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        clientID: row.clientID,
+        company_name: row.company_name || "-",
+        customer_name: row.customer_name || "-",
+        location,
+        contact_person_name: contactName || "-",
+        contact_person_phone: contactPhone || "-",
+        contact_person_designation: contactDesignation || "-",
+        employee_name: row.employee_name || "-",
+        remarks: row.remarks || "-",
+        mom_attendees_client: row.mom_attendees_client || null,
+        mom_attendees_our_side: row.mom_attendees_our_side || null,
+        mom_agenda: row.mom_agenda || null,
+        mom_outcomes: row.mom_outcomes || null,
+        mom_conducted_date: row.mom_conducted_date || null,
+        mom_start_time: row.mom_start_time || null,
+        mom_end_time: row.mom_end_time || null,
+        mom_document_path: row.mom_document_path || null,
+      };
+    });
+
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error("Meetings fetch error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

@@ -72,3 +72,137 @@
 - Use meaningful variable names.
 - Add comments only for complex logic.
 - Remove unused imports, variables, and code.
+
+
+# UI & UX Guidelines
+
+## General
+- Design should be modern, clean, and professional.
+- Prioritize usability over visual complexity.
+- Maintain a consistent design language across the application.
+- Avoid unnecessary animations or decorative elements.
+- Every screen should have a clear visual hierarchy.
+
+## Layout
+- Use a responsive design for Mobile, Tablet, Laptop, and Desktop.
+- Keep consistent spacing throughout the application (8px grid system).
+- Align elements properly; avoid uneven margins and padding.
+- Do not create horizontal scrolling unless absolutely necessary.
+- Keep important actions visible without excessive scrolling.
+
+## Typography
+- Use a maximum of 2 font families.
+- Maintain consistent font sizes.
+- Use bold only for headings or important information.
+- Ensure text has sufficient contrast for readability.
+
+## Colors
+- Use a limited color palette.
+- Primary color should be used for main actions.
+- Secondary colors should support, not dominate.
+- Error = Red
+- Success = Green
+- Warning = Orange
+- Information = Blue
+
+## Components
+- Reuse components whenever possible.
+- Buttons should have consistent height, border radius, and padding.
+- Inputs should have labels, placeholders, and validation messages.
+- Cards should have subtle shadows and rounded corners.
+- Tables should support sorting, searching, and pagination.
+- Modals should be responsive and closable.
+
+## Forms
+- Validate input immediately where appropriate.
+- Clearly indicate required fields.
+- Display user-friendly error messages.
+- Preserve entered data if validation fails.
+- Group related fields together.
+
+## Navigation
+- Navigation should always indicate the active page.
+- Breadcrumbs for nested pages.
+- Keep menu depth minimal.
+- Important actions should be accessible within 2-3 clicks.
+
+## Data Display
+- Show loading skeletons instead of blank screens.
+- Display empty states with helpful messages.
+- Use pagination or lazy loading for large datasets.
+- Format dates as dd/MM/yyyy.
+- Display time in IST.
+- Format currency consistently.
+
+## Feedback
+- Confirm destructive actions.
+- Show success/error toast notifications.
+- Disable buttons while submitting.
+- Display progress indicators for long-running tasks.
+
+## Accessibility
+- Ensure keyboard navigation works.
+- Maintain sufficient color contrast.
+- Use semantic HTML.
+- Add descriptive labels to form controls.
+- Avoid relying solely on color to convey information.
+
+## Performance
+- Lazy load large components.
+- Optimize images.
+- Minimize unnecessary re-renders.
+- Avoid heavy animations.
+- Maintain smooth interactions.
+
+## Mobile Experience
+- Touch targets should be at least 44x44px.
+- Avoid hover-only interactions.
+- Collapse large tables appropriately.
+- Keep navigation thumb-friendly.
+
+## Dashboard Design
+- Show the most important metrics first.
+- Group related information.
+- Avoid information overload.
+- Use charts only when they add value.
+- Keep dashboards scannable.
+
+## AI Instructions
+Whenever generating UI:
+- Follow these UI/UX guidelines.
+- Build reusable components.
+- Maintain responsive layouts.
+- Prioritize accessibility.
+- Keep the interface clean and professional.
+- Never sacrifice usability for aesthetics.
+
+## CRM-Specific UX
+
+- Every list page should include:
+  - Search
+  - Filters
+  - Sorting
+  - Pagination
+  - Export (CSV/Excel) if applicable
+
+- Every form should support:
+  - Create
+  - Edit
+  - View
+  - Delete (with confirmation)
+
+- Show loading states for all API requests.
+
+- Handle API failures gracefully.
+
+- Never block the UI unnecessarily.
+
+- Display timestamps in dd/MM/yyyy HH:mm IST.
+
+- Tables should remain usable with 10,000+ records.
+
+- Prefer dialogs for quick edits instead of full page navigation.
+
+- Keep actions predictable and consistent across all modules.
+
+- Truncate long text fields (e.g., remarks, company, customer) in table cells and display a custom hover tooltip with a 1-click copy option.

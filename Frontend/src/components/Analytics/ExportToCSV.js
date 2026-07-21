@@ -1,57 +1,107 @@
-class ExportToCSV {
+import * as XLSX from "xlsx";
 
-  export(data, fileName) {
+class ExportToCSV {
+  export(data, options = {}) {
+    let fileName = "Report";
+    let title = "Management Followup Report";
+    let filters = [];
+    let withHistory = false;
+    let historyData = null;
+
+    if (typeof options === "string") {
+      fileName = options;
+    } else {
+      fileName = options.fileName || "Report";
+      title = options.title || "Management Followup Report";
+      filters = options.filters || [];
+      withHistory = options.withHistory || false;
+      historyData = options.historyData || null;
+    }
+
     const headers = [
       "S.NO",
       "Date",
       "Company",
       "Customer",
-      "Industry",
-      "City",
-      "State",
-      "Contact",
-      "Designation",
-      "Next Follow up",
+      "Phone",
+      "Location",
       "Status",
+      "Remarks",
+      "Handled By",
     ];
 
-    let csvContent = headers.join(",") + "\n";
+    const generatedOn = `Generated on: ${new Date().toLocaleDateString("en-GB")} ${new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })}`;
+    const filterText = filters && filters.length > 0 ? `Applied Filters: ${filters.join(" | ")}` : "Applied Filters: None";
 
-    data.forEach((row) => {
-      const safe = (v) =>
-        `"${String(v ?? "")
-          .replace(/"/g, '""')
-          .trim()}"`;
-
-      const line = [
+    // Main Report Worksheet Data with Header Metadata
+    const sheetData = [
+      [title],
+      [generatedOn],
+      [filterText],
+      [], // blank spacing row
+      headers,
+      ...data.map((row) => [
         row.sno,
-        `="${row.date}"`,
-        safe(row.company),
-        safe(row.customer),
-        safe(row.industry),
-        safe(row.city),
-        safe(row.state),
-        safe(row.contact),
-        safe(row.designation),
-        safe(row.nextFollowupDate),
-        safe(row.status),
+        row.date || "-",
+        row.company || "-",
+        row.customer || "-",
+        row.phone || "-",
+        row.location || "-",
+        row.status || "-",
+        row.remarks || "-",
+        row.handled_by || "-",
+      ]),
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const wsReport = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, wsReport, "Followup Report");
+
+    // Optional History Sheet
+    if (withHistory && historyData && Array.isArray(historyData)) {
+      const historySheetRows = [
+        [`${title} - Detailed History`],
+        [generatedOn],
+        [filterText],
+        [], // blank spacing row
+        ["S.NO", "Company", "Customer", "Followup Date", "Status", "Contacted Person", "Remarks", "Next Followup"],
       ];
 
-      csvContent += line.join(",") + "\n";
-    });
+      historyData.forEach((item) => {
+        const clientSNo = item.sno || "-";
+        if (item.history && item.history.length > 0) {
+          item.history.forEach((h) => {
+            historySheetRows.push([
+              clientSNo,
+              item.company || "-",
+              item.customer || "-",
+              h.date || "-",
+              h.status || "-",
+              h.contactPerson || "-",
+              h.remarks || "-",
+              h.nextFollowupDate || "-",
+            ]);
+          });
+        } else {
+          historySheetRows.push([
+            clientSNo,
+            item.company || "-",
+            item.customer || "-",
+            "-",
+            "-",
+            "-",
+            "No history records available",
+            "-",
+          ]);
+        }
+      });
 
-    const BOM = "\uFEFF";
-    const blob = new Blob([BOM + csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
+      const wsHistory = XLSX.utils.aoa_to_sheet(historySheetRows);
+      XLSX.utils.book_append_sheet(wb, wsHistory, "Followup History");
+    }
 
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${fileName}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
+    // Write binary Excel file
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
   }
 }
 

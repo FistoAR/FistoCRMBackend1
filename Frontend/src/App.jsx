@@ -46,11 +46,11 @@ import PHinternReports from "./components/ProjectHead/InternReports";
 import PHworkdone from "./components/ProjectHead/Workdone";
 
 // Admin Components
-import AdminAnalytics from "./components/Management/Analytics";
+import MarketingAnalytic from "./components/Management/MarketingAnalytics";
 import AdminManagement from "./components/Management/Management";
 import AdminFollowup from "./components/Management/Followup";
 import MarketingLeeds from "./components/Management/MarketingLeeds";
-import AdminMarketing from "./components/Management/Marketing";
+import ManagementAnalytics from "./components/Management/ManagementAnalytics";
 import AdminHR, {
   HREmployeeDetails,
   HRAddDesignation,
@@ -145,7 +145,7 @@ function AppContent() {
   const socketData = useSocketNotifications();
 
   return (
-    <Router >
+    <Router>
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/mobileRequest" element={<MobileRequest />} />
@@ -243,14 +243,14 @@ function AppContent() {
                 <Route path="admin/*" element={<Management />}>
                   <Route index element={<Navigate to="dashboard" replace />} />
                   <Route path="dashboard" element={<Dashboard />} />
-                  <Route path="analytics" element={<AdminAnalytics />} />
+                  <Route path="marketingAnalytics" element={<MarketingAnalytic />} />
                   <Route path="projectAnalytics" element={<Analytics />} />
                   <Route path="management" element={<AdminManagement />} />
                   <Route path="followup" element={<AdminFollowup />} />
                   <Route path="resource" element={<MarketingResourse />} />
                   <Route path="masterResource" element={<MasterResource />} />
                   <Route path="marketingLeeds" element={<MarketingLeeds />} />
-                  <Route path="marketing" element={<AdminMarketing />} />
+                  <Route path="analytics" element={<ManagementAnalytics />} />
                   <Route path="taskCalendar" element={<EmployeeCalendar />} />
                   <Route path="hr/*" element={<AdminHR />}>
                     <Route index element={<Navigate to="employeeDetails" replace />} />

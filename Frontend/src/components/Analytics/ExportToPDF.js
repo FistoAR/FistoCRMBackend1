@@ -42,6 +42,8 @@ class ExportToPDF {
       dataKeys.map(key => row[key] !== undefined ? row[key] : "")
     );
 
+    const pageWidth = doc.internal.pageSize.width || 297;
+    const rightMargin = 14;
     let startY = 15;
 
     // Logo
@@ -53,23 +55,26 @@ class ExportToPDF {
     // Title
     doc.setFontSize(15);
     doc.setFont(undefined, "bold");
-    if (logoImg) {
-      doc.text(title, 50, 17);
+    const titleX = options.titleAlign === "right" ? pageWidth - rightMargin : (logoImg ? 50 : 14);
+    const alignOpt = options.titleAlign === "right" ? { align: "right" } : undefined;
+    
+    if (logoImg && options.titleAlign !== "right") {
+      doc.text(title, titleX, 17);
     } else {
-      doc.text(title, 14, startY);
-      startY += 7;
+      doc.text(title, titleX, logoImg ? 17 : startY, alignOpt);
+      if (!logoImg) startY += 7;
     }
 
     // Subtitle / Generated Date
     doc.setFontSize(9);
     doc.setFont(undefined, "normal");
     const generatedOn = `Generated on: ${new Date().toLocaleDateString("en-GB")}`;
-    if (logoImg) {
+    if (logoImg && options.titleAlign !== "right") {
       doc.text(generatedOn, 50, 23);
       startY = 32;
     } else {
-      doc.text(generatedOn, 14, startY);
-      startY += 6;
+      doc.text(generatedOn, titleX, logoImg ? 23 : startY, alignOpt);
+      startY = logoImg ? 32 : startY + 6;
     }
 
     // Filters
@@ -103,6 +108,53 @@ class ExportToPDF {
       },
       margin: { left: 13, right: 13 },
     });
+
+    if (options.withHistory && options.historyData) {
+      doc.addPage();
+      doc.setFontSize(14);
+      doc.setFont(undefined, "bold");
+      doc.text("Followup History Details", 14, 15);
+
+      let historyY = 22;
+      options.historyData.forEach((item, idx) => {
+        if (historyY > 170) {
+          doc.addPage();
+          historyY = 15;
+        }
+
+        doc.setFontSize(10);
+        doc.setFont(undefined, "bold");
+        doc.text(`${item.sno || idx + 1}. ${item.company} (${item.customer})`, 14, historyY);
+        historyY += 5;
+
+        if (item.history && item.history.length > 0) {
+          const historyRows = item.history.map((h, hIdx) => [
+            hIdx + 1,
+            h.date,
+            h.status,
+            h.contactPerson,
+            h.remarks,
+            h.nextFollowupDate || "-"
+          ]);
+
+          autoTable(doc, {
+            head: [["S.NO", "Date", "Status", "Contacted Person", "Remarks", "Next Followup"]],
+            body: historyRows,
+            startY: historyY,
+            styles: { fontSize: 7, cellPadding: 2 },
+            headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255] },
+            margin: { left: 14, right: 14 }
+          });
+
+          historyY = doc.lastAutoTable.finalY + 8;
+        } else {
+          doc.setFontSize(8);
+          doc.setFont(undefined, "italic");
+          doc.text("No history records available", 18, historyY);
+          historyY += 8;
+        }
+      });
+    }
 
     doc.save(`${fileName}.pdf`);
   }

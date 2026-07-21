@@ -476,6 +476,15 @@ mongoose
 
 const PORT = process.env.PORT || 5000;
 
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`❌ Port ${PORT} is already in use. Please terminate the process using port ${PORT} or check if another instance of server.js is running.`);
+    process.exit(1);
+  } else {
+    console.error("❌ Server error:", err);
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🔌 Socket.IO ready`);

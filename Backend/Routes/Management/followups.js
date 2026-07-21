@@ -856,17 +856,55 @@ router.get("/client/:clientId", async (req, res) => {
     const { clientId } = req.params;
 
     const results = await queryWithRetry(
-      `SELECT f.*
+      `SELECT f.*,
+              cp.name AS contact_person_name,
+              cp.contactNumber AS contact_person_phone,
+              cp.email AS contact_person_email,
+              cp.designation AS contact_person_designation,
+              c.contactPersons AS client_contact_persons
        FROM ManagementFollowups f
+       LEFT JOIN ContactPersons cp ON f.contactPersonID = cp.id
+       LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
        WHERE f.clientID = ?
        ORDER BY f.created_at DESC`,
       [clientId]
     );
 
-    res.status(200).json({ success: true, data: results });
+    const processed = (results || []).map((row) => {
+      let contactName = row.contact_person_name || null;
+      let contactPhone = row.contact_person_phone || null;
+      let contactEmail = row.contact_person_email || null;
+      let contactDesignation = row.contact_person_designation || null;
+
+      if (!contactName && row.client_contact_persons) {
+        try {
+          const parsed = typeof row.client_contact_persons === "string"
+            ? JSON.parse(row.client_contact_persons)
+            : row.client_contact_persons;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            contactName = parsed[0].name || parsed[0].contactPerson || null;
+            contactPhone = parsed[0].phone || parsed[0].contactNumber || null;
+            contactEmail = parsed[0].email || null;
+            contactDesignation = parsed[0].designation || null;
+          }
+        } catch (e) {
+          console.error("Error parsing client_contact_persons:", e);
+        }
+      }
+
+      return {
+        ...row,
+        contact_person_name: contactName,
+        contact_person_phone: contactPhone,
+        contact_person_email: contactEmail,
+        contact_person_designation: contactDesignation,
+      };
+    });
+
+    res.status(200).json({ success: true, data: processed });
   } catch (err) {
-    console.error("Error fetching client followups:", err);
-    res.status(500).json({ error: "Failed to fetch followups" });
+    console.error("❌ Error fetching client followups:", err);
+    res.status(500).json({ success: false, error: "Failed to fetch followups", message: err.message });
   }
 });
 
