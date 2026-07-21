@@ -47,8 +47,8 @@ export default function ExistingClients() {
     const activeComponent = tabs[safeActiveTab]?.component;
 
     return (
-        <div className="flex flex-col">
-            <div className="flex gap-[1vh] flex-wrap my-[0.4vw] bg-white p-[0.6vh] rounded-[2vh]">
+        <div className="flex flex-col h-full min-h-0 overflow-hidden">
+            <div className="flex gap-[1vh] flex-wrap my-[0.4vw] bg-white p-[0.6vh] rounded-[2vh] shrink-0">
                 {tabs.map((tab, i) => (
                     <button
                         key={i}
@@ -64,10 +64,12 @@ export default function ExistingClients() {
                 ))}
             </div>
 
-            {activeComponent === 'ProjectLinks' && <ProjectLinks />}
-            {activeComponent === 'ProjectResource' && <ProjectResource />}
-            {activeComponent === 'DriveManager' && <DriveManager />}
-            {activeComponent === 'Others' && <Others />}
+            <div className="flex-1 min-h-0 overflow-hidden">
+                {activeComponent === 'ProjectLinks' && <ProjectLinks />}
+                {activeComponent === 'ProjectResource' && <ProjectResource />}
+                {activeComponent === 'DriveManager' && <DriveManager />}
+                {activeComponent === 'Others' && <Others />}
+            </div>
         </div>
     );
 }

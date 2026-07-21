@@ -1434,14 +1434,15 @@ router.get("/onboarded-projects", async (req, res) => {
   }
 });
 
-// PATCH - Update budget_status to 'entered'
+// PATCH - Update budget_status to 'completed' (or value passed in body)
 router.patch("/onboard/:id/budget-status", async (req, res) => {
   const { id } = req.params;
-  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called`);
+  const newStatus = req.body?.status || "completed";
+  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called with status: ${newStatus}`);
   try {
     await queryWithRetry(
-      `UPDATE ManagementOnboardedProjects SET budget_status = 'entered' WHERE id = ?`,
-      [id]
+      `UPDATE ManagementOnboardedProjects SET budget_status = ? WHERE id = ?`,
+      [newStatus, id]
     );
     res.status(200).json({ success: true, message: "Budget status updated" });
   } catch (err) {

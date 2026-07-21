@@ -230,7 +230,7 @@ router.get("/projects/:id", (req, res) => {
 
       // Fetch proposal documents submitted during followups
       const followupDocsQuery = `
-        SELECT mf.quotation, mf.purchaseOrder, mf.invoice
+        SELECT mf.id AS followupId, mf.quotation, mf.purchaseOrder, mf.invoice
         FROM ManagementFollowups mf
         LEFT JOIN clientAddManagement c ON mf.clientID = c.id
         LEFT JOIN MarketingClients mc ON mf.marketing_client_id = mc.id
@@ -251,7 +251,9 @@ router.get("/projects/:id", (req, res) => {
                     if (Array.isArray(arr)) {
                       arr.forEach((doc) => {
                         followupDocuments.push({
+                          followupId: row.followupId,
                           name: doc.originalName || doc.name || "Followup Document",
+                          convertedName: doc.convertedName || doc.name,
                           path: doc.path ? `/${doc.path}` : null,
                           size: doc.size || 0,
                           uploadedAt: doc.uploadedAt || new Date().toISOString(),
@@ -608,6 +610,57 @@ router.delete("/projects/:id/budget", (req, res) => {
     res.status(200).json({
       success: true,
       message: "Budget deleted successfully",
+    });
+  });
+});
+
+// DELETE - Remove single document from ManagementFollowups row
+router.delete("/followup-document", (req, res) => {
+  const { followupId, docType, path: docPath } = req.body;
+  if (!followupId || !docType) {
+    return res.status(400).json({ success: false, error: "followupId and docType required" });
+  }
+
+  const columnMap = {
+    quotation: "quotation",
+    purchaseOrder: "purchaseOrder",
+    po: "purchaseOrder",
+    invoice: "invoice",
+  };
+  const dbColumn = columnMap[docType];
+  if (!dbColumn) {
+    return res.status(400).json({ success: false, error: "Invalid document type" });
+  }
+
+  const selectSql = `SELECT ${dbColumn} FROM ManagementFollowups WHERE id = ?`;
+  db.pool.query(selectSql, [followupId], (err, rows) => {
+    if (err || !rows.length) {
+      return res.status(500).json({ success: false, error: "Failed to locate followup" });
+    }
+
+    let docs = [];
+    try {
+      docs = rows[0][dbColumn] ? JSON.parse(rows[0][dbColumn]) : [];
+    } catch (e) {
+      docs = [];
+    }
+
+    // Filter out target document by path or filename
+    const cleanPath = (docPath || "").replace(/^\//, "");
+    const updatedDocs = docs.filter(d => {
+      if (!d) return false;
+      if (d.path && d.path === cleanPath) return false;
+      if (d.convertedName && cleanPath.includes(d.convertedName)) return false;
+      if (d.originalName && cleanPath.includes(d.originalName)) return false;
+      return true;
+    });
+
+    const updateSql = `UPDATE ManagementFollowups SET ${dbColumn} = ? WHERE id = ?`;
+    db.pool.query(updateSql, [JSON.stringify(updatedDocs), followupId], (updateErr) => {
+      if (updateErr) {
+        return res.status(500).json({ success: false, error: "Failed to update followup document" });
+      }
+      res.status(200).json({ success: true, message: "Document removed successfully" });
     });
   });
 });

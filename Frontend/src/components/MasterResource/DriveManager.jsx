@@ -380,22 +380,21 @@ export default function DriveManager() {
     );
   };
 
-  // ─── Height: 93vh total (100vh - 7vh header) ──────────────────────────────
-  // sidebar + main both get calc(100vh - 7vh) = 93vh fixed
+  // ─── Height: responsive vh total ──────────────────────────────
 
   return (
-    <div className="w-full h-[650px] flex flex-col rounded-2xl font-['Google_Sans',_'Segoe_UI',_Roboto,_sans-serif] text-[#202124] overflow-hidden">
-      {/* HEADER — fixed height */}
-      <header className="h-14 bg-white border-b border-[#e0e0e0] flex items-center justify-end px-4 gap-3 shrink-0 z-30">
-        <div className="flex items-center gap-2 min-w-[180px]">
-          <img src={driveLogo} alt="Drive" className="w-9 h-9" />
-          <span className="text-lg font-semibold text-[#5f6368]">Drive storage</span>
+    <div className="w-full h-full flex flex-col rounded-2xl font-['Google_Sans',_'Segoe_UI',_Roboto,_sans-serif] text-[#202124] overflow-hidden">
+      {/* HEADER — fixed responsive height */}
+      <header className="h-[6vh] bg-white border-b border-[#e0e0e0] flex items-center justify-end px-[1vw] gap-[0.8vw] shrink-0 z-30">
+        <div className="flex items-center gap-[0.5vw] min-w-[12vw]">
+          <img src={driveLogo} alt="Drive" className="w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px]" />
+          <span className="text-[1.1vw] font-semibold text-[#5f6368]">Drive storage</span>
         </div>
-        <div className="flex items-center justify-end gap-3 flex-1">
-          <div className="flex-1 max-w-[450px] relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5f6368]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            <input className="w-full py-1.5 pl-9 pr-8 rounded-lg bg-[#f1f3f4] text-sm text-[#202124] outline-none focus:bg-white focus:shadow-[0_1px_6px_rgba(32,33,36,0.28)] transition-all" placeholder="Search in current folder..." value={query} onChange={e => setQuery(e.target.value)} />
-            {query && <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] cursor-pointer"><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}
+        <div className="flex items-center justify-end gap-[0.8vw] flex-1">
+          <div className="flex-1 max-w-[28vw] relative">
+            <svg className="absolute left-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] min-w-[14px] min-h-[14px] text-[#5f6368]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input className="w-full py-[0.5vh] pl-[2.2vw] pr-[2vw] rounded-lg bg-[#f1f3f4] text-[0.82vw] text-[#202124] outline-none focus:bg-white focus:shadow-[0_1px_6px_rgba(32,33,36,0.28)] transition-all" placeholder="Search in current folder..." value={query} onChange={e => setQuery(e.target.value)} />
+            {query && <button onClick={() => setQuery("")} className="absolute right-[0.5vw] top-1/2 -translate-y-1/2 p-[0.2vw] rounded-full hover:bg-[#e8eaed] text-[#5f6368] cursor-pointer"><svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}
           </div>
           <div className="flex bg-[#f1f3f4] rounded-lg overflow-hidden">
             <button onClick={() => setView("grid")} className={`p-2 cursor-pointer ${view === "grid" ? "bg-[#e8f0fe] text-[#1967d2]" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}><svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg></button>
@@ -414,24 +413,24 @@ export default function DriveManager() {
       {/* BODY */}
       <div className="flex flex-1 overflow-hidden">
         {/* SIDEBAR */}
-        <aside className="w-64 bg-white border-r border-[#e0e0e0] flex flex-col shrink-0 h-full relative">
+        <aside className="w-[15vw] min-w-[180px] bg-white border-r border-[#e0e0e0] flex flex-col shrink-0 h-full relative">
           {sidebarLoading && (
             <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
               <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
             </div>
           )}
-          <div className="px-4 py-2.5 border-b border-[#e0e0e0] shrink-0 flex items-center justify-between">
-            <span className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider">Folders</span>
-            {!isAdmin && <span className="text-xs text-[#9aa0a6] flex items-center gap-1">{ICONS.lock} = No access</span>}
+          <div className="px-[0.8vw] py-[0.8vh] border-b border-[#e0e0e0] shrink-0 flex items-center justify-between">
+            <span className="text-[0.72vw] font-semibold text-[#5f6368] uppercase tracking-wider">Folders</span>
+            {!isAdmin && <span className="text-[0.68vw] text-[#9aa0a6] flex items-center gap-1">{ICONS.lock} = No access</span>}
           </div>
-          <div className="flex-1 overflow-y-auto px-2 py-1 min-h-0">
+          <div className="flex-1 overflow-y-auto px-[0.4vw] py-[0.2vh] min-h-0">
             {sidebarLoading && !sidebarFolders.length && <div className="flex items-center justify-center h-full"><div className="w-5 h-5 border-[2px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div>}
             {!sidebarLoading && !sidebarFolders.length && !sidebarCreating && <div className="flex flex-col items-center justify-center h-full text-center"><div className="text-3xl mb-1 opacity-40">📁</div><p className="text-xs text-[#5f6368]">No folders yet</p></div>}
-            {sidebarFolders.map(f => <div key={f.id} className="mb-0.5"><SidebarFolderItem folder={f} /></div>)}
+            {sidebarFolders.map(f => <div key={f.id} className="mb-[0.2vh]"><SidebarFolderItem folder={f} /></div>)}
             {sidebarCreating && <div className="flex items-center gap-2 px-3 py-1.5 mb-0.5 bg-[#e8f0fe] rounded-r-full rounded-l-md border-l-[3px] border-[#1967d2]"><div className="shrink-0">{ICONS.folder}</div><input ref={sidebarInlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-sm text-[#202124] outline-none min-w-0" value={sidebarNewName} onChange={e => setSidebarNewName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitSidebarCreate(); if (e.key === "Escape") cancelSidebarCreate(); }} onBlur={() => commitSidebarCreate()} /></div>}
           </div>
-          {storageInfo && <div className="px-4 py-2 border-t border-[#e0e0e0] shrink-0"><div className="text-xs text-[#5f6368] mb-1">{storageInfo.fileCount} items • {fmtSize(storageInfo.totalSize)}</div><div className="h-1 bg-[#e0e0e0] rounded-full overflow-hidden"><div className="h-full bg-[#1a73e8] rounded-full" style={{ width: `${Math.min(100, (storageInfo.totalSize / (15 * 1024 * 1024 * 1024)) * 100)}%` }} /></div></div>}
-          {isAdmin && <div className="px-3 py-2 border-t border-[#e0e0e0] shrink-0"><button onClick={startSidebarCreate} className="w-full h-10 flex items-center justify-center gap-2 rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-sm font-semibold cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Add Folder</button></div>}
+          {storageInfo && <div className="px-[0.8vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0"><div className="text-[0.7vw] text-[#5f6368] mb-[0.2vh]">{storageInfo.fileCount} items • {fmtSize(storageInfo.totalSize)}</div><div className="h-[3px] bg-[#e0e0e0] rounded-full overflow-hidden"><div className="h-full bg-[#1a73e8] rounded-full" style={{ width: `${Math.min(100, (storageInfo.totalSize / (15 * 1024 * 1024 * 1024)) * 100)}%` }} /></div></div>}
+          {isAdmin && <div className="px-[0.6vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0"><button onClick={startSidebarCreate} className="w-full h-[4vh] flex items-center justify-center gap-[0.4vw] rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-[0.8vw] font-semibold cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Add Folder</button></div>}
         </aside>
 
         {/* MAIN */}
@@ -458,8 +457,8 @@ export default function DriveManager() {
             <>
               {/* Breadcrumbs — shrink-0 */}
               <div className="shrink-0 relative">
-                {!searchFiles && <div className="flex items-center justify-between gap-1 py-1.5 px-4 flex-wrap border-b border-[#e0e0e0]"><div className="flex items-center gap-1 flex-wrap">{activeSidebarFolder && <button onClick={() => goTo(activeSidebarFolder.id)} className={`px-2.5 py-1 rounded-full text-sm cursor-pointer ${crumbs.length === 0 && folderId === activeSidebarFolder.id ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{activeSidebarFolder.name}</button>}{crumbs.filter(c => c.id !== activeSidebarFolder?.id).map(c => <React.Fragment key={c.id}><span className="text-[#5f6368] select-none">›</span><button onClick={() => goTo(c.id)} className={`px-2.5 py-1 rounded-full text-sm cursor-pointer ${c.id === folderId ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{c.name}</button></React.Fragment>)}</div><div className="flex items-center gap-3">{!isAdmin && <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${canDownload() ? "bg-[#e6f4ea] text-[#1e8e3e]" : "bg-[#fce8e6] text-[#d93025]"}`}>{canDownload() ? ICONS.unlock : ICONS.lock}{canDownload() ? "Full access" : "No access"}</span>}<span className="text-xs text-[#5f6368]">{displayed.length} item{displayed.length !== 1 ? "s" : ""}</span></div></div>}
-                {searchFiles !== null && <div className="flex items-center gap-2 py-1.5 px-4 border-b border-[#e0e0e0]"><button onClick={() => { setQuery(""); setSearchFiles(null); }} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-sm text-[#5f6368] hover:bg-[#e8eaed] cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>Back</button><span className="text-[#5f6368]">›</span><span className="text-sm text-[#202124] font-medium">"{query}" ({searchFiles.length})</span></div>}
+                {!searchFiles && <div className="flex items-center justify-between gap-1 py-[0.5vh] px-[1vw] flex-wrap border-b border-[#e0e0e0]"><div className="flex items-center gap-1 flex-wrap">{activeSidebarFolder && <button onClick={() => goTo(activeSidebarFolder.id)} className={`px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] cursor-pointer ${crumbs.length === 0 && folderId === activeSidebarFolder.id ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{activeSidebarFolder.name}</button>}{crumbs.filter(c => c.id !== activeSidebarFolder?.id).map(c => <React.Fragment key={c.id}><span className="text-[#5f6368] select-none text-[0.8vw]">›</span><button onClick={() => goTo(c.id)} className={`px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] cursor-pointer ${c.id === folderId ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{c.name}</button></React.Fragment>)}</div><div className="flex items-center gap-[0.8vw]">{!isAdmin && <span className={`flex items-center gap-1 text-[0.7vw] px-[0.5vw] py-[0.2vh] rounded-full ${canDownload() ? "bg-[#e6f4ea] text-[#1e8e3e]" : "bg-[#fce8e6] text-[#d93025]"}`}>{canDownload() ? ICONS.unlock : ICONS.lock}{canDownload() ? "Full access" : "No access"}</span>}<span className="text-[0.72vw] text-[#5f6368]">{displayed.length} item{displayed.length !== 1 ? "s" : ""}</span></div></div>}
+                {searchFiles !== null && <div className="flex items-center gap-2 py-[0.5vh] px-[1vw] border-b border-[#e0e0e0]"><button onClick={() => { setQuery(""); setSearchFiles(null); }} className="flex items-center gap-1 px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] text-[#5f6368] hover:bg-[#e8eaed] cursor-pointer"><svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>Back</button><span className="text-[#5f6368]">›</span><span className="text-[0.82vw] text-[#202124] font-medium">"{query}" ({searchFiles.length})</span></div>}
                 {initialLoading && (
                   <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
                     <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
@@ -473,9 +472,9 @@ export default function DriveManager() {
 
                 {/* GRID */}
                 {view === "grid" && (displayed.length > 0 || inlineCreating) && (
-                  <div className="px-4 py-2">
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3 auto-rows-max content-start">
-                      {inlineCreating && <div className="bg-white border-2 border-[#1a73e8] rounded-lg overflow-hidden"><div className="h-28 flex items-center justify-center bg-[#e8f0fe] border-b border-[#d2e3fc]"><div className="scale-[2.5] opacity-80">{ICONS.folder}</div></div><div className="flex items-center gap-1.5 px-2 py-1.5"><div className="shrink-0">{ICONS.folder}</div><input ref={inlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-xs text-[#202124] outline-none min-w-0" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /></div></div>}
+                  <div className="px-[1vw] py-[0.6vh]">
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(11vw,1fr))] gap-[0.8vw] auto-rows-max content-start">
+                      {inlineCreating && <div className="bg-white border-2 border-[#1a73e8] rounded-lg overflow-hidden"><div className="h-[12vh] flex items-center justify-center bg-[#e8f0fe] border-b border-[#d2e3fc]"><div className="scale-[2.5] opacity-80">{ICONS.folder}</div></div><div className="flex items-center gap-1.5 px-2 py-1.5"><div className="shrink-0">{ICONS.folder}</div><input ref={inlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-xs text-[#202124] outline-none min-w-0" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /></div></div>}
                       {displayed.map(f => {
                         const isSel = selected.has(f.id);
                         return (
@@ -483,14 +482,14 @@ export default function DriveManager() {
                             className={`group bg-white rounded-lg overflow-hidden cursor-pointer transition-all hover:shadow-[0_1px_6px_rgba(32,33,36,0.16)] ${isSel ? "border-[2px] border-[#202124] shadow-[0_0_0_1px_#202124]" : "border border-[#e0e0e0] hover:border-[#d2e3fc]"}`}
                             onClick={e => handleItemClick(f, e)}
                             onContextMenu={e => handleCtx(e, f)}>
-                            <div className="h-28 overflow-hidden border-b border-[#e0e0e0] relative">
+                            <div className="h-[12vh] overflow-hidden border-b border-[#e0e0e0] relative">
                               <Thumbnail file={f} apiUrl={API_URL} />
                               {f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="absolute top-1 right-1 text-[#1e8e3e]">{ICONS.unlock}</span>}
                             </div>
-                            <div className="flex items-center gap-1 px-2.5 py-2">
+                            <div className="flex items-center gap-[0.3vw] px-[0.6vw] py-[0.6vh]">
                               <div className="shrink-0">{getIcon(f.iconType || (f.isFolder ? "folder" : "file"))}</div>
-                              {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-xs outline-none min-w-0" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="flex-1 text-xs text-[#3c4043] truncate" title={f.name}>{f.name}</span>}
-                              <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
+                              {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-xs outline-none min-w-0" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="flex-1 text-[0.78vw] text-[#3c4043] truncate" title={f.name}>{f.name}</span>}
+                              <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
                             </div>
                           </div>
                         );
@@ -501,21 +500,21 @@ export default function DriveManager() {
 
                 {/* LIST */}
                 {view === "list" && (displayed.length > 0 || inlineCreating) && (
-                  <div className="px-4">
-                    <div className="grid grid-cols-[40px_1fr_100px_80px_40px] gap-2 items-center px-3 py-1.5 text-xs font-semibold text-[#5f6368] uppercase tracking-wider border-b border-[#e0e0e0] sticky top-0 bg-white z-10"><span /><span>Name</span><span>Modified</span><span>Size</span><span /></div>
-                    {inlineCreating && <div className="grid grid-cols-[40px_1fr_100px_80px_40px] gap-2 items-center px-3 py-1.5 border-b border-[#d2e3fc] bg-[#e8f0fe]"><span className="flex items-center justify-center">{ICONS.folder}</span><input ref={inlineRef} className="bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-sm outline-none" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /><span className="text-xs text-[#5f6368]">Just now</span><span className="text-xs text-[#5f6368]">—</span><span /></div>}
+                  <div className="px-[1vw]">
+                    <div className="grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] text-[0.7vw] font-semibold text-[#5f6368] uppercase tracking-wider border-b border-[#e0e0e0] sticky top-0 bg-white z-10"><span /><span>Name</span><span>Modified</span><span>Size</span><span /></div>
+                    {inlineCreating && <div className="grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] border-b border-[#d2e3fc] bg-[#e8f0fe]"><span className="flex items-center justify-center">{ICONS.folder}</span><input ref={inlineRef} className="bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-[0.82vw] outline-none" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /><span className="text-[0.7vw] text-[#5f6368]">Just now</span><span className="text-[0.7vw] text-[#5f6368]">—</span><span /></div>}
                     {displayed.map(f => {
                       const isSel = selected.has(f.id);
                       return (
                         <div key={f.id}
-                          className={`group grid grid-cols-[40px_1fr_100px_80px_40px] gap-2 items-center px-3 py-1.5 border-b cursor-pointer transition-colors ${isSel ? "bg-[#f0f0f0] border-l-[3px] border-l-[#202124] border-b-[#e0e0e0]" : "border-[#f1f3f4] hover:bg-[#f1f3f4]"}`}
+                          className={`group grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] border-b cursor-pointer transition-colors ${isSel ? "bg-[#f0f0f0] border-l-[3px] border-l-[#202124] border-b-[#e0e0e0]" : "border-[#f1f3f4] hover:bg-[#f1f3f4]"}`}
                           onClick={e => handleItemClick(f, e)}
                           onContextMenu={e => handleCtx(e, f)}>
                           <span className="flex items-center justify-center">{getIcon(f.iconType || (f.isFolder ? "folder" : "file"))}</span>
-                          {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-sm outline-none" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="text-sm text-[#3c4043] truncate flex items-center gap-1"><span className="truncate">{f.name}</span>{f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="shrink-0 text-[#1e8e3e]">{ICONS.unlock}</span>}</span>}
-                          <span className="text-xs text-[#5f6368]">{fmtDate(f.modifiedTime)}</span>
-                          <span className="text-xs text-[#5f6368]">{f.isFolder ? "—" : fmtSize(f.size)}</span>
-                          <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
+                          {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-[0.82vw] outline-none" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="text-[0.82vw] text-[#3c4043] truncate flex items-center gap-1"><span className="truncate">{f.name}</span>{f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="shrink-0 text-[#1e8e3e]">{ICONS.unlock}</span>}</span>}
+                          <span className="text-[0.72vw] text-[#5f6368]">{fmtDate(f.modifiedTime)}</span>
+                          <span className="text-[0.72vw] text-[#5f6368]">{f.isFolder ? "—" : fmtSize(f.size)}</span>
+                          <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
                         </div>
                       );
                     })}
@@ -528,7 +527,7 @@ export default function DriveManager() {
 
         {/* DETAIL PANEL */}
         {showDetail && detail && (
-          <aside className="w-80 bg-white border-l border-[#e0e0e0] flex flex-col shrink-0 h-full overflow-y-auto animate-[slideLeft_0.2s_ease] relative">
+          <aside className="w-[18vw] min-w-[220px] bg-white border-l border-[#e0e0e0] flex flex-col shrink-0 h-full overflow-y-auto animate-[slideLeft_0.2s_ease] relative">
             {detailLoading && (
               <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
                 <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />

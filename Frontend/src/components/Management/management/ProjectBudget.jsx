@@ -383,6 +383,34 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     }
   };
 
+  const removeFollowupDocument = async (doc, index) => {
+    const ok = window.confirm(`Are you sure you want to delete "${doc.name}" permanently?`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/budget/followup-document`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          followupId: doc.followupId,
+          docType: doc.type,
+          path: doc.path,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setFollowupDocuments((prev) => prev.filter((_, i) => i !== index));
+        showToast("Success", "Document deleted successfully");
+      } else {
+        showToast("Error", data.error || "Failed to delete document");
+      }
+    } catch (err) {
+      console.error("Delete followup document error:", err);
+      showToast("Error", "Failed to delete document");
+    }
+  };
+
   const addPaymentRow = () => {
     if (disabledPayments) {
       showToast(
@@ -597,6 +625,8 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
         if (targetOnboardId) {
           await fetch(`${API_BASE_URL}/ManagementFollowups/onboard/${targetOnboardId}/budget-status`, {
             method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "completed" })
           }).catch(() => {});
           setSelectedOnboardedProjectId(null);
           await fetchOnboardedProjects();
@@ -648,7 +678,16 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                 </div>
 
                 <button
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => {
+                    setSelectedOnboardedProjectId(null);
+                    setCreateFormData({
+                      companyName: "",
+                      customerName: "",
+                      projectName: "",
+                      projectCategory: "",
+                    });
+                    setShowCreateModal(true);
+                  }}
                   className="px-[1.2vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium text-[0.85vw] flex items-center gap-[0.5vw] cursor-pointer"
                 >
                   <Plus size={18} />
@@ -1325,6 +1364,14 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                 </button>
                               </>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => removeFollowupDocument(doc, idx)}
+                              className="text-red-500 hover:text-red-700 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -1723,7 +1770,8 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
               </button>
               <button
                 onClick={handleCreateProject}
-                className="px-[1.5vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer"
+                disabled={!selectedOnboardedProjectId}
+                className="px-[1.5vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 Create Project
               </button>

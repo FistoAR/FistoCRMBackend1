@@ -343,6 +343,7 @@ const Followup = () => {
   useEffect(() => {
     if (employeeId) {
       fetchCounts();
+      fetchMeetings();
     }
   }, [employeeId]);
 
@@ -415,23 +416,42 @@ const Followup = () => {
     }
 
     try {
-      const url = `${API_URL}/ManagementFollowups?status=all&employee_id=${employeeId}`;
+      const url = `${API_URL}/management/analytics/meetings?employee_id=${employeeId}`;
       const response = await fetch(url);
       const data = await response.json();
 
-      if (data.success) {
-        const allMeetings = [];
-        data.data.forEach((clientData) => {
-          if (clientData.meetings && clientData.meetings.length > 0) {
-            clientData.meetings.forEach((meeting) => {
-              allMeetings.push({
-                ...meeting,
-                client_details: clientData.client_details,
-              });
+      if (data.success && Array.isArray(data.data)) {
+        const mappedMeetings = data.data.map((m) => {
+          const cpList = [];
+          if (m.contact_person_name && m.contact_person_name !== "-") {
+            cpList.push({
+              name: m.contact_person_name,
+              contactNumber: m.contact_person_phone || "-",
+              designation: m.contact_person_designation || "",
             });
+          } else if (m.client_contact_persons) {
+            try {
+              const contacts = typeof m.client_contact_persons === "string"
+                ? JSON.parse(m.client_contact_persons)
+                : m.client_contact_persons;
+              if (Array.isArray(contacts)) cpList.push(...contacts);
+            } catch (e) {}
           }
+
+          return {
+            ...m,
+            status: m.status || "inprogress",
+            client_details: {
+              id: m.clientID,
+              company_name: m.company_name,
+              customer_name: m.customer_name,
+              contactPersons: cpList,
+              city: m.city,
+              state: m.state,
+            },
+          };
         });
-        setMeetings(allMeetings);
+        setMeetings(mappedMeetings);
       }
     } catch (error) {
       console.error("Error fetching meetings:", error);
@@ -1076,6 +1096,15 @@ const Followup = () => {
                   : "text-gray-600 hover:text-gray-900"
               }`}> 
               Meetings
+              <span
+                className={`text-[0.7vw] px-[0.4vw] py-[0.1vw] rounded-full ${
+                  mainTab === "meetings"
+                    ? "bg-black text-white"
+                    : "bg-gray-200 text-gray-600"
+                }`}
+              >
+                {formatCount(meetings.length)}
+              </span>
             </button>
           </div>
 
@@ -1450,6 +1479,16 @@ const Followup = () => {
                       if (meetingDate < start || meetingDate > dayEnd) return false;
                     } else if (end) {
                       if (meetingDate > end) return false;
+                    }
+                  }
+
+                  if (searchTerm && searchTerm.trim() !== "") {
+                    const term = searchTerm.toLowerCase().trim();
+                    const company = (m.client_details?.company_name || m.company_name || "").toLowerCase();
+                    const customer = (m.client_details?.customer_name || m.customer_name || "").toLowerCase();
+                    const title = (m.title || "").toLowerCase();
+                    if (!company.includes(term) && !customer.includes(term) && !title.includes(term)) {
+                      return false;
                     }
                   }
 

@@ -52,15 +52,15 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
       return (
         <Link
           to={to}
-          className="flex items-center justify-between px-3 py-2 bg-white border border-slate-100 shadow-sm rounded-xl text-zinc-900 font-semibold text-[0.85vw] w-full transition-all duration-150"
+          className="flex items-center justify-between px-[0.7vw] py-[0.6vh] bg-white border border-slate-200 shadow-sm rounded-xl text-black font-semibold text-[0.88vw] min-h-[4vh] w-full transition-all duration-150"
         >
-          <div className="flex items-center gap-[0.8vw]">
-            <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-gradient-to-r from-zinc-900 to-black text-white text-[0.7vw] font-bold">
+          <div className="flex items-center gap-[0.6vw] min-w-0 flex-1">
+            <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-gradient-to-r from-zinc-900 to-black text-white text-[0.75vw] font-bold shrink-0">
               {formattedNum}
             </span>
-            <span className="truncate">{label}</span>
+            <span className="truncate min-w-0 leading-tight font-semibold">{label}</span>
           </div>
-          <svg className="w-[0.8vw] h-[0.8vw] text-zinc-900 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] text-black shrink-0 ml-[0.3vw]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
           </svg>
         </Link>
@@ -69,12 +69,12 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
       return (
         <Link
           to={to}
-          className="flex items-center px-3 py-2 text-slate-500 hover:text-slate-800 hover:bg-white/50 rounded-xl text-[0.85vw] w-full gap-[0.8vw] transition-all duration-150"
+          className="flex items-center px-[0.7vw] py-[0.6vh] text-gray-700 font-medium hover:bg-slate-100/70 hover:text-black rounded-xl text-[0.88vw] min-h-[4vh] w-full gap-[0.6vw] transition-all duration-150"
         >
-          <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-100 text-slate-400 text-[0.7vw] font-semibold">
+          <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-100 text-gray-700 text-[0.75vw] font-semibold shrink-0">
             {formattedNum}
           </span>
-          <span className="truncate">{label}</span>
+          <span className="truncate min-w-0 leading-tight font-medium">{label}</span>
         </Link>
       );
     }
@@ -102,7 +102,7 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
         ${isCollapsed ? "justify-center py-2" : "py-3 gap-[0.8vw] text-[0.88vw]"}
         ${isActive 
           ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10" 
-          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          : "text-gray-700 font-semibold hover:bg-slate-100 hover:text-black"
         }`}
     >
       {icon && (
@@ -115,7 +115,7 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
           />
         </div>
       )}
-      {!isCollapsed && <span className="truncate">{label}</span>}
+      {!isCollapsed && <span className="truncate min-w-0">{label}</span>}
     </Link>
   );
 }
@@ -143,7 +143,7 @@ function CategoryHeader({ label, icon, count, isOpen, isActive, onClick, isColla
         ${isCollapsed ? "justify-center py-2" : "justify-between text-[0.88vw] py-3"}
         ${isActive
           ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10"
-          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          : "text-gray-800 font-semibold hover:bg-slate-100 hover:text-black"
         }`}
     >
       <div className={`flex items-center min-w-0 ${isCollapsed ? "" : "gap-[0.8vw]"}`}>
@@ -157,7 +157,7 @@ function CategoryHeader({ label, icon, count, isOpen, isActive, onClick, isColla
             />
           </div>
         )}
-        {!isCollapsed && <span className="truncate font-semibold">{label}</span>}
+        {!isCollapsed && <span className="truncate min-w-0 font-semibold">{label}</span>}
       </div>
       
       {!isCollapsed && (
@@ -187,6 +187,7 @@ const PATH_PREFIX_MAP = {
   "3D": "threeD",
   "Project Head": "projectHead",
   SBU: "sbu",
+  Developer: "softwareDeveloper",
 };
 
 const getMenuConfig = (designation, prefix) => ({
@@ -326,15 +327,18 @@ export default function Sidebar() {
     if (["Followup's", "Calls"].includes(label)) return "Followups";
     if (label === "Management") return "Budgets";
     if (label === "Marketing Leeds") return "Marketing Team Leads";
-    if (["Resources", "Resource", "Marketing Resource"].includes(label)) return "Marketing Resources";
+    if (label === "Marketing Analytics") return "Marketing Team Analytics";
+    if (["Resources", "Resource", "Marketing Resource", "Marketing Resources"].includes(label)) return "Marketing Team Resources";
     if (label === "Project" || label === "Projects") return "Projects";
     if (["Task's Calendar", "Task Calendar"].includes(label)) return "Task Calendars";
     if (label === "Employee Reports") return "Employee Monthly Report";
     if (label === "Master Resource") return "My Resources";
-    if (label === "Sticky Notes") return "Sticky notes";
+    if (label === "Sticky Notes" || label === "Sticky notes") return "Sticky Notes";
     if (label === "Project Analytics") return "Analytics";
     if (label === "HR") return "Human Resource";
-    if (label === "Employee Request") return "Employee request";
+    if (label === "Employee Request" || label === "Employee request") return "Employee Request";
+    if (label === "Daily reports" || label === "dailyReports") return "Daily Reports";
+    if (label === "Unscheduled Task") return "Unscheduled Tasks";
     return label;
   };
 
@@ -359,15 +363,25 @@ export default function Sidebar() {
     if (isOnRole && designation === "Project Head") {
       items.push(...menuConfig.projectHead);
     }
-    if (isOnRole && ["Admin", "SBU"].includes(designation)) {
+    if (isOnRole && designation === "SBU") {
+      items.push(...menuConfig.projectHead);
+    }
+    if (isOnRole && designation === "Admin") {
       items.push(...menuConfig.admin);
     }
-    if (employeementType === "Intern") {
+    if (!isOnRole && designation) {
       items.push(...menuConfig.intern);
     }
+
     if (isOnRole && isDeveloper) {
-      const devItems = [...menuConfig.developer];
+      const devKey = PATH_PREFIX_MAP[designation] || "developer";
+      const devItems = menuConfig[devKey] || menuConfig.developer || [];
       items.push(...devItems);
+    }
+
+    // Default fallback: If user is "On Role" (e.g. Employee, Team Member, custom designation), load default developer/project menu
+    if (isOnRole && items.length === 0) {
+      items.push(...(menuConfig.developer || []));
     }
     items.push(...menuConfig.common);
 
@@ -380,8 +394,8 @@ export default function Sidebar() {
         if (!isMarketingDeptOrAdmin) {
           const marketingLabels = [
             "Followups", "Followup's", "Calls", "Budgets", "Management",
-            "Marketing Team Leads", "Marketing Leeds", "Marketing Analytics",
-            "Marketing Resources", "Resources", "Resource", "Marketing Resource",
+            "Marketing Team Leads", "Marketing Leeds", "Marketing Analytics", "Marketing Team Analytics",
+            "Marketing Resources", "Marketing Team Resources", "Resources", "Resource", "Marketing Resource",
             "Marketing Task"
           ];
           if (item.path === "/admin/marketing" || item.path === "/marketing/calls") return false;
@@ -423,7 +437,9 @@ export default function Sidebar() {
         "Marketing Team Leads",
         "Marketing Leeds",
         "Marketing Analytics",
+        "Marketing Team Analytics",
         "Marketing Resources",
+        "Marketing Team Resources",
         "Resources",
         "Resource",
         "Marketing Resource",
@@ -440,9 +456,9 @@ export default function Sidebar() {
         "Analytics",
         "Followups",
         "Budgets",
-        "Marketing Analytics",
+        "Marketing Team Analytics",
         "Marketing Team Leads",
-        "Marketing Resources",
+        "Marketing Team Resources",
         "Marketing Task"
       ];
       marketingItems.sort((a, b) => {
@@ -465,9 +481,14 @@ export default function Sidebar() {
       "Unschedule task"
     ];
     let projectsItems = originalMenuItems.filter((item) => {
-      // Exclude marketing analytics from projects category if user is admin/marketing
+      // Exclude marketing analytics & management analytics from projects category for admin/marketing
       if (isMarketingDeptOrAdmin) {
-        if (item.path === "/admin/marketing" || item.path === "/admin/analytics" || item.path === "/marketing/analytics") return false;
+        if (
+          item.path === "/admin/marketingAnalytics" ||
+          item.path === "/marketing/analytics" ||
+          item.path === "/admin/analytics"
+        )
+          return false;
       }
       return projectLabels.includes(item.label);
     });
@@ -475,14 +496,25 @@ export default function Sidebar() {
     // Enforce exact order for Projects sub tabs
     const projectsOrder = [
       "Analytics",
+      "Project Analytics",
       "Projects",
+      "Project",
       "Task Calendars",
-      "Unscheduled Task"
+      "Task Calendar",
+      "Task's Calendar",
+      "Unscheduled Tasks",
+      "Unscheduled Task",
+      "Unschedule task"
     ];
     projectsItems.sort((a, b) => {
       const aLabel = getDisplayLabel(a.label);
       const bLabel = getDisplayLabel(b.label);
-      return projectsOrder.indexOf(aLabel) - projectsOrder.indexOf(bLabel);
+      const aIndex = projectsOrder.indexOf(aLabel);
+      const bIndex = projectsOrder.indexOf(bLabel);
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
     });
 
     // Group 3.5: HR Items
@@ -525,12 +557,14 @@ export default function Sidebar() {
 
     const combinedSeparated = [...separatedItems, ...otherItems];
     
-    // Sort in exact order: My Resources, Employee Monthly Report, Employee request, Dairy Remainder, Sticky notes
+    // Sort in exact order: My Resources, Employee Monthly Report, Employee Request, Dairy Remainder, Sticky Notes
     const separatedOrder = [
       "My Resources",
       "Employee Monthly Report",
+      "Employee Request",
       "Employee request",
       "Dairy Remainder",
+      "Sticky Notes",
       "Sticky notes"
     ];
     combinedSeparated.sort((a, b) => {
@@ -564,8 +598,8 @@ export default function Sidebar() {
     <aside
       className="relative flex flex-col bg-white border-r border-gray-100 text-[1vw] select-none h-screen flex-shrink-0 transition-all duration-300 ease-in-out font-sans"
       style={{ 
-        width: isCollapsed ? "80px" : "280px", 
-        minWidth: isCollapsed ? "80px" : "280px" 
+        width: isCollapsed ? "80px" : "300px", 
+        minWidth: isCollapsed ? "80px" : "300px" 
       }}
     >
       {/* Collapse / Expand Toggle Button */}

@@ -50,7 +50,7 @@ export default function MasterResource() {
   const activeComponent = navItems[safeActivePage]?.component;
 
   return (
-    <div className="min-h-[90vh] p-0 font-[DM_Sans,sans-serif]">
+    <div className="h-[91vh] p-0 font-[DM_Sans,sans-serif] flex flex-col overflow-hidden">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
 
       {/* ── Sticky Top Nav ── */}
@@ -131,7 +131,7 @@ export default function MasterResource() {
       </div>
 
       {/* ── Page Content ── */}
-      <div className="pt-[0.3vh]">
+      <div className="flex-1 min-h-0 overflow-hidden pt-[0.3vh]">
         {activeComponent === "ExistingClients" && <ExistingClients />}
         {activeComponent === "WeeklyReports" && <WeeklyReports />}
       </div>
