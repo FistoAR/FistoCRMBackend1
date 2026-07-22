@@ -28,10 +28,32 @@ const toDateInputValue = (value) => {
   return d.toISOString().slice(0, 10);
 };
 
+const formatDateDDMMYYYY = (value) => {
+  if (!value) return "N/A";
+  let str = String(value).trim();
+  if (!str || str === "null" || str === "undefined") return "N/A";
+  
+  if (str.includes(" ") && !str.includes("T")) {
+    str = str.replace(" ", "T");
+  }
+  
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) return "N/A";
+  
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   const [projects, setProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [filterCreatedAt, setFilterCreatedAt] = useState("");
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentProject, setCurrentProject] = useState(null);
@@ -64,6 +86,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   const [payments, setPayments] = useState([]);
   const [documents, setDocuments] = useState({ po: [], invoice: [], quotation: [] });
   const [followupDocuments, setFollowupDocuments] = useState([]);
+  const [docViewer, setDocViewer] = useState({ open: false, url: "", name: "", type: "" });
   const [perDayAmount, setPerDayAmount] = useState({ amount: 0, days: 0 });
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -141,47 +164,99 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     }
   }, [formData.totalBudget, formData.startingDate, formData.complicationDate]);
 
+  const formatToYYYYMMDD = (val) => {
+    if (!val) return "";
+    let str = String(val).trim();
+    if (!str || str === "null" || str === "undefined") return "";
+    if (str.includes(" ") && !str.includes("T")) {
+      str = str.replace(" ", "T");
+    }
+    const d = new Date(str);
+    if (Number.isNaN(d.getTime())) return "";
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   useEffect(() => {
-    if (searchTerm.trim() === "") {
-      setFilteredProjects(projects);
-    } else {
+    let result = [...projects];
+
+    // Search filter
+    if (searchTerm.trim() !== "") {
       const term = searchTerm.toLowerCase();
-      const filtered = projects.filter(
+      result = result.filter(
         (project) =>
           project.companyName?.toLowerCase().includes(term) ||
           project.customerName?.toLowerCase().includes(term) ||
           project.projectName?.toLowerCase().includes(term) ||
           project.projectCategory?.toLowerCase().includes(term)
       );
-      setFilteredProjects(filtered);
     }
-  }, [searchTerm, projects]);
+
+    // Status filter
+    if (statusFilter !== "all") {
+      result = result.filter((project) => {
+        const statusInfo = getProjectStatus(project);
+        if (statusFilter === "overdue") {
+          return statusInfo.status === "overdue";
+        }
+        if (statusFilter === "pending") {
+          return statusInfo.status === "pending";
+        }
+        if (statusFilter === "completed") {
+          return statusInfo.status === "completed";
+        }
+        return true;
+      });
+    }
+
+    // Created At date filter
+    if (filterCreatedAt) {
+      result = result.filter((project) => {
+        const createdDateStr = formatToYYYYMMDD(project.createdAt || project.created_at);
+        return createdDateStr === filterCreatedAt;
+      });
+    }
+
+    // Start Date filter
+    if (filterStartDate) {
+      result = result.filter((project) => {
+        const startDateStr = formatToYYYYMMDD(project.budget?.startingDate || project.startDate || project.start_date);
+        return startDateStr >= filterStartDate;
+      });
+    }
+
+    // End Date filter
+    if (filterEndDate) {
+      result = result.filter((project) => {
+        const endDateStr = formatToYYYYMMDD(project.budget?.complicationDate || project.endDate || project.end_date);
+        return endDateStr <= filterEndDate;
+      });
+    }
+
+    setFilteredProjects(result);
+  }, [searchTerm, statusFilter, filterCreatedAt, filterStartDate, filterEndDate, projects]);
 
   const getProjectStatus = (project) => {
-    if (!project.budget || !project.payments) {
-      return { status: "pending", label: "Pending", color: "gray" };
+    const rawStatus = (project.budget_status || project.budgetStatus || "").toLowerCase();
+    if (rawStatus === "completed") {
+      return { status: "completed", label: "Completed", color: "green", isOverdue: false };
     }
 
-    const totalBudget = parseFloat(project.budget.totalBudget) || 0;
-    const completionDate = new Date(project.budget.complicationDate);
-    const today = new Date();
+    const startDateStr = project.startDate || project.start_date || project.startingDate || project.budget?.startingDate;
+    if (startDateStr) {
+      const start = new Date(startDateStr);
+      start.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
-    // Calculate total received amount from payments
-    const totalReceived = project.payments.reduce((sum, payment) => {
-      return sum + (parseFloat(payment.receivedAmount) || 0);
-    }, 0);
-
-    const budgetFullyReceived = totalReceived >= totalBudget;
-
-    if (budgetFullyReceived && today <= completionDate) {
-      return { status: "completed", label: "Completed", color: "green" };
-    } else if (today > completionDate && !budgetFullyReceived) {
-      return { status: "overdue", label: "Overdue", color: "red" };
-    } else if (budgetFullyReceived) {
-      return { status: "completed", label: "Completed", color: "green" };
-    } else {
-      return { status: "pending", label: "Pending", color: "gray" };
+      if (!isNaN(start.getTime()) && start < today) {
+        return { status: "overdue", label: "Overdue", color: "red", isOverdue: true };
+      }
     }
+
+    return { status: "pending", label: "Pending", color: "gray", isOverdue: false };
   };
 
   const fetchProjects = async () => {
@@ -319,18 +394,39 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     e.target.value = "";
   };
 
-  const viewDocument = (docPath) => {
-    window.open(`${API_BASE_URL1}${docPath}`, "_blank");
+  const viewDocument = (docPath, docName) => {
+    if (!docPath) return;
+    const url = `${API_BASE_URL1}${docPath}`;
+    const ext = docPath.split(".").pop().toLowerCase();
+    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(ext);
+    const isPdf = ext === "pdf";
+    setDocViewer({
+      open: true,
+      url,
+      name: docName || docPath.split("/").pop(),
+      type: isPdf ? "pdf" : isImage ? "image" : "other",
+    });
   };
 
-  const downloadDocument = (docPath, docName) => {
-    const url = (`${API_BASE_URL1}${docPath}`, "_blank");
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = docName || "document";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const downloadDocument = async (docPath, docName) => {
+    if (!docPath) return;
+    try {
+      const url = `${API_BASE_URL1}${docPath}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = docName || docPath.split("/").pop() || "document";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch (err) {
+      showToast("Error", "Failed to download document");
+    }
   };
 
   const removeDocument = async (type, index) => {
@@ -546,9 +642,11 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
           projectName: projectDetails.projectName,
           projectCategory: projectDetails.projectCategory,
           totalBudget: projectDetails.budget?.totalBudget || "",
-          startingDate: toDateInputValue(projectDetails.budget?.startingDate),
+          startingDate: toDateInputValue(
+            projectDetails.budget?.startingDate || projectDetails.startDate
+          ),
           complicationDate: toDateInputValue(
-            projectDetails.budget?.complicationDate
+            projectDetails.budget?.complicationDate || projectDetails.endDate
           ),
         });
         setPayments(projectDetails.payments || []);
@@ -662,42 +760,101 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
             {/* Card wrapper like Resource */}
             <div className="bg-white rounded-xl shadow-sm h-full flex flex-col">
               {/* Top toolbar */}
-              <div className="flex items-center justify-between gap-[1vw] p-[0.8vw] h-[10%] flex-shrink-0">
-                <div className="relative w-[25vw]">
+              <div className="flex flex-wrap items-center justify-between gap-[0.8vw] p-[0.8vw] border-b border-gray-100 flex-shrink-0">
+                {/* Search input */}
+                <div className="relative w-[18vw]">
                   <Search
                     className="absolute left-[0.8vw] top-1/2 transform -translate-y-1/2 text-gray-400"
-                    size={18}
+                    size={16}
                   />
                   <input
                     type="text"
-                    placeholder="Search by Company, Customer, Project Name or Category..."
+                    placeholder="Search Company, Customer, Project..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-[2.5vw] pr-[1vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-[2.2vw] pr-[0.8vw] py-[0.45vw] border border-gray-300 rounded-lg text-[0.8vw] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
-                <button
-                  onClick={() => {
-                    setSelectedOnboardedProjectId(null);
-                    setCreateFormData({
-                      companyName: "",
-                      customerName: "",
-                      projectName: "",
-                      projectCategory: "",
-                    });
-                    setShowCreateModal(true);
-                  }}
-                  className="px-[1.2vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium text-[0.85vw] flex items-center gap-[0.5vw] cursor-pointer"
-                >
-                  <Plus size={18} />
-                  Add Project
-                  {pendingOnboardedProjects.length > 0 && (
-                    <span className="bg-red-500 text-white text-[0.7vw] font-bold px-[0.45vw] py-[0.1vw] rounded-full animate-pulse">
-                      {pendingOnboardedProjects.length}
-                    </span>
+                {/* Filter controls */}
+                <div className="flex items-center gap-[0.6vw]">
+                  {/* Created At Date */}
+                  <div className="flex items-center gap-[0.3vw]">
+                    <span className="text-[0.75vw] font-medium text-gray-600">Created:</span>
+                    <input
+                      type="date"
+                      value={filterCreatedAt}
+                      onChange={(e) => setFilterCreatedAt(e.target.value)}
+                      className="px-[0.5vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.75vw] focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white"
+                    />
+                  </div>
+
+                  {/* Start & End Date Separate Container */}
+                  <div className="flex items-center gap-[0.4vw] bg-gray-50 border border-gray-100 rounded-lg px-[0.6vw] py-[0.4vw]">
+                    <div className="flex items-center gap-[0.3vw]">
+                      <span className="text-[0.75vw] font-medium text-gray-600">Start:</span>
+                      <input
+                        type="date"
+                        value={filterStartDate}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFilterStartDate(val);
+                          if (!val) {
+                            setFilterEndDate("");
+                          } else if (filterEndDate && filterEndDate < val) {
+                            setFilterEndDate("");
+                          }
+                        }}
+                        className="bg-transparent border-none outline-none text-[0.75vw] text-gray-700 focus:outline-none cursor-pointer"
+                      />
+                    </div>
+
+                    <span className="text-gray-400 text-[0.75vw]">-</span>
+
+                    <div className="flex items-center gap-[0.3vw]">
+                      <span className="text-[0.75vw] font-medium text-gray-600">End:</span>
+                      <input
+                        type="date"
+                        value={filterEndDate}
+                        min={filterStartDate}
+                        disabled={!filterStartDate}
+                        onChange={(e) => setFilterEndDate(e.target.value)}
+                        className="bg-transparent border-none outline-none text-[0.75vw] text-gray-700 focus:outline-none disabled:cursor-not-allowed disabled:text-gray-400 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Status Filter */}
+                  <div className="flex items-center gap-[0.3vw]">
+                    <span className="text-[0.75vw] font-medium text-gray-600">Status:</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.75vw] focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white cursor-pointer"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="pending">Pending</option>
+                      <option value="completed">Completed</option>
+                      <option value="overdue">Overdue</option>
+                    </select>
+                  </div>
+
+                  {/* Clear filters button */}
+                  {(searchTerm || statusFilter !== "all" || filterCreatedAt || filterStartDate || filterEndDate) && (
+                    <button
+                      onClick={() => {
+                        setSearchTerm("");
+                        setStatusFilter("all");
+                        setFilterCreatedAt("");
+                        setFilterStartDate("");
+                        setFilterEndDate("");
+                      }}
+                      className="px-[0.6vw] py-[0.35vw] bg-red-50 hover:bg-red-100 text-red-600 border border-red-300 rounded-lg text-[0.75vw] font-medium transition cursor-pointer"
+                    >
+                      Clear Filters
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
 
               {/* Table region (scrollable) */}
@@ -735,72 +892,83 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                             S. No
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                            Company Name
+                            Date
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                            Customer Name
+                            Company Name
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                             Project Name
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                            Project Category
+                            Start Date
+                          </th>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                            End Date
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                             Status
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                            Update
+                            Action
                           </th>
                         </tr>
                       </thead>
                       <tbody>
                         {paginatedProjects.map((project, index) => {
                           const statusInfo = getProjectStatus(project);
+                          const isOverdue = statusInfo.isOverdue;
                           const bgColorClass = 
                             statusInfo.color === "green" 
                               ? "bg-green-50" 
-                              : statusInfo.color === "red" 
-                              ? "bg-red-50" 
+                              : isOverdue
+                              ? "bg-red-50/70" 
                               : "hover:bg-gray-50";
                           const textColorClass = 
                             statusInfo.color === "green" 
                               ? "text-green-800" 
-                              : statusInfo.color === "red" 
-                              ? "text-red-800" 
+                              : isOverdue
+                              ? "text-red-800 font-medium" 
                               : "text-gray-600";
                           const statusBgColor = 
                             statusInfo.color === "green" 
                               ? "bg-green-100" 
-                              : statusInfo.color === "red" 
+                              : isOverdue
                               ? "bg-red-100" 
                               : "bg-gray-100";
                           const statusTextColor = 
                             statusInfo.color === "green" 
-                              ? "text-green-700" 
-                              : statusInfo.color === "red" 
-                              ? "text-red-700" 
+                              ? "text-green-700 font-semibold" 
+                              : isOverdue
+                              ? "text-red-700 font-semibold" 
                               : "text-gray-700";
+
+                          const createdDate = project.createdAt || project.created_at;
+                          const startDate = project.budget?.startingDate || project.startDate || project.start_date || project.starting_date;
+                          const endDate = project.budget?.complicationDate || project.endDate || project.end_date || project.completion_date;
 
                           return (
                             <tr
                               key={project.id}
-                              className={`transition-colors ${bgColorClass}`}
+                              className={`transition-colors ${bgColorClass} ${isOverdue ? "border-2 border-red-500" : ""}`}
                             >
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium border border-gray-300 text-center ${textColorClass}`}>
                                 {String(startIndex + index + 1).padStart(2, "0")}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
-                                {project.companyName}
+                                {formatDateDDMMYYYY(createdDate)}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
-                                {project.customerName}
+                                {project.companyName}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
                                 {project.projectName}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
-                                {project.projectCategory}
+                                {formatDateDDMMYYYY(startDate)}
+                              </td>
+                              <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
+                                {formatDateDDMMYYYY(endDate)}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] border border-gray-300 text-center`}>
                                 <span className={`px-[0.6vw] py-[0.3vw] rounded text-[0.75vw] font-medium ${statusBgColor} ${statusTextColor}`}>
@@ -972,7 +1140,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
 
                       {documents.quotation && documents.quotation.filter(isExistingDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
                             📁 Saved Quotation
                           </div>
                           <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
@@ -983,7 +1151,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                   key={doc.docId || `quotation-saved-${idx}`}
                                   className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
                                 >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium">
+                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
                                     {doc.name}
                                   </span>
                                   <div className="flex items-center gap-[0.3vw]">
@@ -1095,7 +1263,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
 
                       {documents.po.filter(isExistingDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
                             📁 Saved PO
                           </div>
                           <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
@@ -1106,7 +1274,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                   key={doc.docId || `po-saved-${idx}`}
                                   className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
                                 >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium">
+                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
                                     {doc.name}
                                   </span>
                                   <div className="flex items-center gap-[0.3vw]">
@@ -1216,10 +1384,9 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                         Upload New Invoice
                       </button>
 
-                      {documents.invoice.filter(isExistingDocument).length >
-                        0 && (
+                      {documents.invoice.filter(isExistingDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
                             📁 Saved Invoice
                           </div>
                           <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
@@ -1230,7 +1397,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                   key={doc.docId || `invoice-saved-${idx}`}
                                   className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
                                 >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium">
+                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
                                     {doc.name}
                                   </span>
                                   <div className="flex items-center gap-[0.3vw]">
@@ -1299,9 +1466,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                     onClick={() =>
                                       removeDocument(
                                         "invoice",
-                                        documents.invoice.findIndex(
-                                          (d) => d === doc
-                                        )
+                                        documents.invoice.findIndex((d) => d === doc)
                                       )
                                     }
                                     className="text-red-500 hover:text-red-700 cursor-pointer"
@@ -1318,63 +1483,124 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                   </div>
                 </div>
 
-                {/* Followup Proposal Documents */}
-                {followupDocuments && followupDocuments.length > 0 && (
-                  <div className="mt-[1vw] border-t border-gray-100 pt-[1vw]">
-                    <div className="flex items-center gap-[0.5vw] mb-[0.6vw]">
-                      <FileText size="1vw" className="text-blue-500" />
-                      <span className="text-[0.85vw] font-semibold text-gray-700">
-                        Followup Proposal Documents
+                {/* Payment Proposal Card - Latest followup docs */}
+                {followupDocuments && (followupDocuments.quotation || followupDocuments.po || followupDocuments.invoice) && (
+                  <div className="mt-[1vw] border border-amber-200 bg-amber-50 rounded-xl px-[1vw] py-[0.8vw]">
+                    <div className="flex items-center gap-[0.5vw] mb-[0.8vw]">
+                      <span className="text-[0.9vw]">📎</span>
+                      <h4 className="text-[0.9vw] font-semibold text-amber-900">Payment Proposal</h4>
+                      <span className="ml-auto text-[0.7vw] text-amber-600 bg-amber-100 border border-amber-300 rounded-full px-[0.5vw] py-[0.1vw] font-medium">
+                        Latest from Followups
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-[0.8vw] max-h-[16vh] overflow-y-auto pr-[0.2vw]">
-                      {followupDocuments.map((doc, idx) => (
-                        <div
-                          key={`followup-doc-${idx}`}
-                          className="flex items-center justify-between p-[0.6vw] bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <div className="flex flex-col flex-1 min-w-0">
-                            <span className="text-[0.8vw] text-gray-800 font-medium truncate">
-                              {doc.name}
+                    <div className="grid grid-cols-3 gap-[1vw]">
+                      {/* Latest Quotation */}
+                      <div>
+                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Quotation</div>
+                        {followupDocuments.quotation ? (
+                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
+                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.quotation.name}>
+                              {followupDocuments.quotation.name}
                             </span>
-                            <span className="text-[0.65vw] text-gray-400 uppercase font-semibold">
-                              {doc.type}
+                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                              {followupDocuments.quotation.path && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => viewDocument(followupDocuments.quotation.path)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="View"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadDocument(followupDocuments.quotation.path, followupDocuments.quotation.name)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="Download"
+                                  >
+                                    <Download size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[0.75vw] text-gray-400 italic">No quotation found</p>
+                        )}
+                      </div>
+
+                      {/* Latest PO */}
+                      <div>
+                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Purchase Order (PO)</div>
+                        {followupDocuments.po ? (
+                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
+                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.po.name}>
+                              {followupDocuments.po.name}
                             </span>
+                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                              {followupDocuments.po.path && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => viewDocument(followupDocuments.po.path)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="View"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadDocument(followupDocuments.po.path, followupDocuments.po.name)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="Download"
+                                  >
+                                    <Download size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-[0.3vw] ml-[0.5vw]">
-                            {doc.path && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => viewDocument(doc.path)}
-                                  className="text-gray-600 hover:text-blue-600 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
-                                  title="View"
-                                >
-                                  <Eye size={16} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    downloadDocument(doc.path, doc.name)
-                                  }
-                                  className="text-gray-600 hover:text-blue-600 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
-                                  title="Download"
-                                >
-                                  <Download size={16} />
-                                </button>
-                              </>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => removeFollowupDocument(doc, idx)}
-                              className="text-red-500 hover:text-red-700 p-[0.25vw] hover:bg-white rounded shadow-sm border border-gray-200 transition cursor-pointer"
-                              title="Delete"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                        ) : (
+                          <p className="text-[0.75vw] text-gray-400 italic">No PO found</p>
+                        )}
+                      </div>
+
+                      {/* Latest Invoice */}
+                      <div>
+                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Invoice</div>
+                        {followupDocuments.invoice ? (
+                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
+                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.invoice.name}>
+                              {followupDocuments.invoice.name}
+                            </span>
+                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                              {followupDocuments.invoice.path && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => viewDocument(followupDocuments.invoice.path)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="View"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadDocument(followupDocuments.invoice.path, followupDocuments.invoice.name)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
+                                    title="Download"
+                                  >
+                                    <Download size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ) : (
+                          <p className="text-[0.75vw] text-gray-400 italic">No invoice found</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1624,161 +1850,79 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
           </div>
         </div>
       )}
-
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-white/30 backdrop-blur-[.2vw] flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-[50vw] max-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between p-[1.5vw] border-b border-gray-200">
-              <h2 className="text-[1.2vw] font-semibold text-gray-900">
-                Create New Project
-              </h2>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-gray-500 hover:text-gray-700 text-[1.5vw] cursor-pointer"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-[1.5vw]">
-              <div className="grid grid-cols-2 gap-[1.2vw]">
-                <div className="relative">
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Company Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="companyName"
-                    value={createFormData.companyName}
-                    onChange={(e) => {
-                      setCreateFormData({
-                        ...createFormData,
-                        companyName: e.target.value,
-                      });
-                      setShowCompanyAutocomplete(true);
-                    }}
-                    onFocus={() => setShowCompanyAutocomplete(true)}
-                    onBlur={() => {
-                      setTimeout(() => setShowCompanyAutocomplete(false), 200);
-                    }}
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                    required
-                    autoComplete="off"
-                  />
-                  {showCompanyAutocomplete && pendingOnboardedProjects.filter(p =>
-                    p.company_name
-                      ?.toLowerCase()
-                      .includes(createFormData.companyName.toLowerCase())
-                  ).length > 0 && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[15vh] overflow-y-auto z-[60]">
-                      {pendingOnboardedProjects
-                        .filter(p =>
-                          p.company_name
-                            ?.toLowerCase()
-                            .includes(createFormData.companyName.toLowerCase())
-                        )
-                        .map((project) => {
-                          return (
-                            <div
-                              key={project.id}
-                              onMouseDown={() => {
-                                setCreateFormData({
-                                  companyName: project.company_name,
-                                  customerName: project.customer_name || "",
-                                  projectName: project.project_name || "",
-                                  projectCategory: project.category || "",
-                                });
-                                setSelectedOnboardedProjectId(project.id);
-                                setShowCompanyAutocomplete(false);
-                              }}
-                              className="px-[1vw] py-[0.5vw] hover:bg-blue-50 cursor-pointer text-[0.85vw] border-b border-gray-100 last:border-0 flex justify-between"
-                            >
-                              <span className="font-semibold text-gray-800">{project.company_name}</span>
-                              <span className="text-gray-500 text-[0.75vw]">{project.project_name}</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Customer Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="customerName"
-                    value={createFormData.customerName}
-                    onChange={(e) =>
-                      setCreateFormData({
-                        ...createFormData,
-                        customerName: e.target.value,
-                      })
-                    }
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Project Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="projectName"
-                    value={createFormData.projectName}
-                    onChange={(e) =>
-                      setCreateFormData({
-                        ...createFormData,
-                        projectName: e.target.value,
-                      })
-                    }
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Project Category *
-                  </label>
-                  <input
-                    type="text"
-                    name="projectCategory"
-                    value={createFormData.projectCategory}
-                    onChange={(e) =>
-                      setCreateFormData({
-                        ...createFormData,
-                        projectCategory: e.target.value,
-                      })
-                    }
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
+      {/* Document Viewer Modal */}
+      {docViewer.open && (
+        <div
+          className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-[2vw]"
+          onClick={() => setDocViewer({ open: false, url: "", name: "", type: "" })}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            style={{ width: "80vw", maxWidth: "1100px", height: "88vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-[1.2vw] py-[0.8vw] border-b border-gray-200 bg-gray-50 rounded-t-2xl">
+              <div className="flex items-center gap-[0.6vw]">
+                <span className="text-[1.1vw]">📄</span>
+                <span className="text-[0.9vw] font-semibold text-gray-800 truncate max-w-[50vw]" title={docViewer.name}>
+                  {docViewer.name}
+                </span>
+              </div>
+              <div className="flex items-center gap-[0.5vw]">
+                <button
+                  type="button"
+                  onClick={() => downloadDocument(docViewer.url.replace(API_BASE_URL1, ""), docViewer.name)}
+                  className="flex items-center gap-[0.3vw] px-[0.8vw] py-[0.4vw] bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[0.78vw] font-medium transition cursor-pointer"
+                >
+                  <Download size={14} />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocViewer({ open: false, url: "", name: "", type: "" })}
+                  className="flex items-center gap-[0.3vw] px-[0.8vw] py-[0.4vw] bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-[0.78vw] font-medium transition cursor-pointer"
+                >
+                  ✕ Close
+                </button>
               </div>
             </div>
 
-            <div className="p-[1.5vw] border-t border-gray-200 flex justify-end gap-[1vw]">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-[1.5vw] py-[0.6vw] border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateProject}
-                disabled={!selectedOnboardedProjectId}
-                className="px-[1.5vw] py-[0.6vw] bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400"
-              >
-                Create Project
-              </button>
+            {/* Viewer Body */}
+            <div className="flex-1 overflow-auto bg-gray-100 flex items-center justify-center p-[1vw]">
+              {docViewer.type === "image" ? (
+                <img
+                  src={docViewer.url}
+                  alt={docViewer.name}
+                  className="max-w-full max-h-full object-contain rounded-lg shadow"
+                />
+              ) : docViewer.type === "pdf" ? (
+                <iframe
+                  src={docViewer.url}
+                  title={docViewer.name}
+                  className="w-full h-full rounded-lg border-0"
+                  style={{ minHeight: "70vh" }}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-[1vw] text-gray-500">
+                  <span className="text-[3vw]">📁</span>
+                  <p className="text-[0.9vw] font-medium">{docViewer.name}</p>
+                  <p className="text-[0.75vw] text-gray-400">Preview not available for this file type.</p>
+                  <button
+                    type="button"
+                    onClick={() => downloadDocument(docViewer.url.replace(API_BASE_URL1, ""), docViewer.name)}
+                    className="flex items-center gap-[0.4vw] px-[1vw] py-[0.5vw] bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[0.8vw] font-medium transition cursor-pointer"
+                  >
+                    <Download size={16} />
+                    Download to view
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

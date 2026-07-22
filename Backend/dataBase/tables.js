@@ -2905,7 +2905,6 @@ const databaseSchema = {
       extra: "on update current_timestamp()",
     },
   ],
-
 };
 
 module.exports = databaseSchema;

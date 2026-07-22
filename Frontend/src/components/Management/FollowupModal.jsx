@@ -25,6 +25,7 @@ const FollowupModal = ({
   subTab,
   isMarketing,
   refreshData,
+  initialShowHistory = false,
 }) => {
 
   const { notify } = useNotification();
@@ -267,7 +268,7 @@ const FollowupModal = ({
       setRemarks("");
       setNextFollowup("");
       setStatus("");
-      setShowHistory(false);
+      setShowHistory(!!initialShowHistory);
       setHistoryTab("followups");
       setShowRecordMOMForm(false);
       setMomForm({

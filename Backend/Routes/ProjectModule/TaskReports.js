@@ -134,12 +134,20 @@ router.post("/", async (req, res) => {
     const activeTasks = allProjectTasks.filter((t) => t.status !== "Cancelled");
 
     if (activeTasks.length > 0) {
+      let completedTaskCount = 0;
       const tasksSum = activeTasks.reduce(
-        (sum, t) => sum + (t.percentage || 0),
+        (sum, t) => {
+          const tPct = t.percentage || 0;
+          if (tPct >= 100) completedTaskCount++;
+          return sum + tPct;
+        },
         0,
       );
 
-      const projectPercentage = Math.round(tasksSum / activeTasks.length);
+      let projectPercentage = Math.round(tasksSum / activeTasks.length);
+      if (projectPercentage >= 100 && completedTaskCount < activeTasks.length) {
+        projectPercentage = 99;
+      }
 
       await Project_Details.findOneAndUpdate(
         { _id: projectId },
@@ -331,11 +339,19 @@ router.put("/verify/:reportId", async (req, res) => {
       });
       const activeTasks = allProjectTasks.filter((t) => t.status !== "Cancelled");
       if (activeTasks.length > 0) {
+        let completedTaskCount = 0;
         const tasksSum = activeTasks.reduce(
-          (sum, t) => sum + (t.percentage || 0),
+          (sum, t) => {
+            const tPct = t.percentage || 0;
+            if (tPct >= 100) completedTaskCount++;
+            return sum + tPct;
+          },
           0,
         );
-        const projectPercentage = Math.round(tasksSum / activeTasks.length);
+        let projectPercentage = Math.round(tasksSum / activeTasks.length);
+        if (projectPercentage >= 100 && completedTaskCount < activeTasks.length) {
+          projectPercentage = 99;
+        }
         await Project_Details.findOneAndUpdate(
           { _id: reviewReport.projectId },
           { $set: { percentage: Number(projectPercentage) } },

@@ -5,6 +5,21 @@ const uploadProjectDocuments = require("../../middleware/projectBudgetUpload");
 const fs = require("fs");
 const path = require("path");
 
+const ensureArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === "object") return [val];
+  if (typeof val === "string") {
+    try {
+      const p = JSON.parse(val);
+      return Array.isArray(p) ? p : [p];
+    } catch (e) {
+      return [{ path: val, name: val.split("/").pop() }];
+    }
+  }
+  return [];
+};
+
 // helper: ensure every document has a stable docId
 const ensureDocIds = (docs, type) => {
   return (docs || []).map((doc, index) => ({
@@ -30,8 +45,8 @@ router.post("/projects", (req, res) => {
   }
 
   const sql = `
-    INSERT INTO dummy_projects (company_name, customer_name, project_name, project_category)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO ManagementOnboardedProjects (client_id, company_name, customer_name, project_name, category, start_date, end_date, budget_status)
+    VALUES (0, ?, ?, ?, ?, CURDATE(), CURDATE(), 'pending')
   `;
 
   db.pool.query(sql, [companyName, customerName, projectName, projectCategory], (err, result) => {
@@ -50,9 +65,9 @@ router.post("/projects", (req, res) => {
         company_name AS companyName,
         customer_name AS customerName,
         project_name AS projectName,
-        project_category AS projectCategory,
+        category AS projectCategory,
         created_at AS createdAt
-      FROM dummy_projects 
+      FROM ManagementOnboardedProjects 
       WHERE id = ?
     `;
 
@@ -74,19 +89,24 @@ router.post("/projects", (req, res) => {
   });
 });
 
-// GET all projects from dummy_projects table
+// GET all projects from ManagementOnboardedProjects table
 router.get("/projects", (req, res) => {
   console.log("GET /api/budget/projects called");
 
   const sql = `
     SELECT 
       id,
+      client_id AS clientId,
       company_name AS companyName,
       customer_name AS customerName,
       project_name AS projectName,
-      project_category AS projectCategory,
+      category AS projectCategory,
+      start_date AS startDate,
+      end_date AS endDate,
+      budget_status AS budget_status,
+      budget_status AS budgetStatus,
       created_at AS createdAt
-    FROM dummy_projects
+    FROM ManagementOnboardedProjects
     ORDER BY created_at DESC
   `;
 
@@ -109,18 +129,24 @@ router.get("/projects", (req, res) => {
 
 // GET single project by ID with all details
 router.get("/projects/:id", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   const { id } = req.params;
   console.log(`GET /api/budget/projects/${id} called`);
 
   const projectQuery = `
     SELECT 
       id,
+      client_id AS clientId,
       company_name AS companyName,
       customer_name AS customerName,    
       project_name AS projectName,
-      project_category AS projectCategory,
+      category AS projectCategory,
+      start_date AS startDate,
+      end_date AS endDate,
       created_at AS createdAt
-    FROM dummy_projects
+    FROM ManagementOnboardedProjects
     WHERE id = ?
   `;
 
@@ -180,7 +206,7 @@ router.get("/projects/:id", (req, res) => {
             : { po: [], invoice: [], quotation: [] };
 
           documentsData = {
-            po: (rawDocuments.po || []).map((doc) => ({
+            po: ensureArray(rawDocuments.po).map((doc) => ({
               ...doc,
               path:
                 doc.path ||
@@ -191,7 +217,7 @@ router.get("/projects/:id", (req, res) => {
               size: doc.size || 0,
               uploadedAt: doc.uploadedAt || new Date().toISOString(),
             })),
-            invoice: (rawDocuments.invoice || []).map((doc) => ({
+            invoice: ensureArray(rawDocuments.invoice).map((doc) => ({
               ...doc,
               path:
                 doc.path ||
@@ -202,7 +228,7 @@ router.get("/projects/:id", (req, res) => {
               size: doc.size || 0,
               uploadedAt: doc.uploadedAt || new Date().toISOString(),
             })),
-            quotation: (rawDocuments.quotation || []).map((doc) => ({
+            quotation: ensureArray(rawDocuments.quotation).map((doc) => ({
               ...doc,
               path:
                 doc.path ||
@@ -228,47 +254,106 @@ router.get("/projects/:id", (req, res) => {
         };
       }
 
-      // Fetch proposal documents submitted during followups
+      const compName = projects[0].companyName || "";
+      const custName = projects[0].customerName || "";
+      const cId = projects[0].clientId || 0;
+
+      // Fetch proposal documents submitted during followups (Management & Marketing)
       const followupDocsQuery = `
-        SELECT mf.id AS followupId, mf.quotation, mf.purchaseOrder, mf.invoice
+        SELECT mf.id AS followupId, mf.clientID, mf.marketing_client_id, mf.quotation, mf.purchaseOrder, mf.invoice,
+               c.company_name AS mgtCompany, c.customer_name AS mgtCustomer,
+               mc.company_name AS mktCompany, mc.customer_name AS mktCustomer
         FROM ManagementFollowups mf
-        LEFT JOIN clientAddManagement c ON mf.clientID = c.id
-        LEFT JOIN MarketingClients mc ON mf.marketing_client_id = mc.id
-        WHERE c.company_name = ? OR mc.company_name = ?
+        LEFT JOIN ClientsDataManagement c ON mf.clientID = c.id
+        LEFT JOIN ClientsData mc ON mf.marketing_client_id = mc.id
+        WHERE ( ? > 0 AND mf.clientID = ? )
+           OR ( ? > 0 AND mf.marketing_client_id = ? )
+           OR ( c.company_name IS NOT NULL AND LOWER(TRIM(c.company_name)) = LOWER(TRIM(?)) )
+           OR ( mc.company_name IS NOT NULL AND LOWER(TRIM(mc.company_name)) = LOWER(TRIM(?)) )
+           OR ( c.customer_name IS NOT NULL AND LOWER(TRIM(c.customer_name)) = LOWER(TRIM(?)) )
+           OR ( mc.customer_name IS NOT NULL AND LOWER(TRIM(mc.customer_name)) = LOWER(TRIM(?)) )
       `;
 
       db.pool.query(
         followupDocsQuery,
-        [projects[0].companyName, projects[0].companyName],
+        [cId, cId, cId, cId, compName, compName, custName, custName],
         (followupErr, followupRows) => {
           let followupDocuments = [];
           if (!followupErr && followupRows) {
             followupRows.forEach((row) => {
               ["quotation", "purchaseOrder", "invoice"].forEach((field) => {
-                if (row[field]) {
+                const val = row[field];
+                if (val) {
+                  let extractedDocs = [];
                   try {
-                    const arr = JSON.parse(row[field]);
-                    if (Array.isArray(arr)) {
-                      arr.forEach((doc) => {
-                        followupDocuments.push({
-                          followupId: row.followupId,
-                          name: doc.originalName || doc.name || "Followup Document",
-                          convertedName: doc.convertedName || doc.name,
-                          path: doc.path ? `/${doc.path}` : null,
-                          size: doc.size || 0,
-                          uploadedAt: doc.uploadedAt || new Date().toISOString(),
-                          type: field,
-                        });
-                      });
+                    const parsed = typeof val === "string" ? JSON.parse(val) : val;
+                    if (Array.isArray(parsed)) {
+                      extractedDocs = parsed;
+                    } else if (typeof parsed === "object" && parsed !== null) {
+                      extractedDocs = [parsed];
+                    } else if (typeof parsed === "string") {
+                      extractedDocs = [{ path: parsed, name: parsed.split("/").pop() }];
                     }
-                  } catch (e) {}
+                  } catch (e) {
+                    if (typeof val === "string") {
+                      extractedDocs = [{ path: val, name: val.split("/").pop() }];
+                    }
+                  }
+
+                  extractedDocs.forEach((doc) => {
+                    let relPath = doc.path || doc.filePath || (doc.filename ? `Images/Management/${field === 'quotation' ? 'Quotation' : field === 'purchaseOrder' ? 'PO' : 'Invoice'}/${doc.filename}` : null);
+                    if (relPath && !relPath.startsWith("/")) {
+                      relPath = `/${relPath}`;
+                    }
+                    const docObj = {
+                      followupId: row.followupId,
+                      docId: `followup-${row.followupId}-${doc.filename || doc.convertedName || doc.originalName || doc.name || Math.random()}`,
+                      name: doc.originalName || doc.name || (relPath ? relPath.split("/").pop() : "Followup Document"),
+                      convertedName: doc.convertedName || doc.name || doc.originalName,
+                      path: relPath,
+                      size: doc.size || 0,
+                      uploadedAt: doc.uploadedAt || new Date().toISOString(),
+                      type: field,
+                      isFollowup: true,
+                    };
+                    // Ensure deduplication in followupDocuments
+                    const exists = followupDocuments.some(
+                      (d) => (d.path && relPath && d.path === relPath) || d.name === docObj.name
+                    );
+                    if (!exists) {
+                      followupDocuments.push(docObj);
+                    }
+                  });
                 }
               });
             });
           }
 
-          console.log("✅ Documents with paths:", documentsData);
-          console.log("✅ Followup proposal documents:", followupDocuments);
+          // Keep modal-uploaded documents in documentsData, filter out any legacy stored management followup paths
+          const cleanDocumentsData = {
+            po: (documentsData.po || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+            invoice: (documentsData.invoice || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+            quotation: (documentsData.quotation || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+          };
+
+          // From all followup docs, pick the latest (highest followupId) for each type
+          const pickLatest = (type) => {
+            const matches = followupDocuments.filter((d) => d.type === type || (type === "purchaseOrder" && d.type === "po"));
+            if (!matches.length) return null;
+            return matches.reduce((prev, cur) => (cur.followupId > prev.followupId ? cur : prev), matches[0]);
+          };
+
+          const latestFollowupDocuments = {
+            quotation: pickLatest("quotation"),
+            po: pickLatest("purchaseOrder"),
+            invoice: pickLatest("invoice"),
+          };
 
           res.status(200).json({
             success: true,
@@ -277,8 +362,8 @@ router.get("/projects/:id", (req, res) => {
               ...projects[0],
               budget: budgetData,
               payments: paymentsData,
-              documents: documentsData,
-              followupDocuments: followupDocuments,
+              documents: cleanDocumentsData,
+              followupDocuments: latestFollowupDocuments,
             },
           });
         }
@@ -367,9 +452,9 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
     const newDocuments = processNewDocuments();
 
     let mergedDocuments = {
-      po: [...(existingDocuments.po || []), ...newDocuments.po],
-      invoice: [...(existingDocuments.invoice || []), ...newDocuments.invoice],
-      quotation: [...(existingDocuments.quotation || []), ...newDocuments.quotation],
+      po: [...ensureArray(existingDocuments.po), ...newDocuments.po],
+      invoice: [...ensureArray(existingDocuments.invoice), ...newDocuments.invoice],
+      quotation: [...ensureArray(existingDocuments.quotation), ...newDocuments.quotation],
     };
 
     // ensure docId on all documents
@@ -441,12 +526,24 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
               });
             }
 
-            res.status(200).json({
-              success: true,
-              message: "Project budget updated successfully",
-              budgetId: existingBudget[0].id,
-              documents: mergedDocuments,
-            });
+            db.pool.query(
+              `UPDATE ManagementOnboardedProjects SET budget_status = 'completed' WHERE id = ?`,
+              [projectId],
+              (statusErr, statusResult) => {
+                if (statusErr) {
+                  console.error("❌ Error updating budget_status:", statusErr);
+                } else {
+                  console.log(`✅ budget_status updated to 'completed' for project ${projectId}`);
+                }
+
+                res.status(200).json({
+                  success: true,
+                  message: "Project budget updated successfully",
+                  budgetId: existingBudget[0].id,
+                  documents: mergedDocuments,
+                });
+              }
+            );
           }
         );
       } else {
@@ -475,12 +572,24 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
               });
             }
 
-            res.status(200).json({
-              success: true,
-              message: "Project budget saved successfully",
-              budgetId: result.insertId,
-              documents: mergedDocuments,
-            });
+            db.pool.query(
+              `UPDATE ManagementOnboardedProjects SET budget_status = 'completed' WHERE id = ?`,
+              [projectId],
+              (statusErr, statusResult) => {
+                if (statusErr) {
+                  console.error("❌ Error updating budget_status:", statusErr);
+                } else {
+                  console.log(`✅ budget_status updated to 'completed' for project ${projectId}`);
+                }
+
+                res.status(200).json({
+                  success: true,
+                  message: "Project budget saved successfully",
+                  budgetId: result.insertId,
+                  documents: mergedDocuments,
+                });
+              }
+            );
           }
         );
       }

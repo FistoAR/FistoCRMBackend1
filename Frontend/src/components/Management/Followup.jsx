@@ -13,6 +13,7 @@ import {
   X,
   Download,
   UserCheck,
+  History,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -59,6 +60,7 @@ const Followup = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isFollowupModalOpen, setIsFollowupModalOpen] = useState(false);
+  const [initialShowHistory, setInitialShowHistory] = useState(false);
   const [followupClient, setFollowupClient] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -883,8 +885,9 @@ const Followup = () => {
     setIsModalOpen(true);
   };
 
-  const handleFollowup = (client) => {
+  const handleFollowup = (client, openHistoryOnly = false) => {
     setFollowupClient(client);
+    setInitialShowHistory(openHistoryOnly);
     setIsFollowupModalOpen(true);
   };
 
@@ -1668,11 +1671,9 @@ const Followup = () => {
                           Next followup date
                         </th>
                       )}
-                      {!(subTab === "lead" && leadSubTab === "onboarded") && (
-                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                          Actions
-                        </th>
-                      )}
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody ref={tableBodyRef}>
@@ -1773,69 +1774,79 @@ const Followup = () => {
                               </div>
                             </td>
                           )}
-                          {!(subTab === "lead" && leadSubTab === "onboarded") && (
-                            <td className="px-[0.4vw] py-[0.52vw] border border-gray-200">
-                              {mainTab === "clientsData" ? (
-                                <div className="flex justify-center items-center gap-[0.3vw]">
-                                  {subTab === "deleted" ? (
+                          <td className="px-[0.4vw] py-[0.52vw] border border-gray-200">
+                            {mainTab === "clientsData" ? (
+                              <div className="flex justify-center items-center gap-[0.3vw]">
+                                {subTab === "deleted" ? (
+                                  <button
+                                    onClick={() => handleRestore(client.id)}
+                                    className="px-[0.6vw] py-[0.3vw] my-[0.3vw] flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 cursor-pointer"
+                                    title="Restore"
+                                  >
+                                    <RefreshCw
+                                      size={"1.02vw"}
+                                      className="mr-[0.2vw]"
+                                    />
+                                    <span className="-mt-[0.2vw]">
+                                      Restore
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <>
                                     <button
-                                      onClick={() => handleRestore(client.id)}
-                                      className="px-[0.6vw] py-[0.3vw] my-[0.3vw] flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 cursor-pointer"
-                                      title="Restore"
+                                      className="p-[0.6vw] text-gray-600 hover:bg-gray-50 rounded-full transition-colors cursor-pointer"
+                                      title="Edit"
+                                      onClick={() => handleEdit(client)}
                                     >
-                                      <RefreshCw
-                                        size={"1.02vw"}
-                                        className="mr-[0.2vw]"
-                                      />
-                                      <span className="-mt-[0.2vw]">
-                                        Restore
-                                      </span>
+                                      <Edit size={"1.02vw"} />
                                     </button>
-                                  ) : (
-                                    <>
+                                    <button
+                                      onClick={() => handleDelete(client.id)}
+                                      className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={"1.02vw"} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex justify-center items-center gap-[0.5vw]">
+                                {subTab !== "lead" && (
+                                  <button
+                                    onClick={() => handleFollowup(client)}
+                                    className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.8vw] items-center font-semibold text-blue-500 hover:bg-blue-55/50 transition-colors cursor-pointer"
+                                    title="Add Followup"
+                                  >
+                                    <PhoneCall size={"0.8vw"} />{" "}
+                                    <span>Followup</span>
+                                  </button>
+                                )}
+                                {subTab === "lead" && (
+                                  <>
+                                    <button
+                                      onClick={() => handleFollowup(client, true)}
+                                      className="px-[0.5vw] py-[0.3vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+                                      title="Followup History"
+                                    >
+                                      <History size={"0.8vw"} />{" "}
+                                      <span>History</span>
+                                    </button>
+                                    {(leadSubTab === "pending" || leadSubTab === "cancelled") && (
                                       <button
-                                        className="p-[0.6vw] text-gray-600 hover:bg-gray-50 rounded-full transition-colors cursor-pointer"
-                                        title="Edit"
-                                        onClick={() => handleEdit(client)}
+                                        onClick={() => handleOnboardClick(client)}
+                                        className="px-[0.5vw] py-[0.3vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-green-600 hover:bg-green-50 border border-green-200 transition-colors cursor-pointer"
+                                        title="Onboard Project"
                                       >
-                                        <Edit size={"1.02vw"} />
+                                        <UserCheck size={"0.8vw"} />{" "}
+                                        <span>Onboard</span>
                                       </button>
-                                      <button
-                                        onClick={() => handleDelete(client.id)}
-                                        className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
-                                        title="Delete"
-                                      >
-                                        <Trash2 size={"1.02vw"} />
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              ) : (
-                                 <div className="flex justify-center items-center gap-[0.5vw]">
-                                  {subTab !== "lead" && (
-                                    <button
-                                      onClick={() => handleFollowup(client)}
-                                      className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.8vw] items-center font-semibold text-blue-500 hover:bg-blue-55/50 transition-colors cursor-pointer"
-                                      title="Add Followup"
-                                    >
-                                      <PhoneCall size={"0.8vw"} />{" "}
-                                      <span>Followup</span>
-                                    </button>
-                                  )}
-                                  {subTab === "lead" && (leadSubTab === "pending" || leadSubTab === "cancelled") && (
-                                    <button
-                                      onClick={() => handleOnboardClick(client)}
-                                      className="px-[0.6vw] py-[0.3vw] rounded-lg flex gap-[0.4vw] text-[0.8vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
-                                      title="Onboard Project"
-                                    >
-                                      <UserCheck size={"0.8vw"} />{" "}
-                                      <span>Onboard</span>
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          )}
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -1907,11 +1918,15 @@ const Followup = () => {
 
       <FollowupModal
         isOpen={isFollowupModalOpen}
-        onClose={() => setIsFollowupModalOpen(false)}
+        onClose={() => {
+          setIsFollowupModalOpen(false);
+          setInitialShowHistory(false);
+        }}
         onSuccess={handleSuccess}
         clientData={followupClient}
         clientHistory={clientsHistory}
         subTab={subTab}
+        initialShowHistory={initialShowHistory}
         refreshData={handleSuccess}
       />
       {renderRemarksTooltip()}

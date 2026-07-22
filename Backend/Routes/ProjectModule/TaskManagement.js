@@ -132,11 +132,17 @@ const updateProjectPercentage = async (projectId) => {
       return;
     }
 
+    let completedTaskCount = 0;
     const totalPercentage = activeTasks.reduce((sum, task) => {
-      return sum + (task.percentage || 0);
+      const taskPct = task.percentage || 0;
+      if (taskPct >= 100) completedTaskCount++;
+      return sum + taskPct;
     }, 0);
 
-    const projectPercentage = Math.round(totalPercentage / activeTasks.length);
+    let projectPercentage = Math.round(totalPercentage / activeTasks.length);
+    if (projectPercentage >= 100 && completedTaskCount < activeTasks.length) {
+      projectPercentage = 99;
+    }
 
     await Project_Details.findByIdAndUpdate(projectId, {
       percentage: projectPercentage,

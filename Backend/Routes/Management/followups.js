@@ -824,6 +824,66 @@ router.get("/marketingLeedsCount", async (req, res) => {
   }
 });
 
+// POST - Save onboard details to ManagementOnboardedProjects
+router.post("/onboard", async (req, res) => {
+  const { clientId, companyName, customerName, projectName, category, startDate, endDate, reviewDate, remarks, onboardedBy } = req.body;
+  try {
+    if (!clientId || !companyName || !projectName || !category || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "clientId, companyName, projectName, category, startDate, and endDate are required",
+      });
+    }
+
+    await queryWithRetry(
+      `INSERT INTO ManagementOnboardedProjects
+        (client_id, company_name, customer_name, project_name, category, start_date, end_date, review_date, remarks, budget_status, onboarded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [clientId, companyName, customerName || "", projectName, category, startDate, endDate, reviewDate || null, remarks || "", onboardedBy || ""]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Onboard details saved successfully",
+    });
+  } catch (err) {
+    console.error("Error saving onboard details:", err);
+    res.status(500).json({ success: false, message: "Failed to save onboard details" });
+  }
+});
+
+// GET - List all onboarded projects
+router.get("/onboarded-projects", async (req, res) => {
+  console.log("GET /api/ManagementFollowups/onboarded-projects called");
+  try {
+    const rows = await queryWithRetry(
+      `SELECT * FROM ManagementOnboardedProjects ORDER BY created_at DESC`
+    );
+    console.log("Found onboarded projects count:", rows.length);
+    res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error("Error fetching onboarded projects:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch onboarded projects" });
+  }
+});
+
+// PATCH - Update budget_status to 'completed' (or value passed in body)
+router.patch("/onboard/:id/budget-status", async (req, res) => {
+  const { id } = req.params;
+  const newStatus = req.body?.status || "completed";
+  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called with status: ${newStatus}`);
+  try {
+    await queryWithRetry(
+      `UPDATE ManagementOnboardedProjects SET budget_status = ? WHERE id = ?`,
+      [newStatus, id]
+    );
+    res.status(200).json({ success: true, message: "Budget status updated" });
+  } catch (err) {
+    console.error("Error updating budget status:", err);
+    res.status(500).json({ success: false, message: "Failed to update budget status" });
+  }
+});
+
 router.get("/:followupId", async (req, res) => {
   const { followupId } = req.params;
 
@@ -1373,82 +1433,14 @@ router.post("/meetings/:meetingId/mom", multerMOM.single("document"), async (req
     await queryWithRetry(`
       ALTER TABLE ManagementOnboardedProjects MODIFY COLUMN review_date DATE NULL
     `);
-    console.log("Migration: review_date column altered to nullable.");
+    await queryWithRetry(`
+      ALTER TABLE ManagementOnboardedProjects MODIFY COLUMN budget_status VARCHAR(50) NOT NULL DEFAULT 'pending'
+    `);
+    console.log("Migration: review_date and budget_status columns updated.");
   } catch (err) {
     console.error("Migration error (ManagementOnboardedProjects):", err.message);
   }
 })();
 
 // POST - Save onboard project details
-router.post("/onboard", async (req, res) => {
-  try {
-    const {
-      clientId,
-      companyName,
-      customerName,
-      projectName,
-      category,
-      startDate,
-      endDate,
-      reviewDate,
-      remarks,
-      onboardedBy,
-    } = req.body;
-
-    if (!clientId || !companyName || !projectName || !category || !startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "clientId, companyName, projectName, category, startDate, and endDate are required",
-      });
-    }
-
-    await queryWithRetry(
-      `INSERT INTO ManagementOnboardedProjects
-        (client_id, company_name, customer_name, project_name, category, start_date, end_date, review_date, remarks, budget_status, onboarded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [clientId, companyName, customerName || "", projectName, category, startDate, endDate, reviewDate || null, remarks || "", onboardedBy || ""]
-    );
-
-    res.status(201).json({
-      success: true,
-      message: "Onboard details saved successfully",
-    });
-  } catch (err) {
-    console.error("Error saving onboard details:", err);
-    res.status(500).json({ success: false, message: "Failed to save onboard details" });
-  }
-});
-
-// GET - List all onboarded projects
-router.get("/onboarded-projects", async (req, res) => {
-  console.log("GET /api/ManagementFollowups/onboarded-projects called");
-  try {
-    const rows = await queryWithRetry(
-      `SELECT * FROM ManagementOnboardedProjects ORDER BY created_at DESC`
-    );
-    console.log("Found onboarded projects count:", rows.length);
-    res.status(200).json({ success: true, data: rows });
-  } catch (err) {
-    console.error("Error fetching onboarded projects:", err);
-    res.status(500).json({ success: false, message: "Failed to fetch onboarded projects" });
-  }
-});
-
-// PATCH - Update budget_status to 'completed' (or value passed in body)
-router.patch("/onboard/:id/budget-status", async (req, res) => {
-  const { id } = req.params;
-  const newStatus = req.body?.status || "completed";
-  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called with status: ${newStatus}`);
-  try {
-    await queryWithRetry(
-      `UPDATE ManagementOnboardedProjects SET budget_status = ? WHERE id = ?`,
-      [newStatus, id]
-    );
-    res.status(200).json({ success: true, message: "Budget status updated" });
-  } catch (err) {
-    console.error("Error updating budget status:", err);
-    res.status(500).json({ success: false, message: "Failed to update budget status" });
-  }
-});
-
 module.exports = router;

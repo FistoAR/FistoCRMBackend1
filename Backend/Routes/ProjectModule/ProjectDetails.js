@@ -1234,6 +1234,7 @@ router.get("/:projectId", async (req, res) => {
     if (tasks.length > 0) {
       let tasksSum = 0;
       let activeTasksCount = 0;
+      let completedTaskCount = 0;
       const tasksWithAssignedBy = await Promise.all(
         tasks.map(async (task) => {
           let assignedBy = null;
@@ -1351,6 +1352,9 @@ router.get("/:projectId", async (req, res) => {
           if (task && task.status !== "Cancelled") {
             tasksSum += (task.percentage || 0);
             activeTasksCount++;
+            if ((task.percentage || 0) >= 100) {
+              completedTaskCount++;
+            }
           }
 
           return {
@@ -1363,7 +1367,11 @@ router.get("/:projectId", async (req, res) => {
       );
 
       project.tasks = tasksWithAssignedBy;
-      project.percentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (project.percentage || 0);
+      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (project.percentage || 0);
+      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+        calculatedPercentage = 99;
+      }
+      project.percentage = calculatedPercentage;
     } else {
       project.tasks = null;
     }
@@ -1589,7 +1597,11 @@ router.get("/", async (req, res) => {
         }
       }
 
-      proj.percentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (proj.percentage || 0);
+      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (proj.percentage || 0);
+      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+        calculatedPercentage = 99;
+      }
+      proj.percentage = calculatedPercentage;
       proj.taskCount = projectTasks.filter((t) => t && t.status !== "Cancelled").length;
       proj.completedTaskCount = completedTaskCount;
 
