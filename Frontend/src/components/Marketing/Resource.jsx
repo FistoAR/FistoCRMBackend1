@@ -277,6 +277,9 @@ const Resource = () => {
   };
 
   const handleDelete = async (id) => {
+    const isConfirmed = window.confirm("Are you sure you want to delete this resource?");
+    if (!isConfirmed) return;
+
     const isNew = typeof id === 'number' && id > 1000000000000;
     
     if (isNew) {
@@ -622,16 +625,13 @@ const Resource = () => {
                                 >
                                   <Edit size={"1.02vw"} />
                                 </button>
-                                {/* Hide delete button for important tab */}
-                                {subTab !== "important" && (
-                                  <button
-                                    onClick={() => handleDelete(row.id)}
-                                    className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
-                                    title="Delete"
-                                  >
-                                    <Trash2 size={"1.02vw"} />
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => handleDelete(row.id)}
+                                  className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={"1.02vw"} />
+                                </button>
                               </>
                             )}
                           </div>

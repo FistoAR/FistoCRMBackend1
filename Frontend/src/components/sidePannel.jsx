@@ -364,7 +364,11 @@ export default function Sidebar() {
       items.push(...menuConfig.projectHead);
     }
     if (isOnRole && designation === "SBU") {
-      items.push(...menuConfig.projectHead);
+      items.push(
+        ...menuConfig.projectHead.filter(
+          (item) => item.label !== "Unscheduled Task"
+        )
+      );
     }
     if (isOnRole && designation === "Admin") {
       items.push(...menuConfig.admin);

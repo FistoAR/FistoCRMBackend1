@@ -96,13 +96,17 @@ const EmployeeRequest = () => {
         const response = await fetch(`${API_BASE_URL}/hr/leave-requests`);
         const data = await response.json();
         if (data.success) {
-          setLeaveHistory(data.requests.filter((req) => req.employee_id === employeeId));
+          const userRequests = data.requests.filter((req) => req.employee_id === employeeId);
+          userRequests.sort((a, b) => (b.id || 0) - (a.id || 0) || new Date(b.created_at || b.from_date) - new Date(a.created_at || a.from_date));
+          setLeaveHistory(userRequests);
         }
       } else if (subTab === "permissionHistory") {
         const response = await fetch(`${API_BASE_URL}/hr/permission-requests`);
         const data = await response.json();
         if (data.success) {
-          setPermissionHistory(data.requests.filter((req) => req.employee_id === employeeId));
+          const userRequests = data.requests.filter((req) => req.employee_id === employeeId);
+          userRequests.sort((a, b) => (b.id || 0) - (a.id || 0) || new Date(b.created_at || b.permission_date) - new Date(a.created_at || a.permission_date));
+          setPermissionHistory(userRequests);
         }
       }
     } catch (error) {

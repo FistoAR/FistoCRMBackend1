@@ -96,38 +96,6 @@ const InternReports = () => {
     };
   }, []);
 
-  // Fetch employees list
-  useEffect(() => {
-    if (userInfo) {
-      fetchEmployees();
-    }
-  }, [userInfo]);
-
-  // Initial fetch when user info is loaded
-  useEffect(() => {
-    if (userInfo) {
-      resetAndFetch();
-    }
-  }, [userInfo]);
-
-  // ✅ Reset and refetch when filters or report type change
-  useEffect(() => {
-    if (userInfo) {
-      setSelectedEmployee("all"); // Reset employee filter when switching report types
-      resetAndFetch();
-    }
-  }, [reportType]);
-
-  useEffect(() => {
-    if (userInfo) {
-      resetAndFetch();
-    }
-  }, [searchTerm, startDate, endDate, selectedEmployee]);
-
-  // ✅ All records are now handled by the backend pagination and filtering
-  // loadAllRecordsForFiltering is removed as it's no longer needed and was fragile
-
-
   const fetchEmployees = async () => {
     try {
       if (userInfo?.isAdmin) {
@@ -141,7 +109,6 @@ const InternReports = () => {
           `${API_URL}/intern-reports/team-by-designation/${userInfo?.designation}`,
         );
         const data = await response.json();
-        console.log("Fetched Reports Data:", data.reports); // Debug log
         if (data.success) {
           setEmployees(data.data || []);
         }
@@ -151,40 +118,75 @@ const InternReports = () => {
     }
   };
 
-  // ✅ Reset everything and fetch first batch
-  const resetAndFetch = () => {
+  // Fetch employees list
+  useEffect(() => {
+    if (userInfo) {
+      fetchEmployees();
+    }
+  }, [userInfo]);
+
+  const activeAbortControllerRef = useRef(null);
+  const activeRequestCountRef = useRef(0);
+
+  // Initial fetch when user info is loaded
+  useEffect(() => {
+    if (userInfo) {
+      resetAndFetch(reportType, selectedEmployee, searchTerm, startDate, endDate);
+    }
+  }, [userInfo, reportType, selectedEmployee, searchTerm, startDate, endDate]);
+
+  // Reset and fetch reports cleanly
+  const resetAndFetch = (currentType = reportType, empId = selectedEmployee, search = searchTerm, start = startDate, end = endDate) => {
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+    }
     setAllFetchedReports([]);
     setCurrentBatch(0);
     setLoadedBatches(new Set([0]));
     setCurrentPage(1);
     setTotalReportsCount(0);
-    fetchReportsBatch(0, false);
+    fetchReportsBatch(0, false, currentType, empId, search, start, end);
   };
 
-  // ✅ Fetch a specific batch of reports with all active filters
-  const fetchReportsBatch = async (batchNumber, append = false) => {
-    if (append) {
-      setFetchingMore(true);
-    } else {
+  // Fetch a specific batch of reports with given filters
+  const fetchReportsBatch = async (
+    batchNumber,
+    append = false,
+    typeParam = reportType,
+    empParam = selectedEmployee,
+    searchParam = searchTerm,
+    startParam = startDate,
+    endParam = endDate
+  ) => {
+    if (!append) {
+      if (activeAbortControllerRef.current) {
+        activeAbortControllerRef.current.abort();
+      }
       setLoading(true);
+      activeRequestCountRef.current += 1;
+    } else {
+      setFetchingMore(true);
+    }
+
+    const controller = new AbortController();
+    if (!append) {
+      activeAbortControllerRef.current = controller;
     }
 
     try {
       const offset = batchNumber * FETCH_BATCH_SIZE;
-      let url = "";
-      
-      // Build common query parameters
       const params = new URLSearchParams({
         limit: FETCH_BATCH_SIZE,
-        offset: offset
+        offset: offset,
       });
-      
-      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
-      if (startDate) params.append("start_date", startDate);
-      if (endDate) params.append("end_date", endDate);
-      if (searchTerm) params.append("search", searchTerm);
 
-      if (reportType === "management") {
+      if (empParam !== "all") params.append("employee_id", empParam);
+      if (startParam) params.append("start_date", startParam);
+      if (endParam) params.append("end_date", endParam);
+      if (searchParam) params.append("search", searchParam);
+
+      let url = "";
+      if (typeParam === "management") {
         url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
       } else if (userInfo?.isAdmin) {
         url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
@@ -196,7 +198,7 @@ const InternReports = () => {
         url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
       }
 
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
 
       if (data.success) {
@@ -204,9 +206,12 @@ const InternReports = () => {
 
         if (append) {
           setAllFetchedReports((prev) => {
-            // Avoid duplicates if same batch is fetched twice
-            const existingKeys = new Set(prev.map(r => `${r.employee_id}_${r.report_date}`));
-            const uniqueNew = newReports.filter(r => !existingKeys.has(`${r.employee_id}_${r.report_date}`));
+            const existingKeys = new Set(
+              prev.map((r) => `${r.employee_id}_${r.report_date}`)
+            );
+            const uniqueNew = newReports.filter(
+              (r) => !existingKeys.has(`${r.employee_id}_${r.report_date}`)
+            );
             return [...prev, ...uniqueNew];
           });
         } else {
@@ -217,13 +222,19 @@ const InternReports = () => {
         setLoadedBatches((prev) => new Set([...prev, batchNumber]));
       }
     } catch (error) {
+      if (error.name === "AbortError") {
+        return;
+      }
       console.error("Error fetching reports:", error);
       showToast("Error", "Failed to fetch reports");
     } finally {
       if (append) {
         setFetchingMore(false);
       } else {
-        setLoading(false);
+        activeRequestCountRef.current = Math.max(0, activeRequestCountRef.current - 1);
+        if (activeRequestCountRef.current === 0) {
+          setLoading(false);
+        }
       }
     }
   };
@@ -519,7 +530,15 @@ const InternReports = () => {
       )}
 
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
-        <div className="bg-white rounded-xl shadow-sm h-[100%] flex flex-col overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm h-[100%] flex flex-col overflow-hidden relative">
+          {/* Top border blue loading bar */}
+          {(loading || fetchingMore) && (
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden rounded-t-xl">
+              <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
+            </div>
+          )}
+          <style>{`@keyframes loadingLine{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}`}</style>
+
           {/* Header */}
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
             <div className="flex items-center gap-[0.5vw]">
@@ -534,7 +553,12 @@ const InternReports = () => {
               {userInfo?.isAdmin && (
                 <div className="flex bg-gray-100 p-[0.2vw] rounded-full border border-gray-200">
                   <button
-                    onClick={() => setReportType("intern")}
+                    onClick={() => {
+                      if (reportType !== "intern") {
+                        setSelectedEmployee("all");
+                        setReportType("intern");
+                      }
+                    }}
                     className={`px-[1.2vw] py-[0.35vw] rounded-full text-[0.75vw] font-semibold transition-all duration-300 cursor-pointer flex items-center gap-[0.3vw] ${
                       reportType === "intern"
                         ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5"
@@ -544,7 +568,12 @@ const InternReports = () => {
                     Employees
                   </button>
                   <button
-                    onClick={() => setReportType("management")}
+                    onClick={() => {
+                      if (reportType !== "management") {
+                        setSelectedEmployee("all");
+                        setReportType("management");
+                      }
+                    }}
                     className={`px-[1.2vw] py-[0.35vw] rounded-full text-[0.75vw] font-semibold transition-all duration-300 cursor-pointer flex items-center gap-[0.3vw] ${
                       reportType === "management"
                         ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5"
@@ -802,13 +831,8 @@ const InternReports = () => {
           )}
 
           {/* Table Content */}
-          <div className="flex-1 min-h-0">
-            {loading && allFetchedReports.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-                <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600 mb-4"></div>
-                <p className="text-gray-600 text-[0.9vw]">Loading reports...</p>
-              </div>
-            ) : filteredReports.length === 0 && !loading ? (
+          <div className="flex-1 min-h-0 relative">
+            {filteredReports.length === 0 && !loading ? (
               <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
                 <svg
                   className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300"
@@ -837,9 +861,9 @@ const InternReports = () => {
               </div>
             ) : (
               <div
-                className={`mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto ${
-                  hasActiveFilters ? "max-h-[70vh]" : "max-h-[74vh]"
-                }`}
+                className={`mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto transition-opacity duration-200 ${
+                  loading ? "opacity-60" : "opacity-100"
+                } ${hasActiveFilters ? "max-h-[70vh]" : "max-h-[74vh]"}`}
               >
                 <table className="w-full border-collapse border border-gray-300">
                   <thead className="bg-[#E2EBFF] sticky top-0">

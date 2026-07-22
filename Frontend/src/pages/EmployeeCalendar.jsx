@@ -434,7 +434,19 @@ const EmployeeCalendar = () => {
         document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const filteredEmployees = employees.filter((emp) =>
+    const [activeTab, setActiveTab] = useState("Active");
+
+    const isEmployeeActive = (emp) => {
+      const status = (emp.working_status || "").trim().toLowerCase();
+      return status === "working" || status === "active" || status === "";
+    };
+
+    const activeEmployees = employees.filter((emp) => isEmployeeActive(emp));
+    const inactiveEmployees = employees.filter((emp) => !isEmployeeActive(emp));
+
+    const currentTabEmployees = activeTab === "Active" ? activeEmployees : inactiveEmployees;
+
+    const filteredEmployees = currentTabEmployees.filter((emp) =>
       emp.employee_name.toLowerCase().includes(search.toLowerCase()),
     );
 
@@ -457,7 +469,7 @@ const EmployeeCalendar = () => {
         </div>
 
         {open && (
-          <div className="absolute right-[0vw] mt-[0.4vw] w-[15vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
+          <div className="absolute right-[0vw] mt-[0.4vw] w-[16.5vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
             <div className="flex items-center px-[0.4vw] py-[0.2vw] rounded-full border-b border-gray-200 bg-gray-100">
               <Search className="w-[1vw] h-[1vw] text-gray-500 mr-[0.7vw]" />
               <input
@@ -468,6 +480,52 @@ const EmployeeCalendar = () => {
                 className="w-full bg-transparent outline-none text-[0.9vw] text-gray-700"
               />
             </div>
+
+            {/* Active / Inactive Tabs */}
+            <div className="flex border-b border-gray-200 mt-[0.3vw]">
+              <button
+                type="button"
+                onClick={() => setActiveTab("Active")}
+                className={`flex-1 text-center py-[0.25vw] text-[0.8vw] font-medium transition-colors cursor-pointer flex items-center justify-center gap-[0.3vw] ${
+                  activeTab === "Active"
+                    ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <span>Active</span>
+                <span
+                  className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                    activeTab === "Active"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {activeEmployees.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("Inactive")}
+                className={`flex-1 text-center py-[0.25vw] text-[0.8vw] font-medium transition-colors cursor-pointer flex items-center justify-center gap-[0.3vw] ${
+                  activeTab === "Inactive"
+                    ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <span>Inactive</span>
+                <span
+                  className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                    activeTab === "Inactive"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {inactiveEmployees.length}
+                </span>
+              </button>
+            </div>
+
             <div className="max-h-[20vw] overflow-y-auto mt-[0.2vw]">
               {filteredEmployees.length > 0 ? (
                 filteredEmployees.map((employee) => (
@@ -500,8 +558,8 @@ const EmployeeCalendar = () => {
                   </div>
                 ))
               ) : (
-                <div className="text-gray-500 text-[1vw] p-2">
-                  No results found
+                <div className="text-gray-500 text-[0.9vw] p-2 text-center">
+                  No {activeTab.toLowerCase()} employees found
                 </div>
               )}
             </div>

@@ -1089,7 +1089,7 @@ const Projects = () => {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 max-h-[84%]">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 {loading ? (
                   <div className="flex items-center justify-center h-full min-h-[400px]">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -1405,7 +1405,7 @@ const Projects = () => {
               </div>
 
               {!loading && paginatedProjects.length > 0 && (
-                <div className="flex items-center justify-between p-[1.7vw] h-[5%] flex-shrink-0">
+                <div className="flex items-center justify-between py-[0.4vw] px-[1.2vw] shrink-0 bg-white ">
                   <button
                     onClick={handlePreviousPage}
                     disabled={currentPage === 1}

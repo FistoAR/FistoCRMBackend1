@@ -1270,6 +1270,16 @@ const Analytics = () => {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState("");
     const [activeTab, setActiveTab] = useState("In Progress");
+    const [canScrollRight, setCanScrollRight] = useState(false);
+    const tabsRef = useRef(null);
+
+    const checkScroll = () => {
+      if (tabsRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
+        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2);
+      }
+    };
+
     const selectRef = useRef(null);
 
     useEffect(() => {
@@ -1283,23 +1293,38 @@ const Analytics = () => {
         document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    useEffect(() => {
+      checkScroll();
+    }, [open]);
+
+    const getProjectStatusCategory = (p) => {
+      const statusLower = p.status?.toLowerCase() || "";
+      if (statusLower === "completed") return "Completed";
+      if (statusLower === "hold") return "Hold";
+      if (statusLower === "canceled" || statusLower === "cancelled") return "Canceled";
+      return "In Progress";
+    };
+
+    const validProjects = projects.filter((p) => p.id != "all");
+    const totalProjectsCount = validProjects.length;
+
+    const counts = {
+      "In Progress": validProjects.filter((p) => getProjectStatusCategory(p) === "In Progress").length,
+      Completed: validProjects.filter((p) => getProjectStatusCategory(p) === "Completed").length,
+      Hold: validProjects.filter((p) => getProjectStatusCategory(p) === "Hold").length,
+      Canceled: validProjects.filter((p) => getProjectStatusCategory(p) === "Canceled").length,
+    };
+
     const filteredProjects = projects.filter((p) => {
       const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-
-      const projectStatus =
-        p.status?.toLowerCase() === "hold"
-          ? "Hold"
-          : p.status?.toLowerCase() === "canceled"
-            ? "Canceled"
-            : "In Progress";
-
+      const projectStatus = getProjectStatusCategory(p);
       const matchesStatus = projectStatus === activeTab;
-
       return matchesSearch && matchesStatus;
     });
 
     const tabs = [
       { id: "In Progress", label: "In Progress" },
+      { id: "Completed", label: "Completed" },
       { id: "Hold", label: "Hold" },
       { id: "Canceled", label: "Canceled" },
     ];
@@ -1322,7 +1347,7 @@ const Analytics = () => {
         </div>
 
         {open && (
-          <div className="absolute left-0 mt-[0.4vw] w-[15vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
+          <div className="absolute left-0 mt-[0.4vw] w-[17.5vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 animate-fadeIn">
             <div className="flex items-center px-[0.4vw] py-[0.2vw] rounded-full border-b border-gray-200 bg-gray-100">
               <Search className="w-[1vw] h-[1vw] text-gray-500 mr-[0.7vw]" />
               <input
@@ -1340,25 +1365,57 @@ const Analytics = () => {
                 setOpen(false);
                 setSearch("");
               }}
-              className="cursor-pointer hover:bg-blue-100 text-gray-800 text-[0.9vw] font-medium border-b border-gray-300 px-[0.4vw] rounded-[0.2vw] py-[0.5vw] mt-[0.2vw]"
+              className="cursor-pointer hover:bg-blue-100 text-gray-800 text-[0.9vw] font-medium border-b border-gray-300 px-[0.4vw] rounded-[0.2vw] py-[0.5vw] mt-[0.2vw] flex items-center justify-between"
             >
-              All projects
+              <span>All projects</span>
+              <span className="text-[0.7vw] bg-gray-200 text-gray-700 px-[0.4vw] py-[0.1vw] rounded-full font-semibold">
+                {totalProjectsCount}
+              </span>
             </div>
 
-            <div className="flex border-b border-gray-200 mt-[0.3vw]">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 text-center py-[0.2vw] text-[0.85vw] font-medium transition-colors cursor-pointer ${
-                    activeTab === tab.id
-                      ? "text-blue-600 border-b-2 border-blue-600"
-                      : "text-gray-600 hover:text-gray-800"
-                  }`}
+            <div className="relative flex items-center border-b border-gray-200 mt-[0.3vw]">
+              <div
+                ref={tabsRef}
+                onScroll={checkScroll}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                className="flex overflow-x-auto [&::-webkit-scrollbar]:hidden scroll-smooth w-full pr-[1.5vw]"
+              >
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`whitespace-nowrap px-[0.5vw] py-[0.25vw] text-[0.85vw] font-medium transition-colors cursor-pointer shrink-0 flex items-center gap-[0.3vw] ${
+                      activeTab === tab.id
+                        ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                        : "text-gray-600 hover:text-gray-800"
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                        activeTab === tab.id
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {counts[tab.id] || 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {canScrollRight && (
+                <div
+                  onClick={() => {
+                    if (tabsRef.current) {
+                      tabsRef.current.scrollBy({ left: 50, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute -right-[0.9vw] top-1/2 -translate-y-1/2 bg-white shadow-md rounded-full p-[0.15vw] border border-gray-200 text-gray-600 hover:text-blue-600 cursor-pointer z-10 animate-pulse"
+                  title="Scroll for more tabs"
                 >
-                  {tab.label}
-                </button>
-              ))}
+                  <ChevronRight className="w-[0.9vw] h-[0.9vw]" />
+                </div>
+              )}
             </div>
 
             <div className="max-h-[18vw] overflow-y-auto mt-[0.2vw]">
