@@ -104,9 +104,9 @@ router.get("/projects", (req, res) => {
       p.budget_status    AS budget_status,
       p.budget_status    AS budgetStatus,
       p.created_at       AS createdAt,
-      pb.totalBudget     AS totalBudget,
-      pb.startingDate    AS budgetStartingDate,
-      pb.complicationDate AS budgetComplicationDate
+      pb.total_budget     AS totalBudget,
+      pb.starting_date    AS budgetStartingDate,
+      pb.completion_date  AS budgetComplicationDate
     FROM ManagementOnboardedProjects p
     LEFT JOIN project_budgets pb ON pb.project_id = p.id
     ORDER BY p.created_at DESC
