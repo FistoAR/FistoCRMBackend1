@@ -135,10 +135,10 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   const pendingOnboardedProjects = onboardedProjects.filter(p => p.budget_status === "pending");
 
   useEffect(() => {
-    fetchProjects();
-    fetchProposedClients();
-    fetchOnboardedProjects();
+    // Fire all 3 startup fetches in parallel — no sequential blocking
+    Promise.all([fetchProjects(), fetchProposedClients(), fetchOnboardedProjects()]);
   }, []);
+
 
   // Auto-open create modal when navigated from onboard confirmation
   useEffect(() => {
@@ -265,15 +265,9 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       const res = await fetch(`${API_BASE_URL}/budget/projects`);
       const data = await res.json();
       if (data.success) {
-        // Fetch budget details for each project
-        const projectsWithDetails = await Promise.all(
-          (data.projects || []).map(async (project) => {
-            const details = await fetchProjectDetails(project.id);
-            return details ? { ...project, ...details } : project;
-          })
-        );
-        setProjects(projectsWithDetails);
-        setFilteredProjects(projectsWithDetails);
+        // Backend now JOINs project_budgets — no per-project calls needed
+        setProjects(data.projects || []);
+        setFilteredProjects(data.projects || []);
       } else {
         showToast("Error", data.error || "Failed to load projects");
       }
@@ -284,6 +278,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       setLoading(false);
     }
   };
+
 
   const fetchProjectDetails = async (projectId) => {
     try {

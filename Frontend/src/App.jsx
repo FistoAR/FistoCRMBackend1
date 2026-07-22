@@ -128,7 +128,7 @@ function MainLayout({ children, socketData }) {
       <Sidebar />
       <main className="flex-1 flex flex-col bg-gray-100 h-full overflow-hidden px-[1.2vw] py-[0.4vh]">
         <NavBarWithTitle socketData={socketData} />
-        <div className="flex-1 overflow-y-auto mt-[1vh] pr-[0.3vw]">
+        <div className="flex-1 mt-[1vh] pr-[0.3vw]">
           {children}
         </div>
       </main>

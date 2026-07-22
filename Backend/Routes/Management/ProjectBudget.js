@@ -89,25 +89,27 @@ router.post("/projects", (req, res) => {
   });
 });
 
-// GET all projects from ManagementOnboardedProjects table
+// GET all projects from ManagementOnboardedProjects table — single JOIN query (O(1))
 router.get("/projects", (req, res) => {
-  console.log("GET /api/budget/projects called");
-
   const sql = `
-    SELECT 
-      id,
-      client_id AS clientId,
-      company_name AS companyName,
-      customer_name AS customerName,
-      project_name AS projectName,
-      category AS projectCategory,
-      start_date AS startDate,
-      end_date AS endDate,
-      budget_status AS budget_status,
-      budget_status AS budgetStatus,
-      created_at AS createdAt
-    FROM ManagementOnboardedProjects
-    ORDER BY created_at DESC
+    SELECT
+      p.id,
+      p.client_id        AS clientId,
+      p.company_name     AS companyName,
+      p.customer_name    AS customerName,
+      p.project_name     AS projectName,
+      p.category         AS projectCategory,
+      p.start_date       AS startDate,
+      p.end_date         AS endDate,
+      p.budget_status    AS budget_status,
+      p.budget_status    AS budgetStatus,
+      p.created_at       AS createdAt,
+      pb.totalBudget     AS totalBudget,
+      pb.startingDate    AS budgetStartingDate,
+      pb.complicationDate AS budgetComplicationDate
+    FROM ManagementOnboardedProjects p
+    LEFT JOIN project_budgets pb ON pb.project_id = p.id
+    ORDER BY p.created_at DESC
   `;
 
   db.pool.query(sql, (err, projects) => {
@@ -119,13 +121,24 @@ router.get("/projects", (req, res) => {
       });
     }
 
+    // Shape each row so budget fields mirror the detail endpoint structure
+    const shaped = projects.map((p) => ({
+      ...p,
+      budget: p.totalBudget != null ? {
+        totalBudget:      p.totalBudget,
+        startingDate:     p.budgetStartingDate,
+        complicationDate: p.budgetComplicationDate,
+      } : null,
+    }));
+
     res.status(200).json({
       success: true,
       message: "Projects fetched successfully",
-      projects: projects,
+      projects: shaped,
     });
   });
 });
+
 
 // GET single project by ID with all details
 router.get("/projects/:id", (req, res) => {
