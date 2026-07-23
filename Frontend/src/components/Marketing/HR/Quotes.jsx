@@ -46,7 +46,8 @@ const OCCASION_OPTIONS = [
     color: "bg-red-100 text-red-800",
     type: "occasion",
   },
-  { value: "Announcement", label: "Announcement", color: "bg-yellow-100 text-yellow-800", type: "occasion" }
+  { value: "Announcement", label: "Announcement", color: "bg-yellow-100 text-yellow-800", type: "occasion" },
+  { value: "Others", label: "Others", color: "bg-gray-100 text-gray-800", type: "occasion" }
 ];
 
 const Quotes = () => {
@@ -280,6 +281,11 @@ const Quotes = () => {
     try {
       const submitFormData = new FormData();
       submitFormData.append("name", newImageData.name);
+      if (newImageData.occasion) {
+        submitFormData.append("occasion", newImageData.occasion);
+      } else if (formData.occasion) {
+        submitFormData.append("occasion", formData.occasion);
+      }
       submitFormData.append("image", newImageData.image);
 
       const endpoint = imageUploadType === "employee" 
@@ -772,6 +778,25 @@ const Quotes = () => {
                     placeholder={imageUploadType === "employee" ? "Enter employee name" : "Enter occasion name"}
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                    Target HR Resource Subfolder
+                  </label>
+                  <select
+                    name="occasion"
+                    value={newImageData.occasion || ""}
+                    onChange={handleNewImageInputChange}
+                    className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black bg-white"
+                  >
+                    <option value="">Default ({imageUploadType === "employee" ? "Birthday" : "Holiday"})</option>
+                    {OCCASION_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

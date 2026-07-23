@@ -97,9 +97,9 @@ async function getOrCreateSubfolder(folderName, parentFolderId = ROOT_FOLDER_ID)
 }
 
 /**
- * Uploads a local file to Google Drive and returns persistent Drive preview path.
+ * Uploads a local file to Google Drive under 'HR Resource' -> [folderName] and returns persistent Drive preview path.
  */
-async function uploadToDrive({ filePath, originalname, mimetype, folderName = "Quotes & Celebrations" }) {
+async function uploadToDrive({ filePath, originalname, mimetype, folderName = "Celebration" }) {
   const hasTokens = loadTokens();
   if (!hasTokens) {
     console.warn("⚠️ Drive Service: No Drive tokens loaded, falling back to local storage.");
@@ -107,12 +107,26 @@ async function uploadToDrive({ filePath, originalname, mimetype, folderName = "Q
   }
 
   try {
-    const parentId = await getOrCreateSubfolder(folderName, ROOT_FOLDER_ID);
+    // 1. Get or create master parent folder "HR Resource" under root
+    const hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
+
+    // 2. Map folderName to one of the valid subfolders
+    let validFolder = folderName;
+    const validNames = ["Birthday", "Work Anniversary", "Holiday", "Special Day", "Celebration", "Announcement", "Others"];
+    if (!validNames.includes(validFolder)) {
+      if (validFolder === "Employee Celebrations") validFolder = "Birthday";
+      else if (validFolder === "Occasion Celebrations") validFolder = "Holiday";
+      else if (validFolder === "Quotes & Celebrations") validFolder = "Celebration";
+      else validFolder = "Others";
+    }
+
+    // 3. Get or create subfolder inside "HR Resource"
+    const targetFolderId = await getOrCreateSubfolder(validFolder, hrResourceFolderId);
 
     const fileRes = await drive.files.create({
       resource: {
         name: originalname,
-        parents: [parentId],
+        parents: [targetFolderId],
       },
       media: {
         mimeType: mimetype,
@@ -139,6 +153,196 @@ async function uploadToDrive({ filePath, originalname, mimetype, folderName = "Q
   } catch (error) {
     console.error("❌ Drive Service Upload Error:", error.message);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Organizes Google Drive folders:
+ * 1. Merges duplicate 'HR Resource' and 'Quotes Images' folders under root into a single master 'HR Resource' folder.
+ * 2. Creates the 6 subfolders ('Birthday', 'Work Anniversary', 'Holiday', 'Special Day', 'Celebration', 'Announcement').
+ * 3. Moves images from loose/old subfolders into their respective subfolders.
+ */
+async function organizeDriveFolders(dbPool) {
+  const hasTokens = loadTokens();
+  if (!hasTokens) return;
+
+  try {
+    const hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
+    const VALID_SUBFOLDERS = [
+      "Birthday",
+      "Work Anniversary",
+      "Holiday",
+      "Special Day",
+      "Celebration",
+      "Announcement",
+      "Others"
+    ];
+
+    const subfolderMap = {};
+    for (const name of VALID_SUBFOLDERS) {
+      subfolderMap[name] = await getOrCreateSubfolder(name, hrResourceFolderId);
+    }
+
+    const fileTargetFolderMap = new Map();
+    const fileNameTargetFolderMap = new Map();
+
+    if (dbPool) {
+      const resolveTarget = (occStr, textStr) => {
+        const occ = (occStr || "").trim();
+        const text = (textStr || "").toLowerCase();
+        
+        const match = VALID_SUBFOLDERS.find(s => s.toLowerCase() === occ.toLowerCase());
+        if (match) return match;
+
+        if (occ === "Work Anniversary" || text.includes("anniversary") || text.includes("milestone") || text.includes("leader") || text.includes("years")) {
+          return "Work Anniversary";
+        }
+        if (occ === "Birthday" || text.includes("birthday") || text.includes("wishing")) {
+          return "Birthday";
+        }
+        if (occ === "Announcement" || text.includes("announcement") || text.includes("presentation")) {
+          return "Announcement";
+        }
+        if (occ === "Holiday" || text.includes("holiday") || text.includes("diwali") || text.includes("pongal")) {
+          return "Holiday";
+        }
+        if (occ === "Special Day" || text.includes("special")) {
+          return "Special Day";
+        }
+        if (occ === "Celebration" || text.includes("celebration")) {
+          return "Celebration";
+        }
+        return "Others";
+      };
+
+      // 1. Query 'quotes'
+      const quotes = await new Promise((res) => {
+        dbPool.query("SELECT id, quote, occasion, image_url FROM quotes WHERE image_url IS NOT NULL", (err, rows) => {
+          res(err ? [] : rows || []);
+        });
+      });
+
+      for (const q of quotes) {
+        const target = resolveTarget(q.occasion, q.quote);
+        if (q.image_url.includes("/api/drive/preview/")) {
+          const fileId = q.image_url.split("/api/drive/preview/")[1];
+          fileTargetFolderMap.set(fileId, target);
+        }
+        const fname = path.basename(q.image_url).toLowerCase();
+        if (fname) {
+          fileNameTargetFolderMap.set(fname, target);
+        }
+      }
+
+      // 2. Query 'employee_images'
+      const empImages = await new Promise((res) => {
+        dbPool.query("SELECT id, employee_name, image_url FROM employee_images WHERE image_url IS NOT NULL", (err, rows) => {
+          res(err ? [] : rows || []);
+        });
+      });
+
+      for (const emp of empImages) {
+        let target = "Birthday";
+        const nameLower = (emp.employee_name || "").toLowerCase();
+        if (nameLower.includes("anniversary") || nameLower.includes("work")) {
+          target = "Work Anniversary";
+        }
+        if (emp.image_url.includes("/api/drive/preview/")) {
+          const fileId = emp.image_url.split("/api/drive/preview/")[1];
+          fileTargetFolderMap.set(fileId, target);
+        }
+        const fname = path.basename(emp.image_url).toLowerCase();
+        if (fname) {
+          fileNameTargetFolderMap.set(fname, target);
+        }
+      }
+
+      // 3. Query 'occasion_images'
+      const occImages = await new Promise((res) => {
+        dbPool.query("SELECT id, occasion_name, image_url FROM occasion_images WHERE image_url IS NOT NULL", (err, rows) => {
+          res(err ? [] : rows || []);
+        });
+      });
+
+      for (const occ of occImages) {
+        const target = resolveTarget(occ.occasion_name, "");
+        if (occ.image_url.includes("/api/drive/preview/")) {
+          const fileId = occ.image_url.split("/api/drive/preview/")[1];
+          fileTargetFolderMap.set(fileId, target);
+        }
+        const fname = path.basename(occ.image_url).toLowerCase();
+        if (fname) {
+          fileNameTargetFolderMap.set(fname, target);
+        }
+      }
+    }
+
+    // 4. Scan all subfolders inside HR Resource
+    const allHrSubfoldersRes = await drive.files.list({
+      q: `'${hrResourceFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: "files(id, name)",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    const hrSubfolders = allHrSubfoldersRes.data.files || [];
+
+    for (const sub of hrSubfolders) {
+      const filesInSub = await drive.files.list({
+        q: `'${sub.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: "files(id, name, parents)",
+        pageSize: 1000,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      const filesList = filesInSub.data.files || [];
+      for (const file of filesList) {
+        let targetFolder = fileTargetFolderMap.get(file.id);
+
+        if (!targetFolder) {
+          targetFolder = fileNameTargetFolderMap.get(file.name.toLowerCase());
+        }
+
+        if (!targetFolder) {
+          const fname = file.name.toLowerCase();
+          if (fname.includes("anniversary") || fname.includes("work")) {
+            targetFolder = "Work Anniversary";
+          } else if (fname.includes("announcement") || fname.includes("presentation")) {
+            targetFolder = "Announcement";
+          } else if (fname.includes("birthday") || fname.includes("employee")) {
+            targetFolder = "Birthday";
+          } else if (fname.includes("holiday") || fname.includes("diwali") || fname.includes("pongal")) {
+            targetFolder = "Holiday";
+          } else if (fname.includes("special")) {
+            targetFolder = "Special Day";
+          } else if (fname.includes("celebration")) {
+            targetFolder = "Celebration";
+          } else {
+            targetFolder = "Others";
+          }
+        }
+
+        const destFolderId = subfolderMap[targetFolder];
+
+        if (destFolderId && sub.id !== destFolderId) {
+          try {
+            await drive.files.update({
+              fileId: file.id,
+              addParents: destFolderId,
+              removeParents: sub.id,
+              fields: "id, parents",
+              supportsAllDrives: true,
+            });
+            console.log(`🚚 Drive Service: Re-routed '${file.name}' (${file.id}) from '${sub.name}' -> '${targetFolder}'`);
+          } catch (err) {
+            console.error(`❌ Drive Service: Failed moving '${file.name}':`, err.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ organizeDriveFolders error:", err.message);
   }
 }
 
@@ -175,8 +379,101 @@ async function deleteFromDrive(fileIdOrUrl) {
   }
 }
 
+function getMimeType(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  switch (ext) {
+    case ".png": return "image/png";
+    case ".jpg": case ".jpeg": return "image/jpeg";
+    case ".webp": return "image/webp";
+    case ".gif": return "image/gif";
+    case ".svg": return "image/svg+xml";
+    default: return "image/jpeg";
+  }
+}
+
+/**
+ * Scans DB tables for old local /Images/ paths and uploads them to Google Drive automatically.
+ */
+async function migrateLocalImagesToDrive(dbPool) {
+  if (!dbPool) return;
+  const tables = [
+    { name: "quotes", folder: "Quotes & Celebrations" },
+    { name: "employee_images", folder: "Employee Celebrations" },
+    { name: "occasion_images", folder: "Occasion Celebrations" },
+  ];
+
+  for (const t of tables) {
+    try {
+      const rows = await new Promise((resolve, reject) => {
+        dbPool.query(`SELECT id, image_url FROM ${t.name} WHERE image_url LIKE '/Images/%'`, (err, res) => {
+          if (err) return reject(err);
+          resolve(res || []);
+        });
+      });
+
+      for (const row of rows) {
+        const localAbsPath = path.join(__dirname, "..", row.image_url);
+        if (!fs.existsSync(localAbsPath)) continue;
+
+        const filename = path.basename(localAbsPath);
+        const driveRes = await uploadToDrive({
+          filePath: localAbsPath,
+          originalname: filename,
+          mimetype: getMimeType(filename),
+          folderName: t.folder,
+        });
+
+        if (driveRes.success) {
+          dbPool.query(`UPDATE ${t.name} SET image_url = ? WHERE id = ?`, [driveRes.previewUrl, row.id]);
+          console.log(`✅ Drive Migration: Migrated ${t.name} ID ${row.id} -> ${driveRes.previewUrl}`);
+        }
+      }
+    } catch (err) {
+      // Non-blocking log
+    }
+  }
+}
+
+/**
+ * Moves a Google Drive file to a target occasion subfolder under 'HR Resource'.
+ */
+async function moveDriveFileToOccasion(fileIdOrUrl, newOccasion) {
+  if (!fileIdOrUrl || !newOccasion) return false;
+  let fileId = fileIdOrUrl;
+  if (typeof fileIdOrUrl === "string" && fileIdOrUrl.includes("/api/drive/preview/")) {
+    fileId = fileIdOrUrl.split("/api/drive/preview/")[1];
+  }
+
+  try {
+    const hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
+    const validNames = ["Birthday", "Work Anniversary", "Holiday", "Special Day", "Celebration", "Announcement", "Others"];
+    let validFolder = validNames.includes(newOccasion) ? newOccasion : "Others";
+    const targetFolderId = await getOrCreateSubfolder(validFolder, hrResourceFolderId);
+
+    const fileGet = await drive.files.get({ fileId, fields: "id, parents", supportsAllDrives: true });
+    const currentParents = fileGet.data.parents || [];
+    if (!currentParents.includes(targetFolderId)) {
+      await drive.files.update({
+        fileId,
+        addParents: targetFolderId,
+        removeParents: currentParents.join(","),
+        fields: "id, parents",
+        supportsAllDrives: true,
+      });
+      console.log(`✅ Drive Service: Moved file ${fileId} -> 'HR Resource/${validFolder}'`);
+    }
+    return true;
+  } catch (err) {
+    console.error("❌ moveDriveFileToOccasion error:", err.message);
+    return false;
+  }
+}
+
 module.exports = {
   uploadToDrive,
   deleteFromDrive,
   getOrCreateSubfolder,
+  organizeDriveFolders,
+  migrateLocalImagesToDrive,
+  moveDriveFileToOccasion,
 };

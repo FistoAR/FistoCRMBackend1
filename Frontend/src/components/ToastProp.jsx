@@ -61,7 +61,7 @@ const Notification = ({
     if (progress <= 0) onClose?.();
   }, [progress, onClose]);
 
-  const styles = typeStyles[ title];
+  const styles = typeStyles[title] || typeStyles.Info || typeStyles.Success;
 
   return (
     <div className="fixed top-[0.8vw] right-[0.8vw] z-50">

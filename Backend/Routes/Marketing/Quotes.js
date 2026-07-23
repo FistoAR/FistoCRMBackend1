@@ -4,7 +4,15 @@ const db = require("../../dataBase/connection");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { uploadToDrive, deleteFromDrive } = require("../../utils/driveService");
+const { uploadToDrive, deleteFromDrive, organizeDriveFolders, migrateLocalImagesToDrive, moveDriveFileToOccasion } = require("../../utils/driveService");
+
+// Auto-organize folders & migrate remaining local disk images (/Images/...) to Google Drive in background
+setTimeout(() => {
+  organizeDriveFolders().catch(() => {});
+  if (db && db.pool) {
+    migrateLocalImagesToDrive(db.pool).catch(() => {});
+  }
+}, 3000);
 
 // Ensure directories exist
 const ensureDirectoryExists = (dir) => {
@@ -172,7 +180,7 @@ router.post("/", uploadQuote.single("image"), async (req, res) => {
       filePath: req.file.path,
       originalname: req.file.originalname,
       mimetype: req.file.mimetype,
-      folderName: "Quotes & Celebrations",
+      folderName: occasion || "Celebration",
     });
 
     if (driveRes.success) {
@@ -252,7 +260,7 @@ router.put("/:id", uploadQuote.single("image"), async (req, res) => {
         filePath: req.file.path,
         originalname: req.file.originalname,
         mimetype: req.file.mimetype,
-        folderName: "Quotes & Celebrations",
+        folderName: occasion || "Celebration",
       });
 
       if (driveRes.success) {
@@ -284,6 +292,16 @@ router.put("/:id", uploadQuote.single("image"), async (req, res) => {
         existingQuote.image_url.startsWith("/Images/quotes/")
       ) {
         shouldDeleteOldImage = true;
+      }
+    } else {
+      // Move existing Drive image to new subfolder if occasion was updated
+      if (
+        imageUrl &&
+        imageUrl.startsWith("/api/drive/preview/") &&
+        occasion &&
+        existingQuote.occasion !== occasion
+      ) {
+        await moveDriveFileToOccasion(imageUrl, occasion);
       }
     }
 
@@ -437,7 +455,7 @@ router.post("/images/employees", uploadEmployee.single("image"), async (req, res
     filePath: req.file.path,
     originalname: req.file.originalname,
     mimetype: req.file.mimetype,
-    folderName: "Employee Celebrations",
+    folderName: req.body.occasion || "Birthday",
   });
 
   if (driveRes.success) {
@@ -576,7 +594,7 @@ router.post("/images/occasions", uploadOccasion.single("image"), async (req, res
     filePath: req.file.path,
     originalname: req.file.originalname,
     mimetype: req.file.mimetype,
-    folderName: "Occasion Celebrations",
+    folderName: req.body.occasion || req.body.name || "Holiday",
   });
 
   if (driveRes.success) {

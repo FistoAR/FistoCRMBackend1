@@ -422,16 +422,73 @@ router.patch("/rename/:fileId", async (req, res) => {
   }
 });
 
+// Helper for recursive folder copying
+async function copyFolderRecursive(sourceFolderId, targetFolderId, newFolderName) {
+  const sourceFolder = await drive.files.get({
+    fileId: sourceFolderId,
+    fields: "id, name, mimeType",
+    supportsAllDrives: true,
+  });
+
+  const newFolder = await drive.files.create({
+    resource: {
+      name: newFolderName || `${sourceFolder.data.name} (copy)`,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [targetFolderId],
+    },
+    fields: "id, name, mimeType, createdTime, modifiedTime, webViewLink",
+    supportsAllDrives: true,
+  });
+
+  const children = await drive.files.list({
+    q: `'${sourceFolderId}' in parents and trashed = false`,
+    fields: "files(id, name, mimeType)",
+    pageSize: 1000,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  for (const child of children.data.files) {
+    if (child.mimeType === "application/vnd.google-apps.folder") {
+      await copyFolderRecursive(child.id, newFolder.data.id, child.name);
+    } else {
+      await drive.files.copy({
+        fileId: child.id,
+        resource: {
+          name: child.name,
+          parents: [newFolder.data.id],
+        },
+        supportsAllDrives: true,
+      });
+    }
+  }
+
+  return newFolder.data;
+}
+
 // ─── Copy ───
 router.post("/copy/:fileId", async (req, res) => {
   try {
     const { newName, folderId } = req.body;
+    const { fileId } = req.params;
+
+    const sourceMeta = await drive.files.get({
+      fileId,
+      fields: "id, name, mimeType",
+      supportsAllDrives: true,
+    });
+
+    if (sourceMeta.data.mimeType === "application/vnd.google-apps.folder") {
+      const copiedFolder = await copyFolderRecursive(fileId, folderId, newName);
+      return res.json(copiedFolder);
+    }
+
     const resource = {};
     if (newName) resource.name = newName;
     if (folderId) resource.parents = [folderId];
 
     const file = await drive.files.copy({
-      fileId: req.params.fileId,
+      fileId,
       resource,
       fields: "id, name, mimeType, size, createdTime, webViewLink",
       supportsAllDrives: true,
@@ -439,6 +496,73 @@ router.post("/copy/:fileId", async (req, res) => {
     res.json(file.data);
   } catch (error) {
     console.error("Copy error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Move ───
+router.patch("/move/:fileId", async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { newParentFolderId } = req.body;
+    if (!newParentFolderId) return res.status(400).json({ error: "Target parent folder required" });
+
+    const file = await drive.files.get({
+      fileId,
+      fields: "parents",
+      supportsAllDrives: true,
+    });
+
+    const previousParents = (file.data.parents || []).join(",");
+
+    const updatedFile = await drive.files.update({
+      fileId,
+      addParents: newParentFolderId,
+      removeParents: previousParents,
+      fields: "id, name, parents, modifiedTime",
+      supportsAllDrives: true,
+    });
+
+    res.json(updatedFile.data);
+  } catch (error) {
+    console.error("Move error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Move Batch ───
+router.post("/move-batch", async (req, res) => {
+  try {
+    const { fileIds, targetFolderId } = req.body;
+    if (!fileIds || !Array.isArray(fileIds) || !targetFolderId) {
+      return res.status(400).json({ error: "fileIds array and targetFolderId required" });
+    }
+
+    const moved = [];
+    const errors = [];
+
+    for (const fileId of fileIds) {
+      try {
+        const file = await drive.files.get({ fileId, fields: "parents", supportsAllDrives: true });
+        const previousParents = (file.data.parents || []).join(",");
+
+        const updatedFile = await drive.files.update({
+          fileId,
+          addParents: targetFolderId,
+          removeParents: previousParents,
+          fields: "id, name, parents",
+          supportsAllDrives: true,
+        });
+
+        moved.push(updatedFile.data);
+      } catch (e) {
+        errors.push({ fileId, error: e.message });
+      }
+    }
+
+    res.json({ moved, errors });
+  } catch (error) {
+    console.error("Move batch error:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -516,6 +640,48 @@ router.get("/storage-info/:folderId", async (req, res) => {
   } catch (error) {
     console.error("Storage info error:", error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Reorganize HR Resource Subfolders ───
+router.post("/reorganize-hr-resources", async (req, res) => {
+  try {
+    const db = require("../../dataBase/connection");
+    const { organizeDriveFolders } = require("../../utils/driveService");
+    await organizeDriveFolders(db.pool);
+    res.json({ success: true, message: "HR Resource files reorganized successfully" });
+  } catch (error) {
+    console.error("Reorganize HR resources error:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── Bulk Folder Counts ───
+router.post("/bulk-folder-counts", async (req, res) => {
+  try {
+    const { folderIds } = req.body;
+    if (!folderIds || !Array.isArray(folderIds) || !folderIds.length) {
+      return res.json({});
+    }
+
+    const countsMap = {};
+    for (const fid of folderIds) {
+      try {
+        const response = await drive.files.list({
+          q: `'${fid}' in parents and trashed = false`,
+          fields: "files(id)",
+          pageSize: 1000,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+        countsMap[fid] = response.data.files ? response.data.files.length : 0;
+      } catch {
+        countsMap[fid] = 0;
+      }
+    }
+    res.json(countsMap);
+  } catch (error) {
+    res.json({});
   }
 });
 
