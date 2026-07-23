@@ -9,6 +9,35 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+const CalendarSkeleton = () => (
+  <div className="relative min-h-[77vh] max-h-[77vh] overflow-y-auto">
+    {Array.from({ length: 5 }).map((_, weekIndex) => (
+      <div
+        key={`skel-week-${weekIndex}`}
+        className="grid grid-cols-7"
+        style={{ minHeight: "11vh" }}
+      >
+        {Array.from({ length: 7 }).map((_, dayIndex) => (
+          <div
+            key={`skel-day-${weekIndex}-${dayIndex}`}
+            className={`border-b border-r border-gray-200 p-[0.5vw] relative flex flex-col gap-[0.4vw] ${
+              dayIndex === 6 ? "border-r-0" : ""
+            }`}
+            style={{ minHeight: "18vh" }}
+          >
+            <div className="h-[1.4vw] w-[1.4vw] animate-shimmer rounded-full mb-[0.2vw]" />
+            <div className="h-[1.5vw] w-[90%] animate-shimmer rounded-full" />
+            <div className="h-[1.5vw] w-[75%] animate-shimmer rounded-full" />
+            {weekIndex % 2 === 0 && (
+              <div className="h-[1.5vw] w-[80%] animate-shimmer rounded-full" />
+            )}
+          </div>
+        ))}
+      </div>
+    ))}
+  </div>
+);
+
 const EmployeeCalendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [employees, setEmployees] = useState([]);
@@ -569,6 +598,8 @@ const EmployeeCalendar = () => {
     );
   }
 
+
+
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
@@ -675,9 +706,7 @@ const EmployeeCalendar = () => {
           {!["Admin", "SBU", "Project Head"].includes(userRole) && !teamHead ? (
             <span></span>
           ) : employeesLoading ? (
-            <div className="text-[0.8vw] text-gray-500">
-              Loading employees...
-            </div>
+            <div className="h-[1.8vw] w-[10vw] animate-shimmer rounded-full" />
           ) : (
             <CustomSelect
               employees={employees}
@@ -704,10 +733,7 @@ const EmployeeCalendar = () => {
         </div>
 
         {loading ? (
-          <div className="p-[3vw] text-center text-gray-500 min-h-[77vh] flex flex-col justify-center items-center">
-            <div className="animate-spin w-[2vw] h-[2vw] border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-[0.5vw]" />
-            <div className="text-[0.9vw]">Loading tasks...</div>
-          </div>
+          <CalendarSkeleton />
         ) : !selectedEmployee ? (
           <div className="p-[3vw] text-center text-gray-500 min-h-[77vh] flex flex-col justify-center items-center">
             <User className="w-[3vw] h-[3vw] mx-auto mb-[0.5vw] opacity-50" />

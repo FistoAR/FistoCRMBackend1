@@ -177,6 +177,7 @@ function AppContent() {
                     path="hrActivities"
                     element={<MarketingHRactivities />}
                   />
+                  <Route path="addReports" element={<PHAssignTask />} />
                   <Route path="employeeReports" element={<PHinternReports />} />
                 </Route>
 

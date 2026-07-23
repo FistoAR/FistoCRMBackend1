@@ -4,6 +4,7 @@ const db = require("../../dataBase/connection");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { uploadToDrive, deleteFromDrive } = require("../../utils/driveService");
 
 // Ensure directories exist
 const ensureDirectoryExists = (dir) => {
@@ -154,8 +155,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST - Create new quote
-// Image is optional — if not provided, imageUrl stays null
-router.post("/", uploadQuote.single("image"), (req, res) => {
+router.post("/", uploadQuote.single("image"), async (req, res) => {
   const { date, quote, occasion } = req.body;
 
   if (!date || !quote) {
@@ -167,11 +167,22 @@ router.post("/", uploadQuote.single("image"), (req, res) => {
 
   let imageUrl = null;
   if (req.file) {
-    imageUrl = `/Images/quotes/${req.file.filename}`;
+    // Attempt Google Drive Upload for permanent storage
+    const driveRes = await uploadToDrive({
+      filePath: req.file.path,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      folderName: "Quotes & Celebrations",
+    });
+
+    if (driveRes.success) {
+      imageUrl = driveRes.previewUrl; // `/api/drive/preview/${fileId}`
+    } else {
+      imageUrl = `/Images/quotes/${req.file.filename}`;
+    }
   } else if (req.body.imageUrl) {
     imageUrl = req.body.imageUrl;
   }
-  // No image is perfectly fine — imageUrl remains null
 
   const query = `
     INSERT INTO quotes (date, quote, occasion, image_url)
@@ -195,15 +206,14 @@ router.post("/", uploadQuote.single("image"), (req, res) => {
         status: true,
         message: "Quote added successfully",
         id: result.insertId,
+        imageUrl: imageUrl,
       });
     }
   );
 });
 
 // PUT - Update existing quote
-// If a new image is provided, replace the old one.
-// If no new image is provided, keep the existing image unchanged.
-router.put("/:id", uploadQuote.single("image"), (req, res) => {
+router.put("/:id", uploadQuote.single("image"), async (req, res) => {
   const { id } = req.params;
   const { date, quote, occasion } = req.body;
 
@@ -216,7 +226,7 @@ router.put("/:id", uploadQuote.single("image"), (req, res) => {
 
   const selectQuery = `SELECT image_url FROM quotes WHERE id = ?`;
 
-  db.pool.query(selectQuery, [id], (err, results) => {
+  db.pool.query(selectQuery, [id], async (err, results) => {
     if (err) {
       console.error("Select quote error:", err);
       return res.status(500).json({
@@ -234,30 +244,48 @@ router.put("/:id", uploadQuote.single("image"), (req, res) => {
     }
 
     const existingQuote = results[0];
-    // Default: keep the existing image untouched
     let imageUrl = existingQuote.image_url;
     let shouldDeleteOldImage = false;
 
     if (req.file) {
-      // New file uploaded — replace image
-      imageUrl = `/Images/quotes/${req.file.filename}`;
+      const driveRes = await uploadToDrive({
+        filePath: req.file.path,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        folderName: "Quotes & Celebrations",
+      });
+
+      if (driveRes.success) {
+        imageUrl = driveRes.previewUrl;
+      } else {
+        imageUrl = `/Images/quotes/${req.file.filename}`;
+      }
+
       if (
+        existingQuote.image_url &&
+        existingQuote.image_url.startsWith("/api/drive/preview/")
+      ) {
+        deleteFromDrive(existingQuote.image_url);
+      } else if (
         existingQuote.image_url &&
         existingQuote.image_url.startsWith("/Images/quotes/")
       ) {
         shouldDeleteOldImage = true;
       }
-    } else if (req.body.imageUrl) {
-      // A URL was passed (selected from gallery) — replace image
+    } else if (req.body.imageUrl && req.body.imageUrl !== existingQuote.image_url) {
       imageUrl = req.body.imageUrl;
       if (
+        existingQuote.image_url &&
+        existingQuote.image_url.startsWith("/api/drive/preview/")
+      ) {
+        deleteFromDrive(existingQuote.image_url);
+      } else if (
         existingQuote.image_url &&
         existingQuote.image_url.startsWith("/Images/quotes/")
       ) {
         shouldDeleteOldImage = true;
       }
     }
-    // No file and no imageUrl body field → imageUrl stays as existingQuote.image_url (no change)
 
     const updateQuery = `
       UPDATE quotes 
@@ -294,6 +322,7 @@ router.put("/:id", uploadQuote.single("image"), (req, res) => {
         res.json({
           status: true,
           message: "Quote updated successfully",
+          imageUrl: imageUrl,
         });
       }
     );
@@ -337,13 +366,17 @@ router.delete("/:id", (req, res) => {
         });
       }
 
-      if (quote.image_url && quote.image_url.startsWith("/Images/quotes/")) {
-        const filePath = path.join(__dirname, "../..", quote.image_url);
-        fs.unlink(filePath, (unlinkErr) => {
-          if (unlinkErr) {
-            console.error("Error deleting image file:", unlinkErr);
-          }
-        });
+      if (quote.image_url) {
+        if (quote.image_url.startsWith("/api/drive/preview/")) {
+          deleteFromDrive(quote.image_url);
+        } else if (quote.image_url.startsWith("/Images/quotes/")) {
+          const filePath = path.join(__dirname, "../..", quote.image_url);
+          fs.unlink(filePath, (unlinkErr) => {
+            if (unlinkErr) {
+              console.error("Error deleting image file:", unlinkErr);
+            }
+          });
+        }
       }
 
       res.json({
@@ -382,7 +415,7 @@ router.get("/images/employees", (req, res) => {
 });
 
 // POST - Add new employee image
-router.post("/images/employees", uploadEmployee.single("image"), (req, res) => {
+router.post("/images/employees", uploadEmployee.single("image"), async (req, res) => {
   const { name } = req.body;
 
   if (!name || !name.trim()) {
@@ -399,7 +432,17 @@ router.post("/images/employees", uploadEmployee.single("image"), (req, res) => {
     });
   }
 
-  const imageUrl = `/Images/employees/${req.file.filename}`;
+  let imageUrl = `/Images/employees/${req.file.filename}`;
+  const driveRes = await uploadToDrive({
+    filePath: req.file.path,
+    originalname: req.file.originalname,
+    mimetype: req.file.mimetype,
+    folderName: "Employee Celebrations",
+  });
+
+  if (driveRes.success) {
+    imageUrl = driveRes.previewUrl;
+  }
 
   const query = `
     INSERT INTO employee_images (employee_name, image_url)
@@ -462,13 +505,17 @@ router.delete("/images/employees/:id", (req, res) => {
         });
       }
 
-      if (image.image_url && image.image_url.startsWith("/Images/employees/")) {
-        const filePath = path.join(__dirname, "../..", image.image_url);
-        fs.unlink(filePath, (unlinkErr) => {
-          if (unlinkErr) {
-            console.error("Error deleting image file:", unlinkErr);
-          }
-        });
+      if (image.image_url) {
+        if (image.image_url.startsWith("/api/drive/preview/")) {
+          deleteFromDrive(image.image_url);
+        } else if (image.image_url.startsWith("/Images/employees/")) {
+          const filePath = path.join(__dirname, "../..", image.image_url);
+          fs.unlink(filePath, (unlinkErr) => {
+            if (unlinkErr) {
+              console.error("Error deleting image file:", unlinkErr);
+            }
+          });
+        }
       }
 
       res.json({
@@ -507,7 +554,7 @@ router.get("/images/occasions", (req, res) => {
 });
 
 // POST - Add new occasion image
-router.post("/images/occasions", uploadOccasion.single("image"), (req, res) => {
+router.post("/images/occasions", uploadOccasion.single("image"), async (req, res) => {
   const { name } = req.body;
 
   if (!name || !name.trim()) {
@@ -524,7 +571,17 @@ router.post("/images/occasions", uploadOccasion.single("image"), (req, res) => {
     });
   }
 
-  const imageUrl = `/Images/occasions/${req.file.filename}`;
+  let imageUrl = `/Images/occasions/${req.file.filename}`;
+  const driveRes = await uploadToDrive({
+    filePath: req.file.path,
+    originalname: req.file.originalname,
+    mimetype: req.file.mimetype,
+    folderName: "Occasion Celebrations",
+  });
+
+  if (driveRes.success) {
+    imageUrl = driveRes.previewUrl;
+  }
 
   const query = `
     INSERT INTO occasion_images (occasion_name, image_url)
@@ -587,13 +644,17 @@ router.delete("/images/occasions/:id", (req, res) => {
         });
       }
 
-      if (image.image_url && image.image_url.startsWith("/Images/occasions/")) {
-        const filePath = path.join(__dirname, "../..", image.image_url);
-        fs.unlink(filePath, (unlinkErr) => {
-          if (unlinkErr) {
-            console.error("Error deleting image file:", unlinkErr);
-          }
-        });
+      if (image.image_url) {
+        if (image.image_url.startsWith("/api/drive/preview/")) {
+          deleteFromDrive(image.image_url);
+        } else if (image.image_url.startsWith("/Images/occasions/")) {
+          const filePath = path.join(__dirname, "../..", image.image_url);
+          fs.unlink(filePath, (unlinkErr) => {
+            if (unlinkErr) {
+              console.error("Error deleting image file:", unlinkErr);
+            }
+          });
+        }
       }
 
       res.json({

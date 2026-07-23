@@ -79,6 +79,18 @@ const Quotes = () => {
   const API_URL = import.meta.env.VITE_API_BASE_URL;
   const API_URL1 = import.meta.env.VITE_API_BASE_URL1;
 
+  const resolveImageUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+      return url;
+    }
+    if (url.startsWith("/api/")) {
+      const base = (API_URL || "").replace(/\/api\/?$/, "");
+      return `${base}${url}`;
+    }
+    return `${API_URL1 || API_URL || ""}${url}`;
+  };
+
   const fetchQuotes = async () => {
     setLoading(true);
     try {
@@ -465,7 +477,7 @@ const Quotes = () => {
               <div key={q.id} className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow duration-300">
                 <div className="relative h-[12vw] overflow-hidden">
                   <img
-                    src={q.image_url?.startsWith("http") ? q.image_url : `${API_URL1}${q.image_url}`}
+                    src={resolveImageUrl(q.image_url)}
                     alt="Quote"
                     className="w-full h-full object-cover"
                   />
@@ -619,7 +631,7 @@ const Quotes = () => {
                           >
                             <div className="w-full aspect-square overflow-hidden">
                               <img
-                                src={item.imageUrl?.startsWith("http") ? item.imageUrl : `${API_URL1}${item.imageUrl}`}
+                                src={resolveImageUrl(item.imageUrl)}
                                 alt={item.name}
                                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
                               />
@@ -669,7 +681,7 @@ const Quotes = () => {
                           <div className="space-y-[0.4vw]">
                             <div className="w-[8vw] h-[8vw] mx-auto rounded-lg overflow-hidden border border-gray-200">
                               <img
-                                src={selectedImage?.startsWith("http") || selectedImage?.startsWith("data:") ? selectedImage : `${API_URL1}${selectedImage}`}
+                                src={resolveImageUrl(selectedImage)}
                                 alt="Preview"
                                 className="w-full h-full object-cover"
                               />

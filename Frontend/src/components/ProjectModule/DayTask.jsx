@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { useNotification } from "../NotificationContext";
-import searchIcon from "../../assets/ProjectPages/search.webp"
+import searchIcon from "../../assets/ProjectPages/search.webp";
 
 const DayTask = () => {
   const { notify } = useNotification();
@@ -31,7 +31,7 @@ const DayTask = () => {
   const fetchDayReports = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${employeeId}`
+        `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${employeeId}`,
       );
 
       const data = await response.json();
@@ -64,13 +64,12 @@ const DayTask = () => {
       const response = await fetch(
         `${
           import.meta.env.VITE_API_BASE_URL
-        }/project/employee-tasks/${employeeId}`
+        }/project/employee-tasks/${employeeId}`,
       );
 
       const data = await response.json();
 
       if (data.success) {
-
         setTasks(data.data);
       }
     } catch (err) {
@@ -103,7 +102,7 @@ const DayTask = () => {
               taskId: task.taskId,
               activityId: type === "activity" ? id : null,
             }),
-          }
+          },
         );
 
         const data = await response.json();
@@ -151,7 +150,7 @@ const DayTask = () => {
               "Content-Type": "application/json",
             },
             body: JSON.stringify(dayReportData),
-          }
+          },
         );
 
         const data = await response.json();
@@ -305,7 +304,10 @@ const DayTask = () => {
           !matchesDateFilter(task.startDate, task.endDate)
         ) {
           // Skip?
-        } else if (task.taskStatus === "Hold" || task.taskStatus === "Cancelled") {
+        } else if (
+          task.taskStatus === "Hold" ||
+          task.taskStatus === "Cancelled"
+        ) {
           // Completely avoid hold tasks in day task
           return;
         } else {
@@ -313,7 +315,7 @@ const DayTask = () => {
 
           if (isTaskAddedToday) {
             const report = dayReports.find(
-              (r) => r.taskId === task.taskId && !r.activityId
+              (r) => r.taskId === task.taskId && !r.activityId,
             );
             if (report && isToday(report.createdAt)) {
               todayTasks.push(taskObj);
@@ -337,7 +339,10 @@ const DayTask = () => {
             !matchesDateFilter(activity.startDate, activity.endDate)
           ) {
             // Skip
-          } else if (activity.status === "Hold" || activity.status === "Cancelled") {
+          } else if (
+            activity.status === "Hold" ||
+            activity.status === "Cancelled"
+          ) {
             // Completely avoid hold activities in day task
             return;
           } else {
@@ -350,7 +355,7 @@ const DayTask = () => {
 
             if (isActivityAddedToday) {
               const report = dayReports.find(
-                (r) => r.activityId === activity._id
+                (r) => r.activityId === activity._id,
               );
               if (report && isToday(report.createdAt)) {
                 todayTasks.push(activityObj);
@@ -446,7 +451,7 @@ const DayTask = () => {
           {task.project.priority && (
             <span
               className={`text-[0.8vw] font-normal ${getPriorityColor(
-                task.project.priority
+                task.project.priority,
               )}`}
             >
               {task.project.priority}
@@ -513,9 +518,7 @@ const DayTask = () => {
                   ? "opacity-50 cursor-not-allowed"
                   : "cursor-pointer hover:bg-green-200"
               }`}
-              disabled={
-                isItemProcessing
-              }
+              disabled={isItemProcessing}
               onClick={() =>
                 handleAddToToday("activity", activity._id, task, activity)
               }
@@ -542,9 +545,7 @@ const DayTask = () => {
                   ></path>
                 </svg>
               )}
-              {isAddedToday("activity", activity._id)
-                ? "Remove"
-                : "Start now"}
+              {isAddedToday("activity", activity._id) ? "Remove" : "Start now"}
             </button>
           </div>
         ) : (
@@ -595,9 +596,7 @@ const DayTask = () => {
                   ? "opacity-50 cursor-not-allowed"
                   : "cursor-pointer hover:bg-green-200"
               }`}
-              disabled={
-                isItemProcessing
-              }
+              disabled={isItemProcessing}
               onClick={() => handleAddToToday("task", task.taskId, task)}
             >
               {isItemProcessing && (
@@ -687,7 +686,7 @@ const DayTask = () => {
     <div className="h-full">
       <div className="flex justify-between px-[0.4vw] py-[0.2vw]  bg-white rounded-xl items-center mb-[0.5vw]">
         <div className="flex gap-[0.3vw] text-[0.9vw] text-gray-500 py-[0.4vw] px-[0.3vw] ">
-            <NavLink
+          <NavLink
             to={`${getProjectsPath(designation)}`}
             end
             className="cursor-pointer hover:text-[#3B82F6]"
@@ -778,7 +777,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {todayTasks.map((task) =>
-                    renderTaskCard(task, "border-green-400")
+                    renderTaskCard(task, "border-green-400"),
                   )}
                 </div>
               </div>
@@ -791,7 +790,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {actualTodayTasks.map((task) =>
-                    renderTaskCard(task, "border-blue-400")
+                    renderTaskCard(task, "border-blue-400"),
                   )}
                 </div>
               </div>
@@ -804,7 +803,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {previousTasks.map((task) =>
-                    renderTaskCard(task, "border-red-400")
+                    renderTaskCard(task, "border-red-400"),
                   )}
                 </div>
               </div>
@@ -817,7 +816,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {upcomingTasks.map((task) =>
-                    renderTaskCard(task, "border-gray-300")
+                    renderTaskCard(task, "border-gray-300"),
                   )}
                 </div>
               </div>

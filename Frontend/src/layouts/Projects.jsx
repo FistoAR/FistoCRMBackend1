@@ -5,6 +5,39 @@ import searchIcon from "../assets/ProjectPages/search.webp";
 import filterIcon from "../assets/ProjectPages/filter.webp";
 import clearFilter from "../assets/ProjectPages/overview/clear-filter.webp";
 
+const TableSkeleton = () => (
+  <>
+    {Array.from({ length: 8 }).map((_, idx) => (
+      <tr key={`skeleton-${idx}`} className="border-b border-gray-200">
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[75%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[60%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[65%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[65%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[80%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[50%] animate-shimmer rounded mx-auto" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1.2vw] w-[70%] animate-shimmer rounded-full mx-auto" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1.2vw] w-[60%] animate-shimmer rounded-full mx-auto" />
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
 const Projects = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -758,10 +791,10 @@ const Projects = () => {
   };
 
   return (
-    <div className="text-black min-h-[92%] max-h-[92%] w-[100%] max-w-[100%] overflow-hidden">
+    <div className="text-black h-[calc(100vh-4.5vw)] w-[100%] max-w-[100%] flex flex-col overflow-hidden">
       {isBaseRoute ? (
         <>
-          <div className="w-[100%] h-[88vh] flex flex-col gap-[1.5vh] mt-[1vw]">
+          <div className="w-[100%] flex-1 min-h-0 flex flex-col gap-[1vh] mt-[0.3vw]">
             <div className="flex justify-between bg-white rounded-full shadow-sm p-[0.5vw] gap-[0.8vw] items-center w-full">
               <div className="relative flex gap-[0.8vw] w-full justify-between">
                 {/* Status tabs */}
@@ -851,7 +884,7 @@ const Projects = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm h-[94%] flex flex-col overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm flex-1 min-h-0 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
                 <div className="flex items-center gap-[0.5vw]">
                   <div className="flex gap-[0.4vw] items-center ml-[0.35vw]">
@@ -1090,11 +1123,7 @@ const Projects = () => {
               </div>
 
               <div className="flex-1 min-h-0 overflow-hidden">
-                {loading ? (
-                  <div className="flex items-center justify-center h-full min-h-[400px]">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  </div>
-                ) : paginatedProjects.length === 0 ? (
+                {!loading && paginatedProjects.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
                     <svg
                       className="w-16 h-16 mb-4 text-gray-300"
@@ -1129,7 +1158,7 @@ const Projects = () => {
                     )}
                   </div>
                 ) : (
-                  <div className="h-full mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
+                  <div className="h-[calc(100%-0.5vw)] max-h-full mr-[0.8vw] mb-[0.4vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
                     <table className="w-full border-collapse border border-gray-300">
                       <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                         <tr>
@@ -1175,7 +1204,9 @@ const Projects = () => {
                         </tr>
                       </thead>
                       <tbody ref={tableBodyRef}>
-                        {Object.keys(paginatedGroupedProjects).length === 0 ? (
+                        {loading ? (
+                          <TableSkeleton />
+                        ) : Object.keys(paginatedGroupedProjects).length === 0 ? (
                           <tr>
                             <td colSpan="8" className="text-center py-4">
                               No projects

@@ -701,7 +701,13 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                 const item = celebrations[currentIndex];
                 const os = getOccasionStyle(item.occasion);
                 const rawUrl = item.imageUrl;
-                const imgUrl = rawUrl ? (rawUrl.startsWith("http") ? rawUrl : `${API_URL1}${rawUrl}`) : null;
+                const imgUrl = rawUrl
+                  ? rawUrl.startsWith("http") || rawUrl.startsWith("data:")
+                    ? rawUrl
+                    : rawUrl.startsWith("/api/")
+                    ? `${(apiBaseUrl || "").replace(/\/api\/?$/, "")}${rawUrl}`
+                    : `${API_URL1}${rawUrl}`
+                  : null;
                 const showImg = imgUrl && !imgError;
                 const isBday = item.occasion === "Birthday";
                 const needsTransparentBg = ["Birthday", "Work Anniversary", "Celebration"].includes(item.occasion);

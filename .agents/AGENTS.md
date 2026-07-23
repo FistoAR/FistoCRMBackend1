@@ -127,7 +127,7 @@
 - Important actions should be accessible within 2-3 clicks.
 
 ## Data Display
-- Show loading skeletons instead of blank screens.
+- Use skeleton loading (pulsing skeleton placeholders) for tables and components instead of blank screens, top bar loaders, or spinners.
 - Display empty states with helpful messages.
 - Use pagination or lazy loading for large datasets.
 - Format dates as dd/MM/yyyy.
@@ -191,7 +191,11 @@ Whenever generating UI:
   - View
   - Delete (with confirmation)
 
-- Show loading states for all API requests.
+- Show skeleton loading states for all API requests (use pulsing skeleton placeholders instead of bar loaders or spinning wheels).
+
+- Date Range Filters alignment:
+  - The "To Date" field must be disabled until a valid "From Date" is selected.
+  - The `min` attribute of the "To Date" input must automatically be set to the selected "From Date".
 
 - Handle API failures gracefully.
 

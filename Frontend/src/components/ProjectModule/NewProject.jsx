@@ -903,13 +903,10 @@ export default function NewProject() {
 
   if (loading) {
     return (
-      <div className="h-[92vh] w-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600 mx-auto mb-[1vw]"></div>
-          <p className="text-gray-600 text-[0.85vw]">
-            {fetchingProject ? "Loading project details..." : "Saving..."}
-          </p>
-        </div>
+      <div className="h-[92vh] w-full p-[1.5vw] space-y-[1vw]">
+        <div className="h-[2.5vw] w-[30%] animate-shimmer rounded-lg" />
+        <div className="h-[15vw] animate-shimmer rounded-xl w-full" />
+        <div className="h-[10vw] animate-shimmer rounded-xl w-full" />
       </div>
     );
   }
@@ -1020,8 +1017,10 @@ export default function NewProject() {
         {activeTab === "requests" && (
           <div className="h-[87%] max-h-[87%] overflow-y-auto px-[1vw] py-[0.8vw]">
             {fetchingRequests ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-[1.8vw] w-[1.8vw] border-b-2 border-blue-600" />
+              <div className="space-y-[0.6vw]">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div key={idx} className="h-[4vw] animate-shimmer rounded-xl w-full" />
+                ))}
               </div>
             ) : requests.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-400">

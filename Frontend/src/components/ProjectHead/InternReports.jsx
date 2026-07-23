@@ -23,6 +23,60 @@ const ADMIN_DESIGNATIONS = [
   "SBU",
 ];
 
+const TableSkeleton = ({ isManagement }) => {
+  return (
+    <>
+      {Array.from({ length: 10 }).map((_, index) => (
+        <tr key={`skeleton-${index}`} className="border-b border-gray-200">
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[50%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[80%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[75%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[55%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+          </td>
+          {!isManagement && (
+            <>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[0.9vw] w-[60%] animate-shimmer rounded mx-auto" />
+              </td>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[1.1vw] w-[75%] animate-shimmer rounded-full mx-auto" />
+              </td>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+              </td>
+            </>
+          )}
+        </tr>
+      ))}
+    </>
+  );
+};
+
 const InternReports = () => {
   // ✅ Lazy loading state
   const [allFetchedReports, setAllFetchedReports] = useState([]);
@@ -531,14 +585,6 @@ const InternReports = () => {
 
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
         <div className="bg-white rounded-xl shadow-sm h-[100%] flex flex-col overflow-hidden relative">
-          {/* Top border blue loading bar */}
-          {(loading || fetchingMore) && (
-            <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden rounded-t-xl">
-              <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
-            </div>
-          )}
-          <style>{`@keyframes loadingLine{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}`}</style>
-
           {/* Header */}
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
             <div className="flex items-center gap-[0.5vw]">
@@ -861,9 +907,9 @@ const InternReports = () => {
               </div>
             ) : (
               <div
-                className={`mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto transition-opacity duration-200 ${
-                  loading ? "opacity-60" : "opacity-100"
-                } ${hasActiveFilters ? "max-h-[70vh]" : "max-h-[74vh]"}`}
+                className={`mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto ${
+                  hasActiveFilters ? "max-h-[70vh]" : "max-h-[74vh]"
+                }`}
               >
                 <table className="w-full border-collapse border border-gray-300">
                   <thead className="bg-[#E2EBFF] sticky top-0">
@@ -917,7 +963,10 @@ const InternReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedReports.map((report, reportIndex) => {
+                    {loading ? (
+                      <TableSkeleton isManagement={reportType === "management"} />
+                    ) : (
+                      displayedReports.map((report, reportIndex) => {
                       const tasks = report.tasks || [];
                       const hasTasks = tasks.length > 0;
                       const attendanceTasks = tasks.filter(
@@ -1162,7 +1211,8 @@ const InternReports = () => {
                           )}
                         </React.Fragment>
                       );
-                    })}
+                    })
+                  )}
                   </tbody>
                 </table>
               </div>
@@ -1197,7 +1247,7 @@ const InternReports = () => {
                 <span className="text-[0.85vw] text-gray-600 px-[0.5vw] flex items-center gap-[0.3vw]">
                   Page {currentPage} of {totalPages}
                   {fetchingMore && (
-                    <div className="animate-spin rounded-full h-[0.9vw] w-[0.9vw] border-b-2 border-blue-600"></div>
+                    <span className="text-[0.7vw] text-blue-600 animate-pulse font-semibold ml-1">Loading...</span>
                   )}
                 </span>
                 <button

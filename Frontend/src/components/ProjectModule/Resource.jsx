@@ -2060,8 +2060,9 @@ export default function Resource() {
     );
   if (isLoading)
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-[1.8vw] w-[1.8vw] border-b-2 border-blue-600" />
+      <div className="p-[1.5vw] space-y-[1vw] w-full min-h-screen">
+        <div className="h-[2.5vw] w-[25%] animate-shimmer rounded-lg" />
+        <div className="h-[20vw] animate-shimmer rounded-xl w-full" />
       </div>
     );
 

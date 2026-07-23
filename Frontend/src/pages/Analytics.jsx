@@ -21,6 +21,70 @@ import { useNotification } from "../components/NotificationContext";
 import filterIcon from "../assets/ProjectPages/filter.webp";
 import searchIcon from "../assets/ProjectPages/search.webp";
 
+const AnalyticsSkeleton = () => (
+  <div className="relative bg-gray-100 pr-[0.4vw] text-black h-[calc(100vh-5.5vw)] flex-1 min-h-0 flex flex-col overflow-y-auto pb-[1vw] gap-[0.7vw]">
+    {/* Header bar skeleton */}
+    <div className="flex justify-between items-center bg-white px-[0.8vw] py-[0.5vw] rounded-xl shadow-sm">
+      <div className="flex flex-col gap-[0.4vw]">
+        <div className="h-[2vw] w-[14vw] animate-shimmer rounded-lg" />
+        <div className="h-[1vw] w-[18vw] animate-shimmer rounded" />
+      </div>
+      <div className="flex gap-[0.5vw]">
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[7vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+      </div>
+    </div>
+
+    {/* Top Charts/Stats Cards Skeleton */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-[0.7vw]">
+      {/* Left Donut Chart Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col items-center justify-center gap-[0.8vw] h-[18vw]">
+        <div className="h-[1.2vw] w-[60%] animate-shimmer rounded" />
+        <div className="w-[10vw] h-[10vw] animate-shimmer rounded-full" />
+      </div>
+      {/* Middle Stats Card Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col justify-between h-[18vw]">
+        <div className="h-[1.2vw] w-[50%] animate-shimmer rounded" />
+        <div className="space-y-[0.6vw]">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="h-[1vw] w-[40%] animate-shimmer rounded" />
+              <div className="h-[1vw] w-[20%] animate-shimmer rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Right Stats Card Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col justify-between h-[18vw]">
+        <div className="h-[1.2vw] w-[50%] animate-shimmer rounded" />
+        <div className="space-y-[0.6vw]">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="h-[1vw] w-[40%] animate-shimmer rounded" />
+              <div className="h-[1vw] w-[20%] animate-shimmer rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    {/* Bottom Table Section Skeleton */}
+    <div className="bg-white rounded-xl shadow-sm p-[1vw] flex-1 flex flex-col gap-[0.8vw]">
+      <div className="flex justify-between items-center">
+        <div className="h-[2vw] w-[15vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[10vw] animate-shimmer rounded-full" />
+      </div>
+      <div className="space-y-[0.6vw] mt-[0.5vw]">
+        {Array.from({ length: 6 }).map((_, idx) => (
+          <div key={`an-skel-${idx}`} className="h-[3.2vw] animate-shimmer rounded-lg w-full" />
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
 const Analytics = () => {
   const { notify } = useNotification();
   const [activepage, setActivepage] = useState("overviewStatus");
@@ -2498,11 +2562,7 @@ const Analytics = () => {
     .filter((project) => project !== null && project.tasks.length > 0);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <AnalyticsSkeleton />;
   }
 
   const projectStatusData = getChartData(overallStats);
@@ -2513,7 +2573,7 @@ const Analytics = () => {
   );
 
   return (
-    <div className="relative bg-gray-100 pr-[0.4vw] text-black max-h-[90%] h-[90vh] flex flex-col gap-[0.7vw]">
+    <div className="relative bg-gray-100 pr-[0.4vw] text-black h-[calc(100vh-5.5vw)] flex-1 min-h-0 flex flex-col overflow-y-auto pb-[1vw] gap-[0.7vw]">
       <div className=" flex justify-between items-center bg-white px-[0.8vw] py-[0.5vw] rounded-xl shadow">
         <div className=" flex flex-col gap-[0.3vw]">
           <CustomSelect

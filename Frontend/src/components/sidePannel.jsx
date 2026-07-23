@@ -199,10 +199,18 @@ const getMenuConfig = (designation, prefix) => ({
     { path: "/marketing/calls", icon: CallsIcon, label: "Calls" },
     { path: "/marketing/resource", icon: ActivityIcon, label: "Resources" },
     { path: "/marketing/dailyReports", icon: DailyReportsIcon, label: "Daily reports" },
+    { path: "/marketing/addReports", icon: MessageIcon, label: "Marketing Task" },
     { path: "/marketing/employeeRequest", icon: CallsIcon, label: "Employee request" },
   ],
   marketingHR: [
     { path: "/marketing/hrActivities", icon: hrActivityIcon, label: "HR Activities" },
+    { path: "/admin/hr/employeeDetails", icon: hrActivityIcon, label: "Employee Details" },
+    { path: "/admin/hr/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
+    { path: "/admin/hr/request", icon: hrActivityIcon, label: "Request" },
+    { path: "/admin/hr/salaryCalculation", icon: hrActivityIcon, label: "Salary Calculation" },
+    { path: "/admin/hr/interviewSchedules", icon: hrActivityIcon, label: "Interview Schedules" },
+    { path: "/admin/hr/quotes", icon: hrActivityIcon, label: "Quotes" },
+    { path: "/admin/hr/maid", icon: hrActivityIcon, label: "Maid" },
     { path: "/marketing/employeeReports", icon: AddReportIcon, label: "Employee Reports" },
   ],
   projectHead: [
@@ -354,9 +362,9 @@ export default function Sidebar() {
     const isOnRole = employeementType === "On Role";
     const isDeveloper = ["Software Developer", "UI/UX", "3D"].includes(designation);
 
-    if (isOnRole && (designation === "Digital Marketing" || designation === "Digital Marketing & HR")) {
+    if (isOnRole && (designation === "Digital Marketing" || designation === "Digital Marketing & HR" || designation === "HR" || designation.includes("Marketing") || designation.includes("HR"))) {
       items.push(...menuConfig.marketing);
-      if (designation === "Digital Marketing & HR") {
+      if (designation === "Digital Marketing & HR" || designation === "HR" || designation.includes("HR")) {
         items.push(...menuConfig.marketingHR);
       }
     }
@@ -650,7 +658,7 @@ export default function Sidebar() {
         {sortedAndGroupedMenu.marketing.length > 0 && (
           <div className="space-y-1">
             <CategoryHeader
-              label="MARKETING"
+              label="Marketing"
               icon={CallsIcon}
               count={sortedAndGroupedMenu.marketing.length}
               isOpen={openGroups.marketing}
@@ -683,7 +691,7 @@ export default function Sidebar() {
         {sortedAndGroupedMenu.projects.length > 0 && (
           <div className="space-y-1">
             <CategoryHeader
-              label="PROJECTS"
+              label="Projects"
               icon={ProjectIcon}
               count={sortedAndGroupedMenu.projects.length}
               isOpen={openGroups.projects}
