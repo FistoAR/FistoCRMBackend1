@@ -642,9 +642,19 @@ router.get("/timeline", async (req, res) => {
       });
     }
 
-    const [allReports] = await Promise.all([
+    const [allReports, allTasks] = await Promise.all([
       TaskReports.find().lean(),
+      Tasks.find().lean(),
     ]);
+
+    const tasksByProject = (allTasks || []).reduce((acc, task) => {
+      const projectId = task.projectId ? task.projectId.toString() : null;
+      if (projectId) {
+        if (!acc[projectId]) acc[projectId] = [];
+        acc[projectId].push(task);
+      }
+      return acc;
+    }, {});
 
     // const outcomeMap = new Map(allOutcomes.map((o) => [o.clientId, o]));
 
@@ -705,7 +715,10 @@ router.get("/timeline", async (req, res) => {
       let delayed = 0;
 
       projects.forEach((project) => {
-        const projectPercentage = getEffectiveProjectPercentage(project, tasksByProject[project._id.toString()]);
+        const projectPercentage = getEffectiveProjectPercentage(
+          project,
+          tasksByProject[project._id.toString()] || []
+        );
 
         if (projectPercentage !== 100) {
           return;

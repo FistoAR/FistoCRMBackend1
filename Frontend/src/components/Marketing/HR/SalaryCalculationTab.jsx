@@ -198,13 +198,21 @@ const SalaryCalculationTab = ({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
       {salaryView === "months" ? (
         <>
           <div className="flex-1 min-h-0">
             {loading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
+              <div className="p-4 space-y-3 animate-pulse">
+                <div className="h-10 bg-gray-200 rounded-lg w-full" />
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="h-12 bg-gray-100 rounded-lg w-full flex items-center px-4 gap-4">
+                    <div className="h-4 bg-gray-200 rounded w-1/12" />
+                    <div className="h-4 bg-gray-200 rounded w-1/4" />
+                    <div className="h-4 bg-gray-200 rounded w-1/4" />
+                    <div className="h-4 bg-gray-200 rounded w-1/6" />
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="h-full px-[0.8vw] pb-[0.8vw] pt-[0.8vw] overflow-auto">

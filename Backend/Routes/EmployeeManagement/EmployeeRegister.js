@@ -9,7 +9,7 @@ router.get("/", (req, res) => {
   const query = `
     SELECT 
       employee_id, intern_id, employee_name, dob, gender,
-      email_personal, email_official, emailPassword, phone_personal, phone_official,
+      email_personal, email_official, phone_personal, phone_official,
       phone_alternative, phone_relation, blood_group,
       account_name, account_number, bank_name, ifsc_code,
       designation, team_head, employment_type, working_status,
@@ -60,7 +60,6 @@ router.get("/", (req, res) => {
         gender: emp.gender,
         email_personal: emp.email_personal,
         email_official: emp.email_official,
-        emailPassword: emp.emailPassword,
         phone_personal: emp.phone_personal,
         phone_official: emp.phone_official,
         phone_alternative: emp.phone_alternative,
@@ -261,7 +260,7 @@ router.post("/", uploadFields, (req, res) => {
   const query = `
     INSERT INTO employees_details 
     (employee_id, intern_id, employee_name, dob, gender, 
-     email_personal, email_official, email_password, phone_personal, phone_official,
+     email_personal, email_official, phone_personal, phone_official,
      phone_alternative, phone_relation, blood_group,
      account_name, account_number, bank_name, ifsc_code,
      designation, team_head, employment_type, working_status,
@@ -269,7 +268,7 @@ router.post("/", uploadFields, (req, res) => {
      address, password, profile_url, resume_url, offer_letter_url,
      intern_offer_letter_url,
      ID_url, Certificates_url, otherDocs_url, exit_docs_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.pool.query(
@@ -282,7 +281,6 @@ router.post("/", uploadFields, (req, res) => {
       data.gender || null,
       data.emailPersonal || null,
       data.emailOfficial || null,
-      data.emailPassword || null,
       data.phonePersonal || null,
       data.phoneOfficial || null,
       data.phoneAlternative || null,
@@ -597,7 +595,6 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         gender = ?,
         email_personal = ?,
         email_official = ?,
-        emailPassword = ?,
         phone_personal = ?,
         phone_official = ?,
         phone_alternative = ?,
@@ -638,7 +635,6 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         data.emailOfficial || null,
         data.phonePersonal || null,
         data.phoneOfficial || null,
-        data.emailPassword || null,
         data.phoneAlternative || null,
         data.phoneRelation || null,
         data.bloodGroup || null,

@@ -16,8 +16,49 @@ import Notification from "../ToastProp";
 const RECORDS_PER_PAGE = 15;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+const checkIfAdmin = (userData) => {
+  if (!userData) return false;
+  const role = (userData.role || userData.userRole || "").toLowerCase();
+  const designation = (userData.designation || "").toLowerCase();
+  const empType = (userData.employeementType || "").toLowerCase();
+
+  return (
+    role === "admin" ||
+    role === "superadmin" ||
+    role === "management" ||
+    designation === "admin" ||
+    designation === "super admin" ||
+    designation === "digital marketing & hr" ||
+    designation === "digital marketing" ||
+    designation === "project head" ||
+    designation === "sbu" ||
+    designation === "management" ||
+    empType === "admin"
+  );
+};
+
 const Workdone = () => {
-  const [mainTab, setMainTab] = useState("reports");
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
+      return checkIfAdmin(userData);
+    } catch {
+      return false;
+    }
+  });
+
+  const [mainTab, setMainTab] = useState(() => {
+    try {
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
+      return checkIfAdmin(userData) ? "viewReport" : "reports";
+    } catch {
+      return "reports";
+    }
+  });
   const [formData, setFormData] = useState({
     projectName: "",
     description: "",
@@ -231,36 +272,38 @@ const Workdone = () => {
   const getFilteredReports = () => {
     let filtered = reports;
 
-    // Filter to show ONLY the logged-in employee's reports
-    try {
-      const userData = JSON.parse(
-        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
-      );
-      const currentEmpId = userData.employee_id || userData.userName || userData._id;
-      const currentEmpName = userData.employeeName || userData.name || "";
+    // Filter to show ONLY the logged-in employee's reports if user is NOT admin
+    if (!isAdmin) {
+      try {
+        const userData = JSON.parse(
+          sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+        );
+        const currentEmpId = userData.employee_id || userData.userName || userData._id;
+        const currentEmpName = userData.employeeName || userData.name || "";
 
-      if (currentEmpId || currentEmpName) {
-        filtered = filtered.filter((report) => {
-          if (
-            currentEmpId &&
-            (String(report.employee_id) === String(currentEmpId) ||
-              String(report.userName) === String(currentEmpId) ||
-              String(report.user_id) === String(currentEmpId))
-          ) {
-            return true;
-          }
-          if (
-            currentEmpName &&
-            report.employee_name?.trim().toLowerCase() ===
-              currentEmpName?.trim().toLowerCase()
-          ) {
-            return true;
-          }
-          return false;
-        });
+        if (currentEmpId || currentEmpName) {
+          filtered = filtered.filter((report) => {
+            if (
+              currentEmpId &&
+              (String(report.employee_id) === String(currentEmpId) ||
+                String(report.userName) === String(currentEmpId) ||
+                String(report.user_id) === String(currentEmpId))
+            ) {
+              return true;
+            }
+            if (
+              currentEmpName &&
+              report.employee_name?.trim().toLowerCase() ===
+                currentEmpName?.trim().toLowerCase()
+            ) {
+              return true;
+            }
+            return false;
+          });
+        }
+      } catch (err) {
+        console.error("Error filtering work reports for logged in user:", err);
       }
-    } catch (err) {
-      console.error("Error filtering work reports for logged in user:", err);
     }
 
     // Filter by employee if selected
@@ -421,6 +464,30 @@ const Workdone = () => {
 
 
 
+                    {/* Employee Filter for Admin */}
+                    {isAdmin && (
+                      <div className="mb-[1vw]">
+                        <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          Employee
+                        </label>
+                        <select
+                          value={selectedEmployee}
+                          onChange={(e) => setSelectedEmployee(e.target.value)}
+                          className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="all">All Employees</option>
+                          {employees.map((emp) => (
+                            <option
+                              key={emp.employee_id || emp.id}
+                              value={emp.employee_id || emp.id}
+                            >
+                              {emp.employee_name || emp.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* Date Range */}
                     <div className="mb-[1vw]">
                       <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
@@ -523,7 +590,7 @@ const Workdone = () => {
                   <tr>
                     <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[4vw]">S.NO</th>
                     <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[9vw]">Date</th>
-                    {/* <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">Employee Name</th> */}
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">Employee Name</th>
                     <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[16vw]">Project Name</th>
                     <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Description</th>
                   </tr>
@@ -533,7 +600,7 @@ const Workdone = () => {
                     <tr key={`workdone-skel-${idx}`} className="border-b border-gray-200">
                       <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[40%] animate-shimmer rounded mx-auto" /></td>
                       <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[50%] animate-shimmer rounded mx-auto" /></td>
-                      {/* <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[60%] animate-shimmer rounded mx-auto" /></td> */}
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[60%] animate-shimmer rounded mx-auto" /></td>
                       <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[70%] animate-shimmer rounded mx-auto" /></td>
                       <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[90%] animate-shimmer rounded" /></td>
                     </tr>
@@ -567,9 +634,9 @@ const Workdone = () => {
                     <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[9vw]">
                       Date
                     </th>
-                    {/* <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">
                       Employee Name
-                    </th> */}
+                    </th>
                     <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[16vw]">
                       Project Name
                     </th>
@@ -587,9 +654,9 @@ const Workdone = () => {
                       <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-900 border border-gray-300 text-center whitespace-nowrap font-medium">
                         {formatDateToIST(report.created_at)}
                       </td>
-                      {/* <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] font-medium text-gray-900 border border-gray-300">
-                        {report.employee_name}
-                      </td> */}
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] font-medium text-gray-900 border border-gray-300">
+                        {report.employee_name || report.employeeName || report.userName || report.employee_id || "-"}
+                      </td>
                       <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-900 border border-gray-300">
                         {report.project_name}
                       </td>
@@ -653,41 +720,43 @@ const Workdone = () => {
 
       <div className="w-[100%] flex-1 min-h-0 flex flex-col gap-[1vh]">
         {/* TOP TABS */}
-        <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[2.5vw] flex-shrink-0 border border-gray-100">
-          <div className="flex border-b border-gray-200 h-full w-full">
-            <button
-              onClick={() => {
-                setMainTab("reports");
-                clearForm();
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
-                mainTab === "reports"
-                  ? "border-b-2 border-black text-black font-semibold"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <div className="flex items-center gap-[0.4vw]">
-                <FileText size="0.9vw" />
-                Reports
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                setMainTab("viewReport");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
-                mainTab === "viewReport"
-                  ? "border-b-2 border-black text-black font-semibold"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <div className="flex items-center gap-[0.4vw]">
-                <Eye size="0.9vw" />
-                View Report
-              </div>
-            </button>
+        {!isAdmin ? (
+          <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[2.5vw] flex-shrink-0 border border-gray-100">
+            <div className="flex border-b border-gray-200 h-full w-full">
+              <button
+                onClick={() => {
+                  setMainTab("reports");
+                  clearForm();
+                }}
+                className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
+                  mainTab === "reports"
+                    ? "border-b-2 border-black text-black font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <div className="flex items-center gap-[0.4vw]">
+                  <FileText size="0.9vw" />
+                  Reports
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setMainTab("viewReport");
+                }}
+                className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
+                  mainTab === "viewReport"
+                    ? "border-b-2 border-black text-black font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <div className="flex items-center gap-[0.4vw]">
+                  <Eye size="0.9vw" />
+                  View Report
+                </div>
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {/* Main Content Container */}
         <div className="bg-white rounded-xl shadow-sm flex-1 min-h-0 flex flex-col overflow-hidden border border-gray-100">

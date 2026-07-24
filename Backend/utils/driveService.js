@@ -334,7 +334,6 @@ async function organizeDriveFolders(dbPool) {
               fields: "id, parents",
               supportsAllDrives: true,
             });
-            console.log(`🚚 Drive Service: Re-routed '${file.name}' (${file.id}) from '${sub.name}' -> '${targetFolder}'`);
           } catch (err) {
             console.error(`❌ Drive Service: Failed moving '${file.name}':`, err.message);
           }

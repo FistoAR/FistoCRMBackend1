@@ -1,5 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useState, useEffect, useMemo } from "react";
+import axios from "axios";
+import API_BASE_URL from "../config/api";
 
 // Import assets
 import logo from "../assets/Fisto Logo.png";
@@ -18,8 +20,18 @@ import MasterResource from "../assets/SidePannelLogos/folder.png";
 // Icon components for Accordion styling
 function ChevronDownIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M19 9l-7 7-7-7"
+      />
     </svg>
   );
 }
@@ -27,21 +39,49 @@ function ChevronDownIcon({ className }) {
 // ChevronRight for collapsed category toggle
 function ChevronRightIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.5}
+        d="M9 5l7 7-7 7"
+      />
     </svg>
   );
 }
 
 function ChevronUpIcon({ className }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5 15l7-7 7 7"
+      />
     </svg>
   );
 }
 
-function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover }) {
+function SidebarLink({
+  to,
+  icon,
+  label,
+  isSub,
+  subIndex,
+  isCollapsed,
+  onHover,
+}) {
   const { pathname } = useLocation();
   const isActive = pathname === to || pathname.startsWith(to + "/");
 
@@ -58,10 +98,22 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
             <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-gradient-to-r from-zinc-900 to-black text-white text-[0.75vw] font-bold shrink-0">
               {formattedNum}
             </span>
-            <span className="truncate min-w-0 leading-tight font-semibold">{label}</span>
+            <span className="truncate min-w-0 leading-tight font-semibold">
+              {label}
+            </span>
           </div>
-          <svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] text-black shrink-0 ml-[0.3vw]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+          <svg
+            className="w-[0.8vw] h-[0.8vw] min-w-[12px] text-black shrink-0 ml-[0.3vw]"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={3}
+              d="M9 5l7 7-7 7"
+            />
           </svg>
         </Link>
       );
@@ -74,7 +126,9 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
           <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-100 text-gray-700 text-[0.75vw] font-semibold shrink-0">
             {formattedNum}
           </span>
-          <span className="truncate min-w-0 leading-tight font-medium">{label}</span>
+          <span className="truncate min-w-0 leading-tight font-medium">
+            {label}
+          </span>
         </Link>
       );
     }
@@ -100,13 +154,16 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
       onMouseLeave={handleMouseLeave}
       className={`group relative flex items-center rounded-xl transition-all duration-150 w-full px-4 
         ${isCollapsed ? "justify-center py-2" : "py-3 gap-[0.8vw] text-[0.88vw]"}
-        ${isActive 
-          ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10" 
-          : "text-gray-700 font-semibold hover:bg-slate-100 hover:text-black"
+        ${
+          isActive
+            ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10"
+            : "text-gray-700 font-semibold hover:bg-slate-100 hover:text-black"
         }`}
     >
       {icon && (
-        <div className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}>
+        <div
+          className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}
+        >
           <img
             src={icon}
             alt={label}
@@ -120,7 +177,16 @@ function SidebarLink({ to, icon, label, isSub, subIndex, isCollapsed, onHover })
   );
 }
 
-function CategoryHeader({ label, icon, count, isOpen, isActive, onClick, isCollapsed, onHover }) {
+function CategoryHeader({
+  label,
+  icon,
+  count,
+  isOpen,
+  isActive,
+  onClick,
+  isCollapsed,
+  onHover,
+}) {
   const handleMouseEnter = (e) => {
     if (isCollapsed && onHover) {
       const rect = e.currentTarget.getBoundingClientRect();
@@ -141,14 +207,19 @@ function CategoryHeader({ label, icon, count, isOpen, isActive, onClick, isColla
       onMouseLeave={handleMouseLeave}
       className={`group relative flex items-center transition-all duration-150 cursor-pointer rounded-xl w-full px-4 
         ${isCollapsed ? "justify-center py-2" : "justify-between text-[0.88vw] py-3"}
-        ${isActive
-          ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10"
-          : "text-gray-800 font-semibold hover:bg-slate-100 hover:text-black"
+        ${
+          isActive
+            ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10"
+            : "text-gray-800 font-semibold hover:bg-slate-100 hover:text-black"
         }`}
     >
-      <div className={`flex items-center min-w-0 ${isCollapsed ? "" : "gap-[0.8vw]"}`}>
+      <div
+        className={`flex items-center min-w-0 ${isCollapsed ? "" : "gap-[0.8vw]"}`}
+      >
         {icon && (
-          <div className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}>
+          <div
+            className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}
+          >
             <img
               src={icon}
               alt={label}
@@ -157,9 +228,11 @@ function CategoryHeader({ label, icon, count, isOpen, isActive, onClick, isColla
             />
           </div>
         )}
-        {!isCollapsed && <span className="truncate min-w-0 font-semibold">{label}</span>}
+        {!isCollapsed && (
+          <span className="truncate min-w-0 font-semibold">{label}</span>
+        )}
       </div>
-      
+
       {!isCollapsed && (
         <div className="flex items-center gap-[0.6vw] flex-shrink-0">
           {count > 0 && (
@@ -190,92 +263,58 @@ const PATH_PREFIX_MAP = {
   Developer: "softwareDeveloper",
 };
 
-const getMenuConfig = (designation, prefix) => ({
+const getMenuConfig = () => ({
   marketing: [
-    { path: "/marketing/dashboard", icon: dashboardIcon, label: "Dashboard" },
-    { path: `/marketing/masterResource`, icon: MasterResource, label: "Master Resource" },
-    { path: "/marketing/projectAnalytics", icon: AnalyticsIcon, label: "Project Analytics" },
-    { path: "/marketing/analytics", icon: AnalyticsIcon, label: "Marketing Analytics" },
-    { path: "/marketing/calls", icon: CallsIcon, label: "Calls" },
-    { path: "/marketing/resource", icon: ActivityIcon, label: "Resources" },
-    { path: "/marketing/dailyReports", icon: DailyReportsIcon, label: "Daily reports" },
-    { path: "/marketing/addReports", icon: MessageIcon, label: "Marketing Task" },
-    { path: "/marketing/employeeRequest", icon: CallsIcon, label: "Employee request" },
+    { path: "/marketingAnalytics", icon: AnalyticsIcon, label: "Analytics" },
+    { path: "/calls", icon: CallsIcon, label: "Calls" },
+    { path: "/resource", icon: ActivityIcon, label: "Marketing Resource" },
+    { path: "/dailyReports", icon: DailyReportsIcon, label: "Daily reports" },
+    { path: "/addReports", icon: MessageIcon, label: "Marketing Task" },
   ],
-  marketingHR: [
-    { path: "/marketing/hrActivities", icon: hrActivityIcon, label: "HR Activities" },
-    { path: "/admin/hr/employeeDetails", icon: hrActivityIcon, label: "Employee Details" },
-    { path: "/admin/hr/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
-    { path: "/admin/hr/request", icon: hrActivityIcon, label: "Request" },
-    { path: "/admin/hr/salaryCalculation", icon: hrActivityIcon, label: "Salary Calculation" },
-    { path: "/admin/hr/interviewSchedules", icon: hrActivityIcon, label: "Interview Schedules" },
-    { path: "/admin/hr/quotes", icon: hrActivityIcon, label: "Quotes" },
-    { path: "/admin/hr/maid", icon: hrActivityIcon, label: "Maid" },
-    { path: "/marketing/employeeReports", icon: AddReportIcon, label: "Employee Reports" },
+  HR: [
+    {
+      path: "/employeeDetails",
+      icon: hrActivityIcon,
+      label: "Employee Details",
+    },
+    { path: "/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
+    { path: "/request", icon: hrActivityIcon, label: "Request" },
+    {
+      path: "/salaryCalculation",
+      icon: hrActivityIcon,
+      label: "Salary Calculation",
+    },
+    {
+      path: "/interviewSchedules",
+      icon: hrActivityIcon,
+      label: "Interview Schedules",
+    },
+    { path: "/quotes", icon: hrActivityIcon, label: "Quotes" },
+    { path: "/maid", icon: hrActivityIcon, label: "Maid" },
   ],
-  projectHead: [
-    { path: `/${prefix}/dashboard`, icon: dashboardIcon, label: "Dashboard" },
-    { path: `/${prefix}/masterResource`, icon: MasterResource, label: "Master Resource" },
-    { path: `/${prefix}/projects`, icon: ProjectIcon, label: "Project" },
-    { path: `/${prefix}/unscheduledTask`, icon: MessageIcon, label: "Unscheduled Task" },
-    { path: `/${prefix}/projectAnalytics`, icon: AnalyticsIcon, label: "Project Analytics" },
-    { path: `/${prefix}/taskCalendar`, icon: CalendarIcon, label: "Task's Calendar" },
-    { path: `/${prefix}/employeeReports`, icon: AddReportIcon, label: "Employee Reports" },
-    { path: `/${prefix}/employeeRequest`, icon: CallsIcon, label: "Employee request" },
-    { path: "/admin/hr/employeeDetails", icon: hrActivityIcon, label: "Employee Details" },
-    { path: "/admin/hr/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
-    { path: "/admin/hr/request", icon: hrActivityIcon, label: "Request" },
-    { path: "/admin/hr/salaryCalculation", icon: hrActivityIcon, label: "Salary Calculation" },
-    { path: "/admin/hr/interviewSchedules", icon: hrActivityIcon, label: "Interview Schedules" },
-    { path: "/admin/hr/quotes", icon: hrActivityIcon, label: "Quotes" },
-    { path: "/admin/hr/maid", icon: hrActivityIcon, label: "Maid" },
-    { path: `/${prefix}/addReports`, icon: MessageIcon, label: "Marketing Task" },
-    { path: `/${prefix}/resource`, icon: ActivityIcon, label: "Marketing Resource" },
-    { path: `/${prefix}/analytics`, icon: AnalyticsIcon, label: "Marketing Analytics" },
-    { path: `/${prefix}/workdone`, icon: AddReportIcon, label: "Work Done" },
-  ],
+  projectHead: [{ path: "/workdone", icon: AddReportIcon, label: "Work Done" }],
   admin: [
-    { path: "/admin/dashboard", icon: dashboardIcon, label: "Dashboard" },
-    { path: `/admin/masterResource`, icon: MasterResource, label: "Master Resource" },
-    { path: "/admin/projectAnalytics", icon: AnalyticsIcon, label: "Project Analytics" },
-    { path: "/admin/taskCalendar", icon: CalendarIcon, label: "Task's Calendar" },
-    { path: "/admin/marketingAnalytics", icon: AnalyticsIcon, label: "Marketing Analytics" },
-    { path: "/admin/analytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/admin/resource", icon: AddReportIcon, label: "Resource" },
-    { path: "/admin/management", icon: AddReportIcon, label: "Management" },
-    { path: "/admin/followup", icon: CallsIcon, label: "Followup's" },
-    { path: "/admin/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
-    { path: "/admin/project", icon: ProjectIcon, label: "Project" },
-    { path: "/admin/hr/employeeDetails", icon: hrActivityIcon, label: "Employee Details" },
-    { path: "/admin/hr/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
-    { path: "/admin/hr/request", icon: hrActivityIcon, label: "Request" },
-    { path: "/admin/hr/salaryCalculation", icon: hrActivityIcon, label: "Salary Calculation" },
-    { path: "/admin/hr/interviewSchedules", icon: hrActivityIcon, label: "Interview Schedules" },
-    { path: "/admin/hr/quotes", icon: hrActivityIcon, label: "Quotes" },
-    { path: "/admin/hr/maid", icon: hrActivityIcon, label: "Maid" },
-    { path: "/marketing/resource", icon: ActivityIcon, label: "Marketing Resource" },
-    { path: "/admin/employeeReports", icon: AddReportIcon, label: "Employee Reports" },
+    { path: "/followup", icon: CallsIcon, label: "Followup's" },
+    { path: "/analytics", icon: AnalyticsIcon, label: "Analytics" },
+    { path: "/management", icon: AddReportIcon, label: "Budget's" },
+    { path: "/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
+    { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
   ],
-  intern: [
-    { path: "/intern/dailyReport", icon: DailyReportsIcon, label: "Daily Report" },
-    { path: "/intern/analytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/intern/projects", icon: ProjectIcon, label: "Projects" },
-    { path: "/intern/unscheduledTask", icon: MessageIcon, label: "Unscheduled Task" },
-    { path: "/intern/taskCalendar", icon: CalendarIcon, label: "Task's Calendar" },
-    { path: "/intern/employeeReports", icon: AddReportIcon, label: "Employee Reports" },
-    { path: "/intern/employeeRequest", icon: CallsIcon, label: "Employee request" },
-  ],
-  developer: [
-    { path: `/${prefix}/dashboard`, icon: dashboardIcon, label: "Dashboard" },
-    { path: `/${prefix}/masterResource`, icon: MasterResource, label: "Master Resource" },
-    { path: `/${prefix}/analytics`, icon: AnalyticsIcon, label: "Analytics" },
-    { path: `/${prefix}/projects`, icon: ProjectIcon, label: "Projects" },
-    { path: `/${prefix}/unscheduledTask`, icon: MessageIcon, label: "Unscheduled Task" },
-    { path: `/${prefix}/taskCalendar`, icon: CalendarIcon, label: "Task's Calendar" },
-    { path: `/${prefix}/employeeReports`, icon: AddReportIcon, label: "Employee Reports" },
-    { path: `/${prefix}/employeeRequest`, icon: CallsIcon, label: "Employee request" },
+  project: [
+    { path: "/projectAnalytics", icon: AnalyticsIcon, label: "Analytics" },
+    { path: "/projects", icon: ProjectIcon, label: "Projects" },
+    { path: "/unscheduledTask", icon: MessageIcon, label: "Unscheduled Task" },
+    { path: "/taskCalendar", icon: CalendarIcon, label: "Task's Calendar" },
   ],
   common: [
+    { path: "/dashboard", icon: dashboardIcon, label: "Dashboard" },
+    { path: "/masterResource", icon: MasterResource, label: "Master Resource" },
+    {
+      path: "/employeeReports",
+      icon: AddReportIcon,
+      label: "Employee Reports",
+    },
+    { path: "/employeeRequest", icon: CallsIcon, label: "Employee request" },
     { path: "/dairyRemainder", icon: CalendarIcon, label: "Dairy Remainder" },
     { path: "/notes", icon: DailyReportsIcon, label: "Sticky Notes" },
   ],
@@ -286,14 +325,18 @@ export default function Sidebar() {
   const [designation, setDesignation] = useState("");
   const [employeementType, setEmployeementType] = useState("");
   const [isTeamHead, setIsTeamHead] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem("sidebar-collapsed") === "true");
+  const [isCollapsed, setIsCollapsed] = useState(
+    () => localStorage.getItem("sidebar-collapsed") === "true",
+  );
   const [tooltip, setTooltip] = useState({ label: "", y: 0, show: false });
+  const [allowedPaths, setAllowedPaths] = useState(null);
 
   // States to track open groups
   const [openGroups, setOpenGroups] = useState({
     marketing: false,
     projects: false,
     hr: false,
+    management: false,
   });
 
   const toggleGroup = (group) => {
@@ -319,270 +362,245 @@ export default function Sidebar() {
     localStorage.setItem("sidebar-collapsed", isCollapsed);
   }, [isCollapsed]);
 
+  const [employeeId, setEmployeeId] = useState(null);
+
   useEffect(() => {
     const userData =
       sessionStorage.getItem("user") || localStorage.getItem("user");
     if (userData) {
       const parsedUser = JSON.parse(userData);
       setDesignation(parsedUser.designation || "");
+      // employee_id may be stored as employee_id, id, or userName (legacy)
+      setEmployeeId(parsedUser.employee_id || parsedUser.id || parsedUser.userName || null);
       setEmployeementType(parsedUser.employeementType || "");
       setIsTeamHead(parsedUser.teamHead || false);
     }
   }, []);
 
+  // Fetch sidebar permissions: read user data directly from storage to avoid
+  // React state batching race conditions where employeeId hasn't updated yet
+  useEffect(() => {
+    const userData =
+      sessionStorage.getItem("user") || localStorage.getItem("user");
+    if (!userData) return;
+
+    const parsedUser = JSON.parse(userData);
+    const desig = parsedUser.designation || "";
+    // employee_id may be stored as employee_id, id, or userName (legacy)
+    const empId = parsedUser.employee_id || parsedUser.id || parsedUser.userName || null;
+
+    if (!desig && !empId) return;
+
+    axios
+      .get(`${API_BASE_URL}/role-access/my-permissions`, {
+        params: {
+          designation: desig,
+          employee_id: empId || undefined,
+        },
+      })
+      .then((res) => {
+        if (res.data && Array.isArray(res.data.allowedPaths)) {
+          setAllowedPaths(res.data.allowedPaths);
+        } else {
+          setAllowedPaths(null);
+        }
+      })
+      .catch(() => {
+        setAllowedPaths(null);
+      });
+  }, []);
+
   // Helper to map original labels to standard UI text
   const getDisplayLabel = (label) => {
-    if (["Followup's", "Calls"].includes(label)) return "Followups";
-    if (label === "Management") return "Budgets";
-    if (label === "Marketing Leeds") return "Marketing Team Leads";
-    if (label === "Marketing Analytics") return "Marketing Team Analytics";
-    if (["Resources", "Resource", "Marketing Resource", "Marketing Resources"].includes(label)) return "Marketing Team Resources";
+    if (label === "Calls") return "Calls";
+    if (["Followup's", "Followups"].includes(label)) return "Followup's";
+    if (label === "Management" || label === "Budgets" || label === "Budget's")
+      return "Budget's";
+    if (label === "Marketing Leeds" || label === "Marketing Leads")
+      return "Marketing Leads";
+    if (["Resources", "Resource", "Marketing Resource"].includes(label))
+      return "Marketing Resource";
     if (label === "Project" || label === "Projects") return "Projects";
-    if (["Task's Calendar", "Task Calendar"].includes(label)) return "Task Calendars";
-    if (label === "Employee Reports") return "Employee Monthly Report";
-    if (label === "Master Resource") return "My Resources";
-    if (label === "Sticky Notes" || label === "Sticky notes") return "Sticky Notes";
-    if (label === "Project Analytics") return "Analytics";
+    if (["Task's Calendar", "Task Calendar"].includes(label))
+      return "Task's Calendar";
+    if (label === "Employee Reports") return "Employee Reports";
+    if (label === "Master Resource") return "Master Resource";
+    if (label === "Sticky Notes" || label === "Sticky notes")
+      return "Sticky Notes";
+    if (label === "Project Analytics" || label === "Analytics")
+      return "Analytics";
     if (label === "HR") return "Human Resource";
-    if (label === "Employee Request" || label === "Employee request") return "Employee Request";
-    if (label === "Daily reports" || label === "dailyReports") return "Daily Reports";
-    if (label === "Unscheduled Task") return "Unscheduled Tasks";
+    if (label === "Employee Request" || label === "Employee request")
+      return "Employee Request";
+    if (label === "Daily reports" || label === "dailyReports")
+      return "Daily Reports";
+    if (label === "Unscheduled Task" || label === "Unscheduled Tasks")
+      return "Unscheduled Task";
     return label;
   };
 
-  const prefix = PATH_PREFIX_MAP[designation] || "";
-  const menuConfig = useMemo(
-    () => getMenuConfig(designation, prefix),
-    [designation, prefix]
-  );
+  const menuConfig = useMemo(() => getMenuConfig(), []);
 
-  // Get original unmodified list of active menu items for this user
+  // Get original unmodified list of active menu items for this user (Default fallback config)
   const originalMenuItems = useMemo(() => {
     const items = [];
-    const isOnRole = employeementType === "On Role";
-    const isDeveloper = ["Software Developer", "UI/UX", "3D"].includes(designation);
+    const desig = (designation || "").trim();
 
-    if (isOnRole && (designation === "Digital Marketing" || designation === "Digital Marketing & HR" || designation === "HR" || designation.includes("Marketing") || designation.includes("HR"))) {
-      items.push(...menuConfig.marketing);
-      if (designation === "Digital Marketing & HR" || designation === "HR" || designation.includes("HR")) {
-        items.push(...menuConfig.marketingHR);
-      }
-    }
-    if (isOnRole && designation === "Project Head") {
-      items.push(...menuConfig.projectHead);
-    }
-    if (isOnRole && designation === "SBU") {
+    if (desig === "Admin") {
       items.push(
-        ...menuConfig.projectHead.filter(
-          (item) => item.label !== "Unscheduled Task"
-        )
+        ...menuConfig.admin,
+        ...menuConfig.project,
+        ...menuConfig.projectHead,
+        ...menuConfig.marketing,
+        ...menuConfig.HR,
       );
-    }
-    if (isOnRole && designation === "Admin") {
-      items.push(...menuConfig.admin);
-    }
-    if (!isOnRole && designation) {
-      items.push(...menuConfig.intern);
+    } else if (desig === "Digital Marketing" || desig === "Marketing") {
+      items.push(...menuConfig.marketing);
+    } else if (
+      desig === "Digital Marketing & HR" ||
+      desig === "HR" ||
+      desig.includes("Marketing & HR")
+    ) {
+      items.push(...menuConfig.marketing, ...menuConfig.HR);
+    } else if (desig === "Project Head" || desig === "SBU") {
+      items.push(...menuConfig.projectHead);
+    } else if (
+      ["Software Developer", "UI/UX", "3D", "Intern", "Developer"].includes(
+        desig,
+      ) ||
+      employeementType !== "On Role"
+    ) {
+      items.push(...menuConfig.project);
+    } else {
+      items.push(...menuConfig.project);
     }
 
-    if (isOnRole && isDeveloper) {
-      const devKey = PATH_PREFIX_MAP[designation] || "developer";
-      const devItems = menuConfig[devKey] || menuConfig.developer || [];
-      items.push(...devItems);
-    }
-
-    // Default fallback: If user is "On Role" (e.g. Employee, Team Member, custom designation), load default developer/project menu
-    if (isOnRole && items.length === 0) {
-      items.push(...(menuConfig.developer || []));
-    }
     items.push(...menuConfig.common);
 
-    // Deduplicate items by their resolved display label (allowing Analytics once in Marketing and once in Projects)
-    const seenLabels = new Set();
-    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR", "Project Head"].includes(designation);
+    // Deduplicate items by path
+    const seen = new Set();
+    return items.filter((item) => {
+      if (seen.has(item.path)) return false;
+      seen.add(item.path);
+      return true;
+    });
+  }, [designation, employeementType, menuConfig]);
 
-    return items
-      .filter((item) => {
-        if (!isMarketingDeptOrAdmin) {
-          const marketingLabels = [
-            "Followups", "Followup's", "Calls", "Budgets", "Management",
-            "Marketing Team Leads", "Marketing Leeds", "Marketing Analytics", "Marketing Team Analytics",
-            "Marketing Resources", "Marketing Team Resources", "Resources", "Resource", "Marketing Resource",
-            "Marketing Task"
-          ];
-          if (item.path === "/admin/marketing" || item.path === "/marketing/calls") return false;
-          if (marketingLabels.includes(item.label)) return false;
-        }
-        return true;
-      })
-      .filter((item) => {
-        const label = getDisplayLabel(item.label);
-        if (label === "Analytics") {
-          const key = `Analytics-${item.path}`;
-          if (seenLabels.has(key)) return false;
-          seenLabels.add(key);
-          return true;
-        }
-        if (seenLabels.has(label)) {
-          return false;
-        }
-        seenLabels.add(label);
-        return true;
+  const activeMenuItems = useMemo(() => {
+    // If role access is not defined in database for this designation, use getMenuConfig()
+    if (!allowedPaths) return originalMenuItems;
+
+    // If role access IS defined, show ONLY the defined/allowed files from database
+    const allSystemItems = [];
+    Object.values(menuConfig).forEach((group) => {
+      if (Array.isArray(group)) allSystemItems.push(...group);
+    });
+
+    const items = allSystemItems.filter((item) => {
+      if (designation === "Admin" && item.path === "/roleAccess") return true;
+
+      const itemSuffix = item.path.split("/").pop();
+
+      return allowedPaths.some(
+        (p) =>
+          p === item.path ||
+          (p === "/management" && item.path === "/management") ||
+          (p === "/analytics" && item.path === "/analytics"),
+      );
+    });
+
+    if (items.length === 0) {
+      items.push({
+        path: "/dashboard",
+        icon: dashboardIcon,
+        label: "Dashboard",
       });
-  }, [designation, employeementType, menuConfig, isTeamHead]);
+    } else if (Array.isArray(allowedPaths) && allowedPaths.length > 0) {
+      // Respect exact sort_order saved in database
+      const orderMap = new Map();
+      allowedPaths.forEach((p, idx) => {
+        orderMap.set(p, idx);
+        const pSuffix = p.split("/").pop();
+        if (pSuffix) orderMap.set(pSuffix, idx);
+      });
+
+      items.sort((a, b) => {
+        const aSuffix = a.path.split("/").pop();
+        const bSuffix = b.path.split("/").pop();
+
+        const indexA = orderMap.has(a.path)
+          ? orderMap.get(a.path)
+          : orderMap.has(aSuffix)
+            ? orderMap.get(aSuffix)
+            : 999;
+        const indexB = orderMap.has(b.path)
+          ? orderMap.get(b.path)
+          : orderMap.has(bSuffix)
+            ? orderMap.get(bSuffix)
+            : 999;
+
+        return indexA - indexB;
+      });
+    }
+
+    return items;
+  }, [originalMenuItems, allowedPaths, designation, menuConfig]);
 
   // Dynamic sorting and grouping of user's original menu items
   const sortedAndGroupedMenu = useMemo(() => {
-    const dashboardItem = originalMenuItems.find((item) => item.label === "Dashboard");
-    const isMarketingDeptOrAdmin = ["Admin", "Digital Marketing", "Digital Marketing & HR", "Marketing", "HR", "Project Head"].includes(designation);
-    
-    // Group 2: MARKETING Items (Only compiled for Marketing Department or Admin)
-    let marketingItems = [];
-    if (isMarketingDeptOrAdmin) {
-      const marketingLabels = [
-        "Analytics",
-        "Followups",
-        "Followup's",
-        "Calls",
-        "Budgets",
-        "Management",
-        "Marketing Team Leads",
-        "Marketing Leeds",
-        "Marketing Analytics",
-        "Marketing Team Analytics",
-        "Marketing Resources",
-        "Marketing Team Resources",
-        "Resources",
-        "Resource",
-        "Marketing Resource",
-        "Marketing Task",
-      ];
-      marketingItems = originalMenuItems.filter((item) => {
-        // Exclude project analytics from marketing category
-        if (item.path === "/admin/projectAnalytics" || item.path === "/marketing/projectAnalytics") return false;
-        return marketingLabels.includes(item.label);
-      });
+    const dashboardItem = activeMenuItems.find(
+      (item) =>
+        item.path === "/dashboard" ||
+        getDisplayLabel(item.label) === "Dashboard",
+    );
 
-      // Enforce exact order for Marketing sub tabs
-      const marketingOrder = [
-        "Analytics",
-        "Followups",
-        "Budgets",
-        "Marketing Team Analytics",
-        "Marketing Team Leads",
-        "Marketing Team Resources",
-        "Marketing Task"
-      ];
-      marketingItems.sort((a, b) => {
-        const aLabel = getDisplayLabel(a.label);
-        const bLabel = getDisplayLabel(b.label);
-        return marketingOrder.indexOf(aLabel) - marketingOrder.indexOf(bLabel);
-      });
-    }
+    const marketingPaths = menuConfig.marketing.map((item) => item.path);
+    const marketingItems = activeMenuItems.filter((item) =>
+      marketingPaths.includes(item.path),
+    );
 
-    // Group 3: PROJECTS Items
-    const projectLabels = [
-      "Project Analytics",
-      "Analytics",
-      "Project",
-      "Projects",
-      "Task Calendar",
-      "Task Calendars",
-      "Task's Calendar",
-      "Unscheduled Task",
-      "Unschedule task"
-    ];
-    let projectsItems = originalMenuItems.filter((item) => {
-      // Exclude marketing analytics & management analytics from projects category for admin/marketing
-      if (isMarketingDeptOrAdmin) {
-        if (
-          item.path === "/admin/marketingAnalytics" ||
-          item.path === "/marketing/analytics" ||
-          item.path === "/admin/analytics"
-        )
-          return false;
-      }
-      return projectLabels.includes(item.label);
-    });
+    const projectPaths = menuConfig.project.map((item) => item.path);
+    const projectsItems = activeMenuItems.filter((item) =>
+      projectPaths.includes(item.path),
+    );
 
-    // Enforce exact order for Projects sub tabs
-    const projectsOrder = [
-      "Analytics",
-      "Project Analytics",
-      "Projects",
-      "Project",
-      "Task Calendars",
-      "Task Calendar",
-      "Task's Calendar",
-      "Unscheduled Tasks",
-      "Unscheduled Task",
-      "Unschedule task"
-    ];
-    projectsItems.sort((a, b) => {
-      const aLabel = getDisplayLabel(a.label);
-      const bLabel = getDisplayLabel(b.label);
-      const aIndex = projectsOrder.indexOf(aLabel);
-      const bIndex = projectsOrder.indexOf(bLabel);
-      if (aIndex === -1 && bIndex === -1) return 0;
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    });
+    const hrPaths = menuConfig.HR.map((item) => item.path);
+    const hrItems = activeMenuItems.filter((item) =>
+      hrPaths.includes(item.path),
+    );
 
-    // Group 3.5: HR Items
-    const hrLabels = [
-      "Employee Details",
-      "Add Designation",
-      "Request",
-      "Salary Calculation",
-      "Interview Schedules",
-      "Quotes",
-      "Maid",
-      "HR Activities",
-      "HR activities"
-    ];
-    const hrItems = originalMenuItems.filter((item) => hrLabels.includes(item.label));
+    const adminPaths = menuConfig.admin.map((item) => item.path);
+    const managementItems = activeMenuItems.filter(
+      (item) => adminPaths.includes(item.path) && item !== dashboardItem,
+    );
 
-    // Group 4: Separated Items (Employee Monthly Report, Dairy Remainder, My Resources/Master Resource, Sticky Notes/notes, plus any other ungrouped original items)
-    const separatedLabels = [
-      "Employee Monthly Report",
-      "Employee Reports",
-      "Dairy Remainder",
-      "My Resources",
-      "Master Resource",
-      "Sticky Notes",
-      "Sticky notes",
-      "Employee request",
-      "Employee Request",
-    ];
-    const separatedItems = originalMenuItems.filter((item) => separatedLabels.includes(item.label) && !hrLabels.includes(item.label));
+    const commonPaths = menuConfig.common.map((item) => item.path);
+    const separatedItems = activeMenuItems.filter(
+      (item) => commonPaths.includes(item.path) && item !== dashboardItem,
+    );
 
-    // Catch any remaining pages from the user's role that are not in the predefined lists, so they are not missing/deleted
-    const otherItems = originalMenuItems.filter(
+    const otherItems = activeMenuItems.filter(
       (item) =>
         item !== dashboardItem &&
         !marketingItems.includes(item) &&
         !projectsItems.includes(item) &&
         !hrItems.includes(item) &&
-        !separatedItems.includes(item)
+        !managementItems.includes(item) &&
+        !separatedItems.includes(item),
     );
 
     const combinedSeparated = [...separatedItems, ...otherItems];
-    
-    // Sort in exact order: My Resources, Employee Monthly Report, Employee Request, Dairy Remainder, Sticky Notes
+
     const separatedOrder = [
-      "My Resources",
-      "Employee Monthly Report",
-      "Employee Request",
-      "Employee request",
-      "Dairy Remainder",
-      "Sticky Notes",
-      "Sticky notes"
+      "/workdone",
+      "/masterResource",
+      "/employeeReports",
+      "/employeeRequest",
+      "/dairyRemainder",
+      "/notes",
     ];
     combinedSeparated.sort((a, b) => {
-      const aLabel = getDisplayLabel(a.label);
-      const bLabel = getDisplayLabel(b.label);
-      return separatedOrder.indexOf(aLabel) - separatedOrder.indexOf(bLabel);
+      return separatedOrder.indexOf(a.path) - separatedOrder.indexOf(b.path);
     });
 
     return {
@@ -590,28 +608,41 @@ export default function Sidebar() {
       marketing: marketingItems,
       projects: projectsItems,
       hr: hrItems,
+      management: managementItems,
       separated: combinedSeparated,
     };
-  }, [originalMenuItems]);
+  }, [activeMenuItems, menuConfig]);
 
   const isMarketingActive = useMemo(() => {
-    return sortedAndGroupedMenu.marketing.some((item) => pathname.startsWith(item.path));
+    return sortedAndGroupedMenu.marketing.some((item) =>
+      pathname.startsWith(item.path),
+    );
   }, [pathname, sortedAndGroupedMenu.marketing]);
 
   const isProjectsActive = useMemo(() => {
-    return sortedAndGroupedMenu.projects.some((item) => pathname.startsWith(item.path));
+    return sortedAndGroupedMenu.projects.some((item) =>
+      pathname.startsWith(item.path),
+    );
   }, [pathname, sortedAndGroupedMenu.projects]);
 
   const isHRActive = useMemo(() => {
-    return sortedAndGroupedMenu.hr.some((item) => pathname.startsWith(item.path));
+    return sortedAndGroupedMenu.hr.some((item) =>
+      pathname.startsWith(item.path),
+    );
   }, [pathname, sortedAndGroupedMenu.hr]);
+
+  const isManagementActive = useMemo(() => {
+    return sortedAndGroupedMenu.management.some((item) =>
+      pathname.startsWith(item.path),
+    );
+  }, [pathname, sortedAndGroupedMenu.management]);
 
   return (
     <aside
       className="relative flex flex-col bg-white border-r border-gray-100 text-[1vw] select-none h-screen flex-shrink-0 transition-all duration-300 ease-in-out font-sans"
-      style={{ 
-        width: isCollapsed ? "80px" : "300px", 
-        minWidth: isCollapsed ? "80px" : "300px" 
+      style={{
+        width: isCollapsed ? "80px" : "300px",
+        minWidth: isCollapsed ? "80px" : "300px",
       }}
     >
       {/* Collapse / Expand Toggle Button */}
@@ -622,8 +653,18 @@ export default function Sidebar() {
         {isCollapsed ? (
           <ChevronRightIcon className="w-4 h-4 text-zinc-600" />
         ) : (
-          <svg className="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+          <svg
+            className="w-4 h-4 text-zinc-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         )}
       </button>
@@ -634,9 +675,9 @@ export default function Sidebar() {
           src={logo}
           alt="Fist-O Logo"
           className="max-h-full object-contain transition-all duration-300"
-          style={{ 
-            width: "auto", 
-            height: isCollapsed ? "75%" : "55%" 
+          style={{
+            width: "auto",
+            height: isCollapsed ? "75%" : "55%",
           }}
         />
       </div>
@@ -652,6 +693,39 @@ export default function Sidebar() {
             isCollapsed={isCollapsed}
             onHover={handleLinkHover}
           />
+        )}
+
+        {/* 1. MANAGEMENT Category */}
+        {sortedAndGroupedMenu.management.length > 0 && (
+          <div className="space-y-1">
+            <CategoryHeader
+              label="Management"
+              icon={ActivityIcon}
+              count={sortedAndGroupedMenu.management.length}
+              isOpen={openGroups.management}
+              isActive={isManagementActive}
+              onClick={() => toggleGroup("management")}
+              isCollapsed={isCollapsed}
+              onHover={handleLinkHover}
+            />
+
+            {openGroups.management && !isCollapsed && (
+              <div className="mt-1 p-1.5 bg-[#F8FAFC] border border-slate-100/80 rounded-2xl space-y-1 shadow-inner/5">
+                {sortedAndGroupedMenu.management.map((item, idx) => (
+                  <SidebarLink
+                    key={idx}
+                    to={item.path}
+                    icon={item.icon}
+                    label={getDisplayLabel(item.label)}
+                    isSub
+                    subIndex={idx + 1}
+                    isCollapsed={isCollapsed}
+                    onHover={handleLinkHover}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* 2. MARKETING Category */}
@@ -720,7 +794,7 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* Human Resource Category */}
+        {/* 4. HUMAN RESOURCE Category */}
         {sortedAndGroupedMenu.hr.length > 0 && (
           <div className="space-y-1">
             <CategoryHeader
@@ -758,7 +832,15 @@ export default function Sidebar() {
           <div className="space-y-2 pt-2">
             {sortedAndGroupedMenu.separated.map((item, idx) => {
               // Apply specific role visibility logic for My Resources
-              if (item.label === "Master Resource" && !(designation === "Admin" || designation === "SBU" || designation === "Project Head" || isTeamHead)) {
+              if (
+                item.label === "Master Resource" &&
+                !(
+                  designation === "Admin" ||
+                  designation === "SBU" ||
+                  designation === "Project Head" ||
+                  isTeamHead
+                )
+              ) {
                 return null;
               }
               return (
@@ -778,12 +860,12 @@ export default function Sidebar() {
 
       {/* Fixed Position Tooltip to bypass scrollbar clip/overflow */}
       {tooltip.show && (
-        <div 
+        <div
           className="fixed bg-zinc-900 text-white text-[12px] px-2.5 py-1.5 rounded-lg shadow-md z-[9999] pointer-events-none whitespace-nowrap before:content-[''] before:absolute before:right-full before:top-1/2 before:-translate-y-1/2 before:border-[6px] before:border-transparent before:border-r-zinc-900 font-normal"
-          style={{ 
-            top: `${tooltip.y}px`, 
+          style={{
+            top: `${tooltip.y}px`,
             left: `92px`,
-            transform: 'translateY(-50%)'
+            transform: "translateY(-50%)",
           }}
         >
           {tooltip.label}

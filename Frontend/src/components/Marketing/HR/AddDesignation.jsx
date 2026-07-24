@@ -282,7 +282,7 @@ const AddDesignation = () => {
   };
 
   return (
-    <div className="h-full w-full flex flex-col px-[0.9vw] py-[0.7vw] overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm h-full w-full flex flex-col p-[0.9vw] overflow-hidden">
       {/* Header */}
       <div className="mb-[0.7vw] flex items-center justify-between">
         <div>
@@ -359,11 +359,13 @@ const AddDesignation = () => {
 
         <div className="flex-1 overflow-auto divide-y divide-gray-200">
           {loading ? (
-            <div className="px-[0.9vw] py-[2vw] text-center">
-              <div className="inline-block w-[1.7vw] h-[1.7vw] border-[0.2vw] border-gray-300 border-t-gray-700 rounded-full animate-spin" />
-              <p className="text-gray-600 mt-[0.55vw] text-[0.8vw]">
-                Loading designations...
-              </p>
+            <div className="p-3 space-y-2.5 animate-pulse">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-10 bg-gray-100 rounded-lg w-full flex items-center justify-between px-3">
+                  <div className="h-4 bg-gray-200 rounded w-1/3" />
+                  <div className="h-6 bg-gray-200 rounded w-16" />
+                </div>
+              ))}
             </div>
           ) : filteredDesignations.length > 0 ? (
             filteredDesignations.map((designation, index) => (

@@ -438,7 +438,7 @@ const Quotes = () => {
   const handleNext = () => setCurrentPage((prev) => Math.min(prev + 1, totalPages));
 
   return (
-    <>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
       {/* Header bar */}
       <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
         <div className="flex items-center gap-[0.5vw]">
@@ -466,8 +466,14 @@ const Quotes = () => {
       {/* Content area */}
       <div className="flex-1 min-h-0 overflow-auto p-[0.8vw]">
         {loading ? (
-          <div className="flex items-center justify-center h-full min-h-[400px]">
-            <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+                <div className="h-32 bg-gray-200 rounded-lg w-full" />
+                <div className="h-4 bg-gray-200 rounded w-2/3" />
+                <div className="h-3 bg-gray-100 rounded w-1/3" />
+              </div>
+            ))}
           </div>
         ) : filteredQuotes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
@@ -865,7 +871,7 @@ const Quotes = () => {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

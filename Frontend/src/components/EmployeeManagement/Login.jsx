@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
+import axios from "axios";
 import { setUser } from "../../redux/slices/userslice";
 import { Shield, Eye, EyeOff, User } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import logo from "../../assets/Fisto Logo.png";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+// System designations with built-in sidebar defaults
+const SYSTEM_DESIGNATIONS = [
+  "Admin", "Management", "Digital Marketing", "Marketing",
+  "Digital Marketing & HR", "HR", "Project Head", "SBU",
+  "Software Developer", "UI/UX", "3D", "Intern", "Developer"
+];
 
 
 const LoginPage = () => {
@@ -87,71 +97,73 @@ const LoginPage = () => {
   };
 
 
-  // Function to navigate based on user role
-  const navigateByRole = (userData) => {
+  // Resolve the route for a known system designation
+  const getRouteForRole = (userData) => {
     const role =
       userData.employeementType === "Intern"
         ? userData.employeementType
         : userData.designation;
 
-
-    console.log("Navigating based on role:", role);
-
-
     switch (role?.trim()) {
       case "Digital Marketing":
-        navigate("/marketing/dashboard");
-        break;
-
-
       case "Digital Marketing & HR":
-        navigate("/marketing/dashboard");
-        break;
-
-
+        return "/marketing/dashboard";
       case "Project Head":
-        navigate("/projectHead/dashboard");
-        break;
-
-
+        return "/projectHead/dashboard";
       case "Admin":
-        navigate("/admin/dashboard");
-        break;
-
-
+        return "/admin/dashboard";
       case "Intern":
-        navigate("/intern/dailyReport");
-        break;
-
-
+        return "/intern/dailyReport";
       case "3D":
-        navigate("/threeD/dashboard");
-        break;
-
-
+        return "/threeD/dashboard";
       case "Management":
-        navigate("/management/dashboard");
-        break;
-
-
+        return "/management/dashboard";
       case "Software Developer":
-        navigate("/softwareDeveloper/dashboard");
-        break;
-
-
+        return "/softwareDeveloper/dashboard";
       case "UI/UX":
-        navigate("/designer/dashboard");
-        break;
-
+        return "/designer/dashboard";
       case "SBU":
-        navigate("/sbu/dashboard");
-        break;
-
-
+        return "/sbu/dashboard";
       default:
-        navigate("/management");
-        break;
+        return "/dashboard";
     }
+  };
+
+  // Check role-access before navigating — unknown/unconfigured → /welcome
+  const checkAndNavigate = async (userData) => {
+    const designation = (userData.designation || "").trim();
+    const isSystemDesignation = SYSTEM_DESIGNATIONS.some(
+      (k) => k.toLowerCase() === designation.toLowerCase()
+    );
+
+    // System designations always go to their normal route
+    if (isSystemDesignation) {
+      navigate(getRouteForRole(userData));
+      return;
+    }
+
+    // Unknown designation — check if admin has configured it
+    try {
+      const res = await axios.get(`${API_BASE_URL}/role-access/my-permissions`, {
+        params: { designation }
+      });
+      const { allowedPaths } = res.data || {};
+      if (Array.isArray(allowedPaths) && allowedPaths.length > 0) {
+        // Configured with tabs → go to dashboard
+        navigate("/dashboard");
+      } else {
+        // Not configured yet → go to welcome page (standalone, no sidebar)
+        navigate("/welcome");
+      }
+    } catch {
+      // On error, fallback to welcome to be safe
+      navigate("/welcome");
+    }
+  };
+
+  // Keep navigateByRole as a wrapper for backward compat (used in checkExistingSession)
+  const navigateByRole = (userData) => {
+    checkAndNavigate(userData);
   };
 
 
@@ -247,6 +259,7 @@ const LoginPage = () => {
         const userData = {
           employeeName: result.data.employeeName,
           userName: result.data.userName,
+          employee_id: result.data.userName, // userName IS the employee_id (e.g. FST01725)
           emailOfficial: result.data.emailOfficial,
           designation: result.data.designation,
           teamHead: result.data.teamHead,
@@ -307,10 +320,18 @@ const LoginPage = () => {
   // Show loading screen while checking authentication
   if (isCheckingAuth) {
     return (
-      <div className="w-full h-screen flex items-center justify-center bg-gradient-to-br from-black via-black to-black">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-white text-lg">Loading...</p>
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-zinc-900 to-black text-white relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30vw] h-[30vw] bg-indigo-600/15 rounded-full blur-[100px] pointer-events-none animate-pulse" />
+        <div className="relative z-10 flex flex-col items-center gap-[1.2vw] bg-white/5 backdrop-blur-xl border border-white/10 p-[2.5vw] rounded-3xl shadow-2xl">
+          <div className="relative p-[1vw] bg-white rounded-2xl shadow-lg">
+            <img src={logo} alt="Fisto Logo" className="h-[3.5vw] object-contain" />
+          </div>
+          <div className="flex items-center gap-[0.6vw] text-slate-300">
+            <div className="w-[1.2vw] h-[1.2vw] border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-[0.95vw] font-medium tracking-wide">
+              Preparing your workspace...
+            </span>
+          </div>
         </div>
       </div>
     );

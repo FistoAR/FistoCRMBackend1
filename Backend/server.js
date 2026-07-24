@@ -430,6 +430,7 @@ app.use("/api/projectLinks", ProjectLink);
 app.use("/api/drive", driveRoutes);
 app.use("/api/drive/access", driveAccess);
 app.use("/api/notes", OthersResource);
+app.use("/api/role-access", require("./Routes/RoleAccess"));
 
 
 
