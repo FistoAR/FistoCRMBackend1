@@ -59,10 +59,25 @@ const folderCache = {};
 
 async function getOrCreateSubfolder(folderName, parentFolderId = ROOT_FOLDER_ID) {
   const cacheKey = `${parentFolderId}_${folderName}`;
-  if (folderCache[cacheKey]) return folderCache[cacheKey];
+
+  if (folderCache[cacheKey]) {
+    try {
+      const check = await drive.files.get({
+        fileId: folderCache[cacheKey],
+        fields: "id, trashed",
+        supportsAllDrives: true,
+      });
+      if (check.data && !check.data.trashed) {
+        return folderCache[cacheKey];
+      }
+    } catch (e) {
+      // Folder was deleted or trashed, clear stale cache
+    }
+    delete folderCache[cacheKey];
+  }
 
   try {
-    // Search for existing folder
+    // Search for existing non-trashed folder
     const searchRes = await drive.files.list({
       q: `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
       fields: "files(id, name)",
@@ -92,6 +107,7 @@ async function getOrCreateSubfolder(folderName, parentFolderId = ROOT_FOLDER_ID)
     return folderId;
   } catch (err) {
     console.error(`Error in getOrCreateSubfolder for ${folderName}:`, err.message);
+    delete folderCache[cacheKey];
     return parentFolderId;
   }
 }
@@ -468,8 +484,151 @@ async function moveDriveFileToOccasion(fileIdOrUrl, newOccasion) {
   }
 }
 
+async function getOrCreateSubfolder(folderName, parentFolderId = ROOT_FOLDER_ID) {
+  const cacheKey = `${parentFolderId}_${folderName}`;
+  
+  if (folderCache[cacheKey]) {
+    try {
+      const check = await drive.files.get({
+        fileId: folderCache[cacheKey],
+        fields: "id, trashed",
+        supportsAllDrives: true,
+      });
+      if (check.data && !check.data.trashed) {
+        return folderCache[cacheKey];
+      }
+    } catch (e) {
+      // Folder was deleted or trashed, clear stale cache
+    }
+    delete folderCache[cacheKey];
+  }
+
+  try {
+    // Search for existing non-trashed folder
+    const searchRes = await drive.files.list({
+      q: `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: "files(id, name)",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    if (searchRes.data.files && searchRes.data.files.length > 0) {
+      const folderId = searchRes.data.files[0].id;
+      folderCache[cacheKey] = folderId;
+      return folderId;
+    }
+
+    // Create new subfolder
+    const folderRes = await drive.files.create({
+      resource: {
+        name: folderName,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentFolderId],
+      },
+      fields: "id, name",
+      supportsAllDrives: true,
+    });
+
+    const folderId = folderRes.data.id;
+    folderCache[cacheKey] = folderId;
+    return folderId;
+  } catch (err) {
+    console.error(`Error in getOrCreateSubfolder for ${folderName}:`, err.message);
+    delete folderCache[cacheKey];
+    return parentFolderId;
+  }
+}
+
+/**
+ * Uploads an employee document to Google Drive under 'Employee Documents' -> [docCategory] (e.g., 'Resume', 'Profiles', 'IDs', etc.)
+ * Returns persistent preview path containing Google Drive file ID (e.g., /api/drive/preview/${fileId}).
+ */
+async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docCategory = "others" }) {
+  const hasTokens = loadTokens();
+  if (!hasTokens) {
+    console.warn("⚠️ Drive Service: No Drive tokens loaded, falling back to local path.");
+    return { success: false, error: "No Drive tokens loaded" };
+  }
+
+  const categoryMap = {
+    resume: "Resume",
+    profiles: "Profiles",
+    ids: "IDs",
+    certificates: "Certificates",
+    offer_letters: "Offer Letters",
+    exit_docs: "Exit Docs",
+    others: "Others",
+  };
+
+  try {
+    // 1. Get or create master parent folder "Employee Documents" under ROOT_FOLDER_ID
+    let mainFolderId = await getOrCreateSubfolder("Employee Documents", ROOT_FOLDER_ID);
+
+    // 2. Get or create category subfolder inside "Employee Documents" (e.g. 'Resume', 'Profiles', 'IDs', 'Certificates', etc.)
+    const key = (docCategory || "others").trim().toLowerCase();
+    const categoryFolderName = categoryMap[key] || "Others";
+    let targetFolderId = await getOrCreateSubfolder(categoryFolderName, mainFolderId);
+
+    // 3. Upload file to Drive under category folder (with auto-retry if folder was deleted)
+    let fileRes;
+    try {
+      fileRes = await drive.files.create({
+        resource: {
+          name: originalname,
+          parents: [targetFolderId],
+        },
+        media: {
+          mimeType: mimetype,
+          body: fs.createReadStream(filePath),
+        },
+        fields: "id, name, mimeType, webViewLink",
+        supportsAllDrives: true,
+      });
+    } catch (createErr) {
+      console.warn("⚠️ Drive upload target folder failed, re-creating missing folder structure...", createErr.message);
+      delete folderCache[`${ROOT_FOLDER_ID}_Employee Documents`];
+      delete folderCache[`${mainFolderId}_${categoryFolderName}`];
+
+      mainFolderId = await getOrCreateSubfolder("Employee Documents", ROOT_FOLDER_ID);
+      targetFolderId = await getOrCreateSubfolder(categoryFolderName, mainFolderId);
+
+      fileRes = await drive.files.create({
+        resource: {
+          name: originalname,
+          parents: [targetFolderId],
+        },
+        media: {
+          mimeType: mimetype,
+          body: fs.createReadStream(filePath),
+        },
+        fields: "id, name, mimeType, webViewLink",
+        supportsAllDrives: true,
+      });
+    }
+
+    const fileId = fileRes.data.id;
+    const previewUrl = `/api/drive/preview/${fileId}`;
+
+    // Clean up local temp file after upload
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    return {
+      success: true,
+      fileId,
+      previewUrl,
+      webViewLink: fileRes.data.webViewLink,
+    };
+  } catch (error) {
+    console.error("❌ Drive Service Upload Error for Employee Doc:", error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   uploadToDrive,
+  uploadEmployeeDocToDrive,
   deleteFromDrive,
   getOrCreateSubfolder,
   organizeDriveFolders,

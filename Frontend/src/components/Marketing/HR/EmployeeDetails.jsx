@@ -378,12 +378,24 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
     }
   };
 
+  const resolveFileUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+      return url;
+    }
+    if (url.startsWith("/api/")) {
+      const base = (API_BASE_URL1 || API_BASE_URL || "").replace(/\/api\/?$/, "");
+      return `${base}${url}`;
+    }
+    return `${API_BASE_URL1 || API_BASE_URL || ""}${url}`;
+  };
+
   const renderEmployeeCell = (emp) => (
     <div className="flex items-center gap-[0.5vw]">
       <div className="w-[2.2vw] h-[2.2vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
         {emp.profile_url ? (
           <img
-            src={`${API_BASE_URL1}${emp.profile_url}`}
+            src={resolveFileUrl(emp.profile_url)}
             alt={emp.employee_name}
             className="w-full h-full object-cover"
             onError={(e) => {

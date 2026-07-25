@@ -19,7 +19,7 @@ const SalaryModal = ({
     designation: "",
     job_role: "",
     basic_salary: 0,
-    month: selectedMonthYear.month || new Date().getMonth() + 1,
+    month: selectedMonthYear?.month || new Date().getMonth() + 1,
     total_leave_days: 0,
     paid_leave_days: 0,
     incentive: 0,
@@ -56,12 +56,12 @@ const SalaryModal = ({
       console.log("📋 Current Employee Data:", currentEmployee);
       
       setFormData({
-        employee_id: currentEmployee.employeeId || currentEmployee.employee_id,
-        employee_name: currentEmployee.employeeName || currentEmployee.employee_name,
-        designation: currentEmployee.designation,
-        job_role: currentEmployee.jobRole || currentEmployee.job_role,
+        employee_id: currentEmployee.employeeId || currentEmployee.employee_id || "",
+        employee_name: currentEmployee.employeeName || currentEmployee.employee_name || "",
+        designation: currentEmployee.designation || "",
+        job_role: currentEmployee.jobRole || currentEmployee.job_role || "",
         basic_salary: currentEmployee.salaryData?.basicSalary || currentEmployee.basic_salary || 0,
-        month: selectedMonthYear.month || new Date().getMonth() + 1,
+        month: selectedMonthYear?.month || new Date().getMonth() + 1,
         // Fetch leave days from salaryData
         total_leave_days: currentEmployee.salaryData?.totalLeaveDays || currentEmployee.total_leave_days || 0,
         paid_leave_days: currentEmployee.salaryData?.paidLeaveDays || currentEmployee.paid_leave_days || 0,
@@ -88,13 +88,13 @@ const SalaryModal = ({
   };
 
   const calculateTotal = () => {
-    const year = selectedMonthYear.year || new Date().getFullYear();
-    const month = formData.month;
+    const year = selectedMonthYear?.year || new Date().getFullYear();
+    const month = formData.month || selectedMonthYear?.month || (new Date().getMonth() + 1);
 
     const totalDaysInMonth = new Date(year, month, 0).getDate();
     const sundays = getSundaysInMonth(month, year);
     const workingDays = totalDaysInMonth - sundays;
-    const perDaySalary = formData.basic_salary / workingDays;
+    const perDaySalary = workingDays > 0 ? (formData.basic_salary / workingDays) : 0;
 
     const unpaidLeaveDays = Math.max(
       0,
@@ -140,12 +140,12 @@ const SalaryModal = ({
 
   const handleSubmit = async () => {
     if (!formData.employee_id) {
-      showToast("Error", "Please select an employee");
+      if (showToast) showToast("Error", "Please select an employee");
       return;
     }
 
     if (formData.basic_salary <= 0) {
-      showToast("Error", "Please enter a valid basic salary");
+      if (showToast) showToast("Error", "Please enter a valid basic salary");
       return;
     }
 
@@ -170,7 +170,7 @@ const SalaryModal = ({
           },
           body: JSON.stringify({
             ...formData,
-            year: selectedMonthYear.year || new Date().getFullYear(),
+            year: selectedMonthYear?.year || new Date().getFullYear(),
             created_by: userName,
           }),
         }
@@ -178,7 +178,7 @@ const SalaryModal = ({
 
       const data = await response.json();
       if (data.success) {
-        showToast("Success", data.message);
+        if (showToast) showToast("Success", data.message || "Salary saved successfully");
         setShowSalaryModal(false);
         setCurrentEmployee(null);
 
@@ -187,11 +187,11 @@ const SalaryModal = ({
           onSalaryUpdated();
         }
       } else {
-        showToast("Error", data.error || "Failed to save salary");
+        if (showToast) showToast("Error", data.error || "Failed to save salary");
       }
     } catch (error) {
       console.error("Error saving salary:", error);
-      showToast("Error", "Failed to save salary");
+      if (showToast) showToast("Error", "Failed to save salary");
     }
   };
 
@@ -219,38 +219,33 @@ const SalaryModal = ({
             </button>
           </div>
 
-          {/* LEAVE INFO BOX - Between title and close button */}
-          {(currentEmployee?.salaryData?.totalLeaveDays > 0 || 
-            currentEmployee?.salaryData?.paidLeaveDays > 0 ||
-            formData.total_leave_days > 0 ||
-            formData.paid_leave_days > 0) && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-300 rounded-lg p-[0.8vw] flex items-center gap-[2vw]">
-              <div className="flex items-center gap-[0.4vw]">
-                <span className="text-[0.75vw] text-gray-600">
-                  Total Leave Days:
-                </span>
-                <span className="text-[0.9vw] font-semibold text-blue-700 bg-blue-100 px-[0.6vw] py-[0.2vw] rounded-md">
-                  {formData.total_leave_days || 0} days
-                </span>
-              </div>
-              <div className="flex items-center gap-[0.4vw]">
-                <span className="text-[0.75vw] text-gray-600">
-                  Paid Leave Days:
-                </span>
-                <span className="text-[0.9vw] font-semibold text-green-700 bg-green-100 px-[0.6vw] py-[0.2vw] rounded-md">
-                  {formData.paid_leave_days || 0} days
-                </span>
-              </div>
-              <div className="flex items-center gap-[0.4vw]">
-                <span className="text-[0.75vw] text-gray-600">
-                  Unpaid Leave:
-                </span>
-                <span className="text-[0.9vw] font-semibold text-orange-700 bg-orange-100 px-[0.6vw] py-[0.2vw] rounded-md">
-                  {Math.max(0, formData.total_leave_days - formData.paid_leave_days)} days
-                </span>
-              </div>
+          {/* LEAVE INFO BOX - Always visible */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-300 rounded-lg p-[0.8vw] flex items-center gap-[2vw]">
+            <div className="flex items-center gap-[0.4vw]">
+              <span className="text-[0.75vw] text-gray-600">
+                Total Leave Days:
+              </span>
+              <span className="text-[0.9vw] font-semibold text-blue-700 bg-blue-100 px-[0.6vw] py-[0.2vw] rounded-md">
+                {formData.total_leave_days || 0} days
+              </span>
             </div>
-          )}
+            <div className="flex items-center gap-[0.4vw]">
+              <span className="text-[0.75vw] text-gray-600">
+                Paid Leave Days:
+              </span>
+              <span className="text-[0.9vw] font-semibold text-green-700 bg-green-100 px-[0.6vw] py-[0.2vw] rounded-md">
+                {formData.paid_leave_days || 0} days
+              </span>
+            </div>
+            <div className="flex items-center gap-[0.4vw]">
+              <span className="text-[0.75vw] text-gray-600">
+                Unpaid Leave:
+              </span>
+              <span className="text-[0.9vw] font-semibold text-orange-700 bg-orange-100 px-[0.6vw] py-[0.2vw] rounded-md">
+                {Math.max(0, formData.total_leave_days - formData.paid_leave_days)} days
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-[1.2vw] space-y-[1.5vw]">
@@ -471,7 +466,7 @@ const SalaryModal = ({
           {/* Total Amount Display */}
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-[1vw]">
             <div className="flex flex-col gap-[0.5vw]">
-              <div className="grid grid-cols-3 gap-[1vw] text-[0.8vw] text-gray-700">
+              <div className="grid grid-cols-4 gap-[1vw] text-[0.8vw] text-gray-700">
                 <div>
                   Total Days:{" "}
                   <span className="font-semibold">
@@ -488,6 +483,18 @@ const SalaryModal = ({
                   Sundays:{" "}
                   <span className="font-semibold">
                     {salaryBreakdown.sundays}
+                  </span>
+                </div>
+                <div>
+                  Total Leave:{" "}
+                  <span className="font-semibold text-blue-700">
+                    {formData.total_leave_days || 0}
+                  </span>
+                </div>
+                <div>
+                  Paid Leave:{" "}
+                  <span className="font-semibold text-green-600">
+                    {formData.paid_leave_days || 0}
                   </span>
                 </div>
                 <div>

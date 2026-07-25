@@ -243,7 +243,7 @@ const AddEmployee = ({
       setCanEditEmployeeId(isCurrentlyIntern);
 
       if (editingEmployee.profile_url) {
-        setProfilePreview(`${API_URL1}${editingEmployee.profile_url}`);
+        setProfilePreview(resolveFileUrl(editingEmployee.profile_url));
       }
     } else {
       setFormData({
@@ -554,8 +554,20 @@ const AddEmployee = ({
     }
   };
 
+  const resolveFileUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+      return url;
+    }
+    if (url.startsWith("/api/")) {
+      const base = (API_URL1 || API_URL || "").replace(/\/api\/?$/, "");
+      return `${base}${url}`;
+    }
+    return `${API_URL1 || API_URL || ""}${url}`;
+  };
+
   const handleViewFile = (fileUrl) => {
-    setViewFileModal(`${API_URL1}${fileUrl}`);
+    setViewFileModal(resolveFileUrl(fileUrl));
   };
 
   const validateForm = () => {
