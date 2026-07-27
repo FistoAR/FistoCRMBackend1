@@ -117,13 +117,13 @@ const ALL_SYSTEM_TABS = [
     group: "Management",
     label: "Analytics",
     desc: "System Analytics & Overview",
-    path: "/analytics",
+    path: "/managementAnalytics",
   },
   {
     group: "Management",
     label: "Budget's",
     desc: "Budgets & Financial Overview",
-    path: "/management",
+    path: "/budgets",
   },
   {
     group: "Management",

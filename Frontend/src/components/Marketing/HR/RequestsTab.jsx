@@ -987,10 +987,7 @@ const RequestsTab = ({
                         {startIndex + index + 1}
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                        {renderEmployeeCell(
-                          req.employee_name,
-                          req.employee_id,
-                        )}
+                        {renderEmployeeCell(req)}
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
                         {formatDateTime(req.created_at)}

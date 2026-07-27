@@ -291,14 +291,14 @@ const getMenuConfig = () => ({
     },
     { path: "/quotes", icon: hrActivityIcon, label: "Quotes" },
     { path: "/maid", icon: hrActivityIcon, label: "Maid" },
+    { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
   ],
   projectHead: [{ path: "/workdone", icon: AddReportIcon, label: "Work Done" }],
   admin: [
     { path: "/followup", icon: CallsIcon, label: "Followup's" },
-    { path: "/analytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/management", icon: AddReportIcon, label: "Budget's" },
+    { path: "/managementAnalytics", icon: AnalyticsIcon, label: "Analytics" },
+    { path: "/budgets", icon: AddReportIcon, label: "Budget's" },
     { path: "/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
-    { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
   ],
   project: [
     { path: "/projectAnalytics", icon: AnalyticsIcon, label: "Analytics" },

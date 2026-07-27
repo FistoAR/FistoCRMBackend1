@@ -3,38 +3,32 @@ import { User } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL1;
 
-export const renderEmployeeCell = (data) => (
-  <div className="flex items-center gap-[0.5vw]">
-    <div className="w-[2.2vw] h-[2.2vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
-      {data.profile_url ? (
-        <img
-          src={`${API_BASE_URL}${data.profile_url}`}
-          alt={data.employee_name || data.employeeName}
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            e.target.style.display = "none";
-            e.target.nextSibling.style.display = "flex";
-          }}
-        />
-      ) : null}
-      <div
-        className={`w-full h-full items-center justify-center bg-blue-100 text-blue-600 flex ${
-          data.profile_url ? "hidden" : ""
-        }`}
-      >
-        <User size="1.2vw" />
+export const renderEmployeeCell = (data, empId) => {
+  const isObject = typeof data === "object" && data !== null;
+  const name = isObject
+    ? (data.employee_name || data.employeeName || data.employee_id || data.employeeId)
+    : data;
+  const id = isObject
+    ? (data.employee_id || data.employeeId)
+    : empId;
+  const profileUrl = isObject ? data.profile_url : null;
+
+  return (
+    <div className="flex items-center gap-[0.5vw]">
+   
+      <div>
+        <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
+          {name || "-"}
+        </div>
+        {id && (
+          <div className="text-[0.72vw] text-gray-500 leading-tight">
+            {id}
+          </div>
+        )}
       </div>
     </div>
-    <div>
-      <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
-        {data.employee_name || data.employeeName || data.employee_id || data.employeeId}
-      </div>
-      <div className="text-[0.72vw] text-gray-500 leading-tight">
-        {data.employee_id || data.employeeId}
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
 export const formatDate = (dateString) => {
   if (!dateString) return "-";
