@@ -52,7 +52,8 @@ app.use(
       "http://localhost:5174",
       "https://pspc32l5-5174.inc1.devtunnels.ms",
       "https://www.fist-o.com",
-      "https://fistocrmbackend1-2.onrender.com"
+      "https://fistocrmbackend1-2.onrender.com",
+      "https://fistocrmbackend1-1-n61p.onrender.com"
     ],
     credentials: true,
   })

@@ -1,24 +1,62 @@
 import React, { useState, useEffect } from "react";
 import { Calendar, ArrowLeft, Eye, User } from "lucide-react";
 import { MONTHS } from "./utils.jsx";
+import SalaryModal from "./SalaryModal.jsx";
+import Notification from "../../ToastProp.jsx";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const API_BASE_URL1 = import.meta.env.VITE_API_BASE_URL1;
 
 const SalaryCalculationTab = ({
-  loading,
-  setLoading,
-  selectedMonthYear,
-  setSelectedMonthYear,
-  handleViewEmployee,
-  showToast,
+  loading: externalLoading,
+  setLoading: externalSetLoading,
+  selectedMonthYear: externalSelectedMonthYear,
+  setSelectedMonthYear: externalSetSelectedMonthYear,
+  handleViewEmployee: externalHandleViewEmployee,
+  showToast: externalShowToast,
   refreshTrigger,
 }) => {
+  const [internalLoading, setInternalLoading] = useState(false);
+  const [internalSelectedMonthYear, setInternalSelectedMonthYear] = useState({
+    month: null,
+    year: null,
+  });
   const [salaryView, setSalaryView] = useState("months");
   const [employeeSalaries, setEmployeeSalaries] = useState([]);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [editingLeave, setEditingLeave] = useState({}); // Track which cell is being edited
   const [designation, setDesignation] = useState("");
+
+  // Modal & Toast States
+  const [showSalaryModal, setShowSalaryModal] = useState(false);
+  const [currentEmployee, setCurrentEmployee] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const loading = externalLoading !== undefined ? externalLoading : internalLoading;
+  const setLoading = externalSetLoading || setInternalLoading;
+
+  const selectedMonthYear =
+    externalSelectedMonthYear && (externalSelectedMonthYear.month || externalSelectedMonthYear.year)
+      ? externalSelectedMonthYear
+      : internalSelectedMonthYear;
+  const setSelectedMonthYear = externalSetSelectedMonthYear || setInternalSelectedMonthYear;
+
+  const triggerToast = (title, message) => {
+    if (externalShowToast) {
+      externalShowToast(title, message);
+    } else {
+      setToast({ title, message });
+      setTimeout(() => setToast(null), 5000);
+    }
+  };
+
+  const handleViewEmployeeClick = (emp) => {
+    if (externalHandleViewEmployee) {
+      externalHandleViewEmployee(emp);
+    }
+    setCurrentEmployee(emp);
+    setShowSalaryModal(true);
+  };
 
   // Get user designation from session
   useEffect(() => {
@@ -60,11 +98,11 @@ const SalaryCalculationTab = ({
         setSelectedMonthYear({ month, year });
         setSalaryView("employees");
       } else {
-        showToast("Error", "Failed to load employee salaries");
+        triggerToast("Error", "Failed to load employee salaries");
       }
     } catch (error) {
       console.error("Error loading employees:", error);
-      showToast("Error", "Failed to load employee salaries");
+      triggerToast("Error", "Failed to load employee salaries");
     } finally {
       setLoading(false);
     }
@@ -147,9 +185,9 @@ const SalaryCalculationTab = ({
 
       const data = await response.json();
       if (data.success) {
-        showToast("Success", "Leave data updated successfully");
+        triggerToast("Success", "Leave data updated successfully");
       } else {
-        showToast("Error", data.error || "Failed to update leave data");
+        triggerToast("Error", data.error || "Failed to update leave data");
         // Reload data on error
         loadEmployeesWithSalary(
           selectedMonthYear.month,
@@ -158,7 +196,7 @@ const SalaryCalculationTab = ({
       }
     } catch (error) {
       console.error("Error updating leave:", error);
-      showToast("Error", "Failed to update leave data");
+      triggerToast("Error", "Failed to update leave data");
       // Reload data on error
       loadEmployeesWithSalary(selectedMonthYear.month, selectedMonthYear.year);
     }
@@ -378,9 +416,15 @@ const SalaryCalculationTab = ({
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                             Paid Leave Days
                           </th>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                            View
+                          </th>
                         </>
                       ) : (
                         <>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                            Total Leave
+                          </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                             This Month Salary
                           </th>
@@ -395,9 +439,7 @@ const SalaryCalculationTab = ({
                     {employeeSalaries.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={
-                            designation === "Digital Marketing & HR" ? "7" : "7"
-                          }
+                          colSpan="8"
                           className="text-center py-[2vw] text-gray-500 text-[0.9vw]"
                         >
                           No employees found
@@ -469,9 +511,25 @@ const SalaryCalculationTab = ({
                                   className="w-[4vw] px-[0.4vw] py-[0.25vw] text-[0.8vw] border border-gray-300 rounded text-center focus:border-blue-500 focus:outline-none"
                                 />
                               </td>
+
+                              {/* View Button */}
+                              <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
+                                <button
+                                  onClick={() => handleViewEmployeeClick(emp)}
+                                  className="p-[0.4vw] hover:bg-blue-50 rounded-lg transition"
+                                  title="View Salary Details"
+                                >
+                                  <Eye size="1.2vw" className="text-blue-600" />
+                                </button>
+                              </td>
                             </>
                           ) : (
                             <>
+                              {/* Total Leave */}
+                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                                {emp.salaryData?.totalLeaveDays || 0}
+                              </td>
+
                               {/* This Month Salary */}
                               <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
                                 {emp.hasSalary ? (
@@ -488,8 +546,9 @@ const SalaryCalculationTab = ({
                               {/* View Button */}
                               <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
                                 <button
-                                  onClick={() => handleViewEmployee(emp)}
+                                  onClick={() => handleViewEmployeeClick(emp)}
                                   className="p-[0.4vw] hover:bg-blue-50 rounded-lg transition"
+                                  title="View Salary Details"
                                 >
                                   <Eye size="1.2vw" className="text-blue-600" />
                                 </button>
@@ -506,6 +565,28 @@ const SalaryCalculationTab = ({
           </div>
         </>
       )}
+
+      {toast && (
+        <Notification
+          title={toast.title}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      <SalaryModal
+        showSalaryModal={showSalaryModal}
+        setShowSalaryModal={setShowSalaryModal}
+        currentEmployee={currentEmployee}
+        setCurrentEmployee={setCurrentEmployee}
+        selectedMonthYear={selectedMonthYear}
+        showToast={triggerToast}
+        onSalaryUpdated={() => {
+          if (selectedMonthYear.month && selectedMonthYear.year) {
+            loadEmployeesWithSalary(selectedMonthYear.month, selectedMonthYear.year);
+          }
+        }}
+      />
     </div>
   );
 };
