@@ -33,19 +33,37 @@ const SalaryCalculationTab = ({
   // Tab State: "salary" | "reports"
   const [activeTab, setActiveTab] = useState("salary");
 
-  // Reports States
-  const [reportsEmployees, setReportsEmployees] = useState([]);
+  // Helper for previous completed month (e.g. Current = July 2026 -> "2026-06")
+  const getPreviousCompletedMonthYearString = () => {
+    const now = new Date();
+    let year = now.getFullYear();
+    let month = now.getMonth(); // 0 is Jan, prev month for Jan is 12 (Dec) of prev year
+    if (month === 0) {
+      month = 12;
+      year -= 1;
+    }
+    const monthStr = String(month).padStart(2, "0");
+    return `${year}-${monthStr}`;
+  };
+
+  const defaultFromDate = getPreviousCompletedMonthYearString();
+
+  // Reports Employee Lists
+  const [reportsActiveEmployees, setReportsActiveEmployees] = useState([]);
+  const [reportsInactiveEmployees, setReportsInactiveEmployees] = useState([]);
   const [reportsData, setReportsData] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
 
-  // Reports Filters
-  const [selectedEmpFilter, setSelectedEmpFilter] = useState("all");
+  // Reports Filter Inputs
+  const [selectedActiveEmpFilter, setSelectedActiveEmpFilter] = useState("all");
+  const [selectedInactiveEmpFilter, setSelectedInactiveEmpFilter] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  // Applied Filters State (Persisted across pagination)
+  // Applied Filters State (Persisted across pagination and exports)
   const [appliedFilters, setAppliedFilters] = useState({
-    employeeId: "all",
+    activeEmp: "all",
+    inactiveEmp: "all",
     fromDate: "",
     toDate: "",
   });
@@ -74,11 +92,18 @@ const SalaryCalculationTab = ({
     return `${day} ${month} ${year} ${strHours}:${minutes} ${ampm}`;
   };
 
-  const getFilterDisplayInfo = (filters, employeesList) => {
-    let empDisplay = "All Employees";
-    if (filters.employeeId && filters.employeeId !== "all") {
-      const foundEmp = employeesList.find((e) => e.employee_id === filters.employeeId);
-      empDisplay = foundEmp ? `${foundEmp.employee_name} (${foundEmp.employee_id})` : filters.employeeId;
+  const getFilterDisplayInfo = (filters, activeList, inactiveList) => {
+    let empDisplay = "All Active Employees";
+    if (filters.activeEmp && filters.activeEmp !== "all") {
+      const foundEmp = activeList.find((e) => e.employee_id === filters.activeEmp);
+      empDisplay = foundEmp
+        ? `${foundEmp.employee_name} (${foundEmp.employee_id})`
+        : filters.activeEmp;
+    } else if (filters.inactiveEmp && filters.inactiveEmp !== "all") {
+      const foundEmp = inactiveList.find((e) => e.employee_id === filters.inactiveEmp);
+      empDisplay = foundEmp
+        ? `${foundEmp.employee_name} (${foundEmp.employee_id}) (Inactive)`
+        : `${filters.inactiveEmp} (Inactive)`;
     }
 
     const formatMonthYearStr = (ymStr) => {
@@ -126,26 +151,40 @@ const SalaryCalculationTab = ({
     const logoImg = await loadImage(fistoLogo);
     const doc = new jsPDF("p", "pt", "a4");
     const timestampStr = getFormattedCurrentTimestamp();
-    const filterInfo = getFilterDisplayInfo(appliedFilters, reportsEmployees);
+    const filterInfo = getFilterDisplayInfo(appliedFilters, reportsActiveEmployees, reportsInactiveEmployees);
 
     const head = [
       ["S.No", "Employee ID", "Employee Name", "Designation", "Job Role", "Month", "Total Leave", "Salary"]
     ];
 
-    const body = reportsData.map((emp, index) => [
-      index + 1,
-      emp.employeeId || "-",
-      emp.employeeName || "-",
-      emp.designation || "-",
-      emp.jobRole || "On Role",
-      emp.month && emp.year
-        ? `${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}`
-        : "-",
-      emp.salaryData?.totalLeaveDays ?? 0,
-      emp.hasSalary && emp.salaryData?.totalSalary !== undefined
-        ? `Rs. ${emp.salaryData.totalSalary.toLocaleString("en-IN")}`
-        : "Not Added"
-    ]);
+    let pdfSNo = 1;
+    const body = [];
+
+    reportsData.forEach((emp, index) => {
+      if (index > 0) {
+        const prev = reportsData[index - 1];
+        const prevKey = `${prev.month}-${prev.year}`;
+        const currKey = `${emp.month}-${emp.year}`;
+        if (prevKey !== currKey) {
+          body.push(["", "", "", "", "", "", "", ""]);
+        }
+      }
+
+      body.push([
+        pdfSNo++,
+        emp.employeeId || "-",
+        emp.employeeName || "-",
+        emp.designation || "-",
+        emp.jobRole || "On Role",
+        emp.month && emp.year
+          ? `${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}`
+          : "-",
+        emp.salaryData?.totalLeaveDays ?? 0,
+        emp.hasSalary && emp.salaryData?.totalSalary !== undefined
+          ? `Rs. ${emp.salaryData.totalSalary.toLocaleString("en-IN")}`
+          : "Not Added"
+      ]);
+    });
 
     autoTable(doc, {
       head: head,
@@ -266,7 +305,7 @@ const SalaryCalculationTab = ({
     }
 
     const timestampStr = getFormattedCurrentTimestamp();
-    const filterInfo = getFilterDisplayInfo(appliedFilters, reportsEmployees);
+    const filterInfo = getFilterDisplayInfo(appliedFilters, reportsActiveEmployees, reportsInactiveEmployees);
 
     let csvContent = `Salary Report\n\n`;
     csvContent += `Generated On: ${timestampStr}\n\n`;
@@ -285,8 +324,18 @@ const SalaryCalculationTab = ({
 
     csvContent += `S.No,Employee ID,Employee Name,Designation,Job Role,Month,Total Leave,Salary\n`;
 
+    let csvSNo = 1;
     reportsData.forEach((emp, index) => {
-      const sNo = index + 1;
+      if (index > 0) {
+        const prev = reportsData[index - 1];
+        const prevKey = `${prev.month}-${prev.year}`;
+        const currKey = `${emp.month}-${emp.year}`;
+        if (prevKey !== currKey) {
+          csvContent += `,,,,,,,\n`;
+        }
+      }
+
+      const sNo = csvSNo++;
       const empId = `"${(emp.employeeId || "").replace(/"/g, '""')}"`;
       const empName = `"${(emp.employeeName || "").replace(/"/g, '""')}"`;
       const designation = `"${(emp.designation || "").replace(/"/g, '""')}"`;
@@ -359,16 +408,23 @@ const SalaryCalculationTab = ({
     }
   }, []);
 
-  // Fetch employees list for Reports filter dropdown
+  // Fetch active and inactive employee lists for Reports dropdowns
   const fetchReportsEmployees = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/hr/employees`);
-      if (response.ok) {
-        const data = await response.json();
-        setReportsEmployees(data.employees || []);
+      const [actRes, inactRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/hr/employees?status=Active`),
+        fetch(`${API_BASE_URL}/hr/employees?status=Inactive`),
+      ]);
+      if (actRes.ok) {
+        const actData = await actRes.json();
+        setReportsActiveEmployees(actData.employees || []);
+      }
+      if (inactRes.ok) {
+        const inactData = await inactRes.json();
+        setReportsInactiveEmployees(inactData.employees || []);
       }
     } catch (err) {
-      console.error("Error fetching employees list:", err);
+      console.error("Error fetching employees lists:", err);
     }
   };
 
@@ -377,9 +433,18 @@ const SalaryCalculationTab = ({
     setReportsLoading(true);
     try {
       const queryParams = new URLSearchParams();
-      if (filters.employeeId && filters.employeeId !== "all") {
-        queryParams.append("employeeId", filters.employeeId);
+
+      if (filters.activeEmp && filters.activeEmp !== "all") {
+        queryParams.append("employeeId", filters.activeEmp);
+        queryParams.append("status", "Active");
+      } else if (filters.inactiveEmp && filters.inactiveEmp !== "all") {
+        queryParams.append("employeeId", filters.inactiveEmp);
+        queryParams.append("status", "Inactive");
+      } else {
+        queryParams.append("employeeId", "all");
+        queryParams.append("status", "Active");
       }
+
       if (filters.fromDate) {
         const [fYear, fMonth] = filters.fromDate.split("-");
         queryParams.append("fromYear", fYear);
@@ -411,33 +476,43 @@ const SalaryCalculationTab = ({
   useEffect(() => {
     if (activeTab === "reports") {
       fetchReportsEmployees();
-      fetchReportsData(appliedFilters);
     }
   }, [activeTab]);
 
-  const handleApplyFilter = () => {
-    const newFilters = {
-      employeeId: selectedEmpFilter,
-      fromDate,
-      toDate,
-    };
-    setAppliedFilters(newFilters);
-    setCurrentPage(1);
-    fetchReportsData(newFilters);
+  // Auto-refresh reports data whenever any filter input changes
+  useEffect(() => {
+    if (activeTab === "reports") {
+      const newFilters = {
+        activeEmp: selectedActiveEmpFilter,
+        inactiveEmp: selectedInactiveEmpFilter,
+        fromDate,
+        toDate,
+      };
+      setAppliedFilters(newFilters);
+      setCurrentPage(1);
+      fetchReportsData(newFilters);
+    }
+  }, [selectedActiveEmpFilter, selectedInactiveEmpFilter, fromDate, toDate, activeTab]);
+
+  const handleActiveEmpChange = (val) => {
+    setSelectedActiveEmpFilter(val);
+    if (val !== "all") {
+      setSelectedInactiveEmpFilter("all");
+    }
+  };
+
+  const handleInactiveEmpChange = (val) => {
+    setSelectedInactiveEmpFilter(val);
+    if (val !== "all") {
+      setSelectedActiveEmpFilter("all");
+    }
   };
 
   const handleResetFilter = () => {
-    setSelectedEmpFilter("all");
+    setSelectedActiveEmpFilter("all");
+    setSelectedInactiveEmpFilter("all");
     setFromDate("");
     setToDate("");
-    const resetFilters = {
-      employeeId: "all",
-      fromDate: "",
-      toDate: "",
-    };
-    setAppliedFilters(resetFilters);
-    setCurrentPage(1);
-    fetchReportsData(resetFilters);
   };
 
   // Pagination Math for Reports
@@ -983,18 +1058,47 @@ const SalaryCalculationTab = ({
           {/* Filters Section */}
           <div className="p-[0.8vw] border-b border-gray-200 bg-gray-50/50 flex flex-wrap items-end justify-between gap-[0.8vw] flex-shrink-0">
             <div className="flex flex-wrap items-end gap-[0.8vw]">
-              {/* Employee Filter */}
+              {/* Active Employee Dropdown */}
               <div className="flex flex-col gap-[0.2vw]">
                 <label className="text-[0.75vw] font-medium text-gray-700">
-                  Employee
+                  Active Employee
                 </label>
                 <select
-                  value={selectedEmpFilter}
-                  onChange={(e) => setSelectedEmpFilter(e.target.value)}
-                  className="w-[14vw] px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={selectedActiveEmpFilter}
+                  disabled={selectedInactiveEmpFilter !== "all"}
+                  onChange={(e) => handleActiveEmpChange(e.target.value)}
+                  className={`w-[13vw] px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    selectedInactiveEmpFilter !== "all"
+                      ? "bg-gray-100 cursor-not-allowed opacity-60"
+                      : ""
+                  }`}
                 >
-                  <option value="all">All Employees</option>
-                  {reportsEmployees.map((emp) => (
+                  <option value="all">All Active Employees</option>
+                  {reportsActiveEmployees.map((emp) => (
+                    <option key={emp.employee_id} value={emp.employee_id}>
+                      {emp.employee_name} ({emp.employee_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Inactive Employee Dropdown */}
+              <div className="flex flex-col gap-[0.2vw]">
+                <label className="text-[0.75vw] font-medium text-gray-700">
+                  Inactive Employee
+                </label>
+                <select
+                  value={selectedInactiveEmpFilter}
+                  disabled={selectedActiveEmpFilter !== "all"}
+                  onChange={(e) => handleInactiveEmpChange(e.target.value)}
+                  className={`w-[13vw] px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    selectedActiveEmpFilter !== "all"
+                      ? "bg-gray-100 cursor-not-allowed opacity-60"
+                      : ""
+                  }`}
+                >
+                  <option value="all">All Inactive Employees</option>
+                  {reportsInactiveEmployees.map((emp) => (
                     <option key={emp.employee_id} value={emp.employee_id}>
                       {emp.employee_name} ({emp.employee_id})
                     </option>
@@ -1039,16 +1143,7 @@ const SalaryCalculationTab = ({
                 />
               </div>
 
-              {/* Search / Apply Button */}
-              <button
-                onClick={handleApplyFilter}
-                className="flex items-center gap-[0.3vw] px-[1vw] py-[0.4vw] bg-blue-600 hover:bg-blue-700 text-white font-medium text-[0.8vw] rounded-lg transition-colors shadow-xs cursor-pointer"
-              >
-                <Search size="0.9vw" />
-                Search
-              </button>
-
-              {/* Reset Button */}
+              {/* Reset Button (Search button removed; auto-filters on change) */}
               <button
                 onClick={handleResetFilter}
                 className="flex items-center gap-[0.3vw] px-[1vw] py-[0.4vw] bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium text-[0.8vw] rounded-lg transition-colors cursor-pointer"

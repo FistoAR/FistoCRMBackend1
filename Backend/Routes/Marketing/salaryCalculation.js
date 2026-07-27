@@ -718,7 +718,7 @@ router.post("/update-leave", async (req, res) => {
 router.get("/reports", async (req, res) => {
   console.log("✅ GET SALARY REPORTS HIT!");
   try {
-    const { employeeId, fromMonth, fromYear, toMonth, toYear } = req.query;
+    const { employeeId, fromMonth, fromYear, toMonth, toYear, status } = req.query;
 
     let joinOnConditions = [];
     let joinQueryParams = [];
@@ -741,7 +741,16 @@ router.get("/reports", async (req, res) => {
       ? `AND ${joinOnConditions.join(" AND ")}` 
       : "";
 
-    let whereClause = "WHERE ed.working_status = 'Active'";
+    let whereClause = "WHERE 1=1";
+    if (status === "Inactive") {
+      whereClause += " AND ed.working_status != 'Active'";
+    } else if (status === "all") {
+      // No working_status filter
+    } else {
+      // Default: Active
+      whereClause += " AND ed.working_status = 'Active'";
+    }
+
     let whereQueryParams = [];
 
     if (employeeId && employeeId !== "all") {
@@ -773,7 +782,7 @@ router.get("/reports", async (req, res) => {
       FROM employees_details ed
       INNER JOIN salary_calculation sc ON ed.employee_id = sc.employee_id ${joinClause}
       ${whereClause}
-      ORDER BY ed.employee_name ASC, sc.year DESC, sc.month DESC
+      ORDER BY sc.year DESC, sc.month DESC, ed.employee_name ASC
     `;
 
     const allParams = [...joinQueryParams, ...whereQueryParams];
