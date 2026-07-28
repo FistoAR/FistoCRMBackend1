@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Edit2, Trash2, ChevronLeft, ChevronRight, Plus, Calendar, X, ArrowUpDown, ArrowUp, ArrowDown, Download } from "lucide-react";
+import { Edit2, Trash2, ChevronLeft, ChevronRight, Plus, Calendar, X, ArrowUpDown, ArrowUp, ArrowDown, Download, Bell, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useNotification } from "../../NotificationContext";
 import { useConfirm } from "../../ConfirmContext";
 import AddEmployeeModal from "./AddEmployeeModal";
@@ -7,9 +7,56 @@ import SearchIcon from "../../../assets/Marketing/search.webp";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const  API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const API_BASE_URL1 = import.meta.env.VITE_API_BASE_URL1;
 const RECORDS_PER_PAGE = 9;
+
+export const getPendingExitDocuments = (employee) => {
+  if (!employee) return [];
+
+  let exitDocs = employee.exit_docs_url || employee.exitDocsUrl || {};
+  if (typeof exitDocs === "string") {
+    try {
+      exitDocs = JSON.parse(exitDocs);
+    } catch (e) {
+      exitDocs = {};
+    }
+  }
+
+  const isDocPresent = (docObj) => {
+    if (!docObj) return false;
+    if (typeof docObj === "string") return docObj.trim() !== "";
+    if (typeof docObj === "object") {
+      return Boolean(docObj.path || docObj.url || docObj.filename || Object.keys(docObj).length > 0);
+    }
+    return false;
+  };
+
+  const pending = [];
+
+  const hasPaySlip = isDocPresent(exitDocs.paySlip) || isDocPresent(exitDocs.pay_slip) || isDocPresent(exitDocs.payslip);
+  if (!hasPaySlip) {
+    pending.push("Pay Slip");
+  }
+
+  const hasExperienceLetter = isDocPresent(exitDocs.experienceLetter) || isDocPresent(exitDocs.experience_letter);
+  if (!hasExperienceLetter) {
+    pending.push("Experience Letter");
+  }
+
+  const hasRelievingLetter = isDocPresent(exitDocs.relievingLetter) || isDocPresent(exitDocs.relieving_letter);
+  if (!hasRelievingLetter) {
+    pending.push("Relieving Letter");
+  }
+
+  return pending;
+};
+
+export const hasPendingExitDocuments = (employee) => {
+  if (!employee) return false;
+  const status = employee.working_status || employee.workingStatus;
+  return status === "Relieved" && getPendingExitDocuments(employee).length > 0;
+};
 
 const EmployeeOverview = () => {
   const { notify } = useNotification();
@@ -29,7 +76,11 @@ const EmployeeOverview = () => {
   });
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [sortOrder, setSortOrder] = useState("asc"); // "none", "asc", "desc"
+  const [showNotificationPopup, setShowNotificationPopup] = useState(false);
+  const [highlightedEmpId, setHighlightedEmpId] = useState(null);
+
   const dateFilterRef = useRef(null);
+  const notificationRef = useRef(null);
 
   useEffect(() => {
     fetchEmployees();
@@ -40,22 +91,25 @@ const EmployeeOverview = () => {
     setCurrentPage(1);
   }, [searchTerm, dateFilter, sortOrder]);
 
-  // Close tooltip when clicking outside
+  // Close popups when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dateFilterRef.current && !dateFilterRef.current.contains(event.target)) {
         setShowDateFilter(false);
       }
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setShowNotificationPopup(false);
+      }
     };
 
-    if (showDateFilter) {
+    if (showDateFilter || showNotificationPopup) {
       document.addEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [showDateFilter]);
+  }, [showDateFilter, showNotificationPopup]);
 
   const fetchEmployees = async () => {
     try {
@@ -390,6 +444,34 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
     return `${API_BASE_URL1 || API_BASE_URL || ""}${url}`;
   };
 
+  const pendingEmployees = employees.filter((emp) => hasPendingExitDocuments(emp));
+  const pendingCount = pendingEmployees.length;
+
+  const handleSelectPendingEmployee = (emp) => {
+    setShowNotificationPopup(false);
+
+    const empIndex = sortedEmployees.findIndex((e) => e.employee_id === emp.employee_id);
+    if (empIndex !== -1) {
+      if (!hasActiveFilters) {
+        const page = Math.floor(empIndex / RECORDS_PER_PAGE) + 1;
+        setCurrentPage(page);
+      }
+
+      setHighlightedEmpId(emp.employee_id);
+
+      setTimeout(() => {
+        const rowElem = document.getElementById(`emp-row-${emp.employee_id}`);
+        if (rowElem) {
+          rowElem.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 150);
+
+      setTimeout(() => {
+        setHighlightedEmpId(null);
+      }, 3500);
+    }
+  };
+
   const renderEmployeeCell = (emp) => (
     <div className="flex items-center gap-[0.5vw]">
       <div className="w-[2.2vw] h-[2.2vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
@@ -458,6 +540,93 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
           <span className="text-[0.85vw] text-gray-500">
             ({filteredEmployees.length})
           </span>
+
+          {/* Notification Icon Button - Placed next to All Employees */}
+          <div className="relative ml-[0.2vw]" ref={notificationRef}>
+            <button
+              onClick={() => setShowNotificationPopup(!showNotificationPopup)}
+              className="relative p-[0.45vw] bg-gray-200 hover:bg-gray-300 rounded-full text-gray-700 transition flex items-center justify-center cursor-pointer"
+              title="Pending Exit Documents"
+            >
+              <Bell size={"1.1vw"} />
+              {pendingCount > 0 && (
+                <span className="absolute -top-[0.2vw] -right-[0.2vw] bg-red-600 text-white rounded-full min-w-[1.2vw] h-[1.2vw] px-[0.2vw] flex items-center justify-center text-[0.65vw] font-bold shadow-sm animate-pulse">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown Popup */}
+            {showNotificationPopup && (
+              <div className="absolute left-0 top-[calc(100%+0.5vw)] bg-white rounded-2xl shadow-2xl border border-gray-200/80 w-[24vw] z-50 overflow-hidden transition-all duration-200">
+                {/* Top Blue Accent Line */}
+                <div className="h-[3.5px] bg-blue-600 w-full" />
+
+                <div className="p-[0.9vw]">
+                  {/* Header */}
+                  <div className="flex items-center justify-between pb-[0.6vw] mb-[0.6vw] border-b border-gray-100">
+                    <div className="flex items-center gap-[0.4vw]">
+                      <Bell size={"1.1vw"} className="text-amber-500 fill-amber-500/20" />
+                      <span className="text-[0.9vw] font-bold text-gray-800">
+                        Pending Exit Documents
+                      </span>
+                      <span className="bg-red-100 text-red-700 text-[0.7vw] font-bold px-[0.4vw] py-[0.1vw] rounded-full">
+                        {pendingCount}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setShowNotificationPopup(false)}
+                      className="p-[0.2vw] hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition"
+                    >
+                      <X size={"0.9vw"} />
+                    </button>
+                  </div>
+
+                  {pendingCount === 0 ? (
+                    <div className="py-[1.5vw] flex flex-col items-center justify-center text-center">
+                      <CheckCircle2 size={"2vw"} className="text-green-500 mb-[0.4vw]" />
+                      <p className="text-[0.85vw] font-medium text-gray-700">No pending documents</p>
+                      <p className="text-[0.7vw] text-gray-400 mt-[0.1vw]">All relieved employees have submitted exit documents</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[18vw] overflow-y-auto pr-[0.2vw] space-y-[0.6vw]">
+                      {pendingEmployees.map((emp) => {
+                        const missingDocs = getPendingExitDocuments(emp);
+                        return (
+                          <div
+                            key={emp.employee_id}
+                            onClick={() => handleSelectPendingEmployee(emp)}
+                            className="group relative bg-gray-50/80 hover:bg-gray-100/90 border border-gray-200/70 rounded-xl p-[0.65vw] transition-all duration-200 cursor-pointer shadow-2xs flex items-start gap-[0.6vw] text-left"
+                          >
+                            {/* Left Round Icon Avatar */}
+                            <div className="w-[2vw] h-[2vw] rounded-full bg-amber-100/70 border border-amber-200/60 flex items-center justify-center flex-shrink-0 mt-[0.1vw]">
+                              <Bell size={"1vw"} className="text-amber-600" />
+                            </div>
+
+                            {/* Card Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-[0.3vw] mb-[0.1vw]">
+                                <span className="text-[0.82vw] font-bold text-gray-900 truncate" title={emp.employee_name}>
+                                  {emp.employee_name}
+                                </span>
+                                <span className="w-[0.45vw] h-[0.45vw] rounded-full bg-blue-600 flex-shrink-0" />
+                              </div>
+                              <div className="text-[0.7vw] text-gray-500 font-medium mb-[0.35vw]">
+                                {emp.employee_id}
+                              </div>
+                              <div className="bg-red-50/90 border border-red-200/60 rounded-lg p-[0.35vw] text-[0.7vw] font-medium text-red-600 leading-snug">
+                                {missingDocs.join(", ")}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex relative items-center gap-[0.5vw]">
           <img
@@ -472,7 +641,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-[2.1vw] pr-[0vw] py-[0.24vw] rounded-full text-[0.9vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500"
           />
-          
+
           {/* Date Filter Tooltip */}
           <div className="relative" ref={dateFilterRef}>
             <button
@@ -667,120 +836,151 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
         ) : (
         <div className="mx-[0.8vw] mb-[0.8vw] flex-1 min-h-0 border border-gray-300 rounded-xl overflow-auto bg-white">
             <table className="w-full border-collapse border border-gray-300">
-              <thead className="bg-[#E2EBFF] sticky top-0">
+              <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                 <tr>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[4%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     S.NO
                   </th>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[18%] px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Employee
                   </th>
                   {isAdmin && (
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="w-[9%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Password
                     </th>
                   )}
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[13%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Designation
                   </th>
                   <th 
-                    className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
+                    className="w-[11%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
                     onClick={toggleSort}
                   >
                     <div className="flex items-center justify-center gap-[0.3vw]">
                       <span>Date of Joining</span>
-                      <span > {getSortIcon()}</span>
+                      <span>{getSortIcon()}</span>
                     </div>
                   </th>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[18%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Email
                   </th>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[11%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Employment Type
                   </th>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[13%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Status
                   </th>
-                  <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[7%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Action
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {displayedEmployees.map((emp, index) => (
-                  <tr
-                    key={emp.employee_id || index}
-                    className="hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
-                      {displayStartIndex + index + 1}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                      {renderEmployeeCell(emp)}
-                    </td>
-                    {isAdmin && (
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-mono">
-                        {emp.password || "-"}
+                {displayedEmployees.map((emp, index) => {
+                  const isPendingRelieved = hasPendingExitDocuments(emp);
+                  const isHighlighted = highlightedEmpId === emp.employee_id;
+
+                  return (
+                    <tr
+                      key={emp.employee_id || index}
+                      id={`emp-row-${emp.employee_id}`}
+                      className={`transition-colors duration-200 ${
+                        isHighlighted
+                          ? "border-2 border-yellow-400 bg-yellow-100/80"
+                          : isPendingRelieved
+                          ? "border-2 border-[#EF4444] bg-red-100/50 hover:bg-red-100"
+                          : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <td className="px-[0.5vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
+                        {displayStartIndex + index + 1}
                       </td>
-                    )}
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                      {emp.designation}
-                      {emp.team_head && (
-                        <span className="ml-[0.3vw] text-[0.7vw] bg-purple-100 text-purple-700 px-[0.4vw] py-[0.1vw] rounded-full">
-                          Team Head
-                        </span>
+                      <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                        {renderEmployeeCell(emp)}
+                      </td>
+                      {isAdmin && (
+                        <td className="px-[0.5vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-mono">
+                          {emp.password || "-"}
+                        </td>
                       )}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
-                      {emp.employment_type === "On Role" ? formatDate(emp.join_date) : formatDate(emp.intern_start_date)}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 truncate max-w-[12vw]">
-                      {emp.email_official || emp.email_personal}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                      <span
-                        className={`px-2 py-1 rounded-full text-[0.75vw] font-medium ${
-                          emp.employment_type === "On Role"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-blue-100 text-blue-800"
-                        }`}
-                      >
-                        {emp.employment_type}
-                      </span>
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                      <span
-                        className={`px-2 py-1 rounded-full text-[0.75vw] font-medium ${
-                          emp.working_status === "Active"
-                            ? "bg-green-100 text-green-800"
-                            : emp.working_status === "On Leave"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-orange-100 text-orange-800"
-                        }`}
-                      >
-                        {emp.working_status}
-                      </span>
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                      <div className="flex items-center justify-center gap-[0.5vw]">
-                        <button
-                          onClick={() => handleEdit(emp)}
-                          className="p-[0.35vw] bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition cursor-pointer"
-                          title="Edit"
+                      <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 max-w-[10vw]">
+                        <div className="flex flex-wrap items-center gap-[0.3vw]">
+                          <span className="truncate" title={emp.designation}>{emp.designation}</span>
+                          {emp.team_head && (
+                            <span className="text-[0.65vw] bg-purple-100 text-purple-700 px-[0.35vw] py-[0.05vw] rounded-full whitespace-nowrap font-medium flex-shrink-0">
+                              Team Head
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
+                        {emp.employment_type === "On Role" ? formatDate(emp.join_date) : formatDate(emp.intern_start_date)}
+                      </td>
+                      <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 truncate max-w-[12vw]">
+                        {emp.email_official || emp.email_personal}
+                      </td>
+                      <td className="px-[0.5vw] py-[0.56vw] border border-gray-300 text-center">
+                        <span
+                          className={`px-2 py-1 rounded-full text-[0.75vw] font-medium whitespace-nowrap ${
+                            emp.employment_type === "On Role"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
                         >
-                          <Edit2 size={"1vw"} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(emp.employee_id)}
-                          className="p-[0.35vw] bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition cursor-pointer"
-                          title="Delete"
-                        >
-                          <Trash2 size={"1vw"} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {emp.employment_type}
+                        </span>
+                      </td>
+                      <td className="px-[0.6vw] py-[0.56vw] border border-gray-300 text-center">
+                        {emp.working_status === "Relieved" ? (
+                          <div className="flex flex-col items-center justify-center gap-[4px]">
+                            <span className="px-2.5 py-1 rounded-full text-[0.75vw] font-medium bg-orange-100 text-orange-800 border border-orange-200 whitespace-nowrap">
+                              Relieved
+                            </span>
+                            {isPendingRelieved ? (
+                              <span className="px-2.5 py-1 rounded-full text-[0.75vw] font-medium bg-red-100 text-red-800 border border-red-200 whitespace-nowrap">
+                                Document Pending
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-[0.75vw] font-medium bg-green-100 text-green-800 border border-green-200 whitespace-nowrap">
+                                Documents Submitted
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[0.75vw] font-medium whitespace-nowrap ${
+                              emp.working_status === "Active"
+                                ? "bg-green-100 text-green-800"
+                                : emp.working_status === "On Leave"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : "bg-orange-100 text-orange-800"
+                            }`}
+                          >
+                            {emp.working_status}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-[0.5vw] py-[0.56vw] border border-gray-300 text-center">
+                        <div className="flex items-center justify-center gap-[0.5vw]">
+                          <button
+                            onClick={() => handleEdit(emp)}
+                            className="p-[0.35vw] bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition cursor-pointer"
+                            title="Edit"
+                          >
+                            <Edit2 size={"1vw"} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(emp.employee_id)}
+                            className="p-[0.35vw] bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 size={"1vw"} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
