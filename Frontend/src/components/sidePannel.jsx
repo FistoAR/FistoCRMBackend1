@@ -8,9 +8,12 @@ import logo from "../assets/Fisto Logo.png";
 import dashboardIcon from "../assets/SidePannelLogos/Dashboard.svg";
 import ActivityIcon from "../assets/SidePannelLogos/Activity.svg";
 import CallsIcon from "../assets/SidePannelLogos/calls.svg";
+import EmployeeRequestIcon from "../assets/SidePannelLogos/employee-request-new.webp";
 import DailyReportsIcon from "../assets/SidePannelLogos/dailyReports.svg";
+import StickyNotesIcon from "../assets/SidePannelLogos/sticky-notes.webp";
 import hrActivityIcon from "../assets/SidePannelLogos/hrActivity.svg";
 import AddReportIcon from "../assets/SidePannelLogos/AddReport.svg";
+import WorkDoneIcon from "../assets/SidePannelLogos/work-done.webp";
 import AnalyticsIcon from "../assets/SidePannelLogos/Analytics.svg";
 import CalendarIcon from "../assets/SidePannelLogos/Calendar.svg";
 import ProjectIcon from "../assets/SidePannelLogos/Projects.svg";
@@ -92,7 +95,7 @@ function SidebarLink({
       return (
         <Link
           to={to}
-          className="flex items-center justify-between px-[0.7vw] py-[0.6vh] bg-white border border-slate-200 shadow-sm rounded-xl text-black font-semibold text-[0.88vw] min-h-[4vh] w-full transition-all duration-150"
+          className="flex items-center justify-between px-[0.7vw] py-[0.6vh] bg-white shadow-sm rounded-xl text-black font-semibold text-[0.88vw] min-h-[4vh] w-full transition-all duration-150 outline-none focus:outline-none"
         >
           <div className="flex items-center gap-[0.6vw] min-w-0 flex-1">
             <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-gradient-to-r from-zinc-900 to-black text-white text-[0.75vw] font-bold shrink-0">
@@ -121,9 +124,9 @@ function SidebarLink({
       return (
         <Link
           to={to}
-          className="flex items-center px-[0.7vw] py-[0.6vh] text-gray-700 font-medium hover:bg-slate-100/70 hover:text-black rounded-xl text-[0.88vw] min-h-[4vh] w-full gap-[0.6vw] transition-all duration-150"
+          className="flex items-center px-[0.7vw] py-[0.6vh] text-gray-700 font-medium hover:bg-white hover:text-black rounded-xl text-[0.88vw] min-h-[4vh] w-full gap-[0.6vw] transition-all duration-150 outline-none focus:outline-none"
         >
-          <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-100 text-gray-700 text-[0.75vw] font-semibold shrink-0">
+          <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-200/80 text-gray-700 text-[0.75vw] font-semibold shrink-0">
             {formattedNum}
           </span>
           <span className="truncate min-w-0 leading-tight font-medium">
@@ -200,18 +203,27 @@ function CategoryHeader({
     }
   };
 
+  const getStyleClass = () => {
+    if (isActive) {
+      return "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10 border-zinc-900";
+    }
+    if (isOpen) {
+      return "bg-white border-slate-200 text-zinc-900 font-semibold shadow-2xs hover:border-slate-300";
+    }
+    return "bg-transparent border-transparent text-gray-800 font-semibold hover:bg-slate-100/80 hover:text-black";
+  };
+
+  const isExpanded = isOpen && !isCollapsed;
+
   return (
     <button
       onClick={onClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`group relative flex items-center transition-all duration-150 cursor-pointer rounded-xl w-full px-4 
-        ${isCollapsed ? "justify-center py-2" : "justify-between text-[0.88vw] py-3"}
-        ${
-          isActive
-            ? "bg-gradient-to-r from-zinc-900 to-black text-white font-semibold shadow-md shadow-black/10"
-            : "text-gray-800 font-semibold hover:bg-slate-100 hover:text-black"
-        }`}
+      className={`group relative flex items-center transition-all duration-200 ease-in-out cursor-pointer w-full px-4 border 
+        ${isCollapsed ? "justify-center py-2 rounded-xl" : "justify-between text-[0.88vw] py-3"}
+        ${isExpanded ? "rounded-t-xl rounded-b-none border-b-0" : "rounded-xl"}
+        ${getStyleClass()}`}
     >
       <div
         className={`flex items-center min-w-0 ${isCollapsed ? "" : "gap-[0.8vw]"}`}
@@ -223,7 +235,7 @@ function CategoryHeader({
             <img
               src={icon}
               alt={label}
-              className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain`}
+              className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain transition-all duration-200`}
               style={{ filter: isActive ? "brightness(0) invert(1)" : "none" }}
             />
           </div>
@@ -237,16 +249,20 @@ function CategoryHeader({
         <div className="flex items-center gap-[0.6vw] flex-shrink-0">
           {count > 0 && (
             <span
-              className={`flex items-center justify-center w-[1.4vw] h-[1.4vw] rounded-full text-[0.7vw] font-bold
-                ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}
+              className={`flex items-center justify-center w-[1.4vw] h-[1.4vw] rounded-full text-[0.7vw] font-bold transition-all duration-200
+                ${isActive ? "bg-white/20 text-white" : isOpen ? "bg-slate-100 text-zinc-800 border border-slate-200" : "bg-slate-100 text-slate-500"}`}
             >
               {count}
             </span>
           )}
           {isOpen ? (
-            <ChevronUpIcon className="w-[0.9vw] h-[0.9vw]" />
+            <ChevronUpIcon
+              className={`w-[0.9vw] h-[0.9vw] transition-colors duration-200 ${isActive ? "text-white" : "text-zinc-700"}`}
+            />
           ) : (
-            <ChevronDownIcon className="w-[0.9vw] h-[0.9vw]" />
+            <ChevronDownIcon
+              className={`w-[0.9vw] h-[0.9vw] transition-colors duration-200 ${isActive ? "text-white" : "text-gray-400"}`}
+            />
           )}
         </div>
       )}
@@ -293,7 +309,7 @@ const getMenuConfig = () => ({
     { path: "/maid", icon: hrActivityIcon, label: "Maid" },
     { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
   ],
-  projectHead: [{ path: "/workdone", icon: AddReportIcon, label: "Work Done" }],
+  projectHead: [{ path: "/workdone", icon: WorkDoneIcon, label: "Work Done" }],
   admin: [
     { path: "/followup", icon: CallsIcon, label: "Followup's" },
     { path: "/managementAnalytics", icon: AnalyticsIcon, label: "Analytics" },
@@ -314,9 +330,9 @@ const getMenuConfig = () => ({
       icon: AddReportIcon,
       label: "Employee Reports",
     },
-    { path: "/employeeRequest", icon: CallsIcon, label: "Employee request" },
+    { path: "/employeeRequest", icon: EmployeeRequestIcon, label: "Employee request" },
     { path: "/dairyRemainder", icon: CalendarIcon, label: "Dairy Remainder" },
-    { path: "/notes", icon: DailyReportsIcon, label: "Sticky Notes" },
+    { path: "/notes" , icon: StickyNotesIcon, label: "Sticky Notes" },
   ],
 });
 
@@ -697,7 +713,7 @@ export default function Sidebar() {
 
         {/* 1. MANAGEMENT Category */}
         {sortedAndGroupedMenu.management.length > 0 && (
-          <div className="space-y-1">
+          <div className="flex flex-col">
             <CategoryHeader
               label="Management"
               icon={ActivityIcon}
@@ -710,7 +726,11 @@ export default function Sidebar() {
             />
 
             {openGroups.management && !isCollapsed && (
-              <div className="mt-1 p-1.5 bg-[#F8FAFC] border border-slate-100/80 rounded-2xl space-y-1 shadow-inner/5">
+              <div
+                className={`p-1.5 bg-[#EEF2F6] border border-t-0 ${
+                  isManagementActive ? "border-slate-300/60" : "border-slate-200"
+                } rounded-b-2xl rounded-t-none space-y-1 shadow-inner/5`}
+              >
                 {sortedAndGroupedMenu.management.map((item, idx) => (
                   <SidebarLink
                     key={idx}
@@ -730,7 +750,7 @@ export default function Sidebar() {
 
         {/* 2. MARKETING Category */}
         {sortedAndGroupedMenu.marketing.length > 0 && (
-          <div className="space-y-1">
+          <div className="flex flex-col">
             <CategoryHeader
               label="Marketing"
               icon={CallsIcon}
@@ -743,7 +763,11 @@ export default function Sidebar() {
             />
 
             {openGroups.marketing && !isCollapsed && (
-              <div className="mt-1 p-1.5 bg-[#F8FAFC] border border-slate-100/80 rounded-2xl space-y-1 shadow-inner/5">
+              <div
+                className={`p-1.5 bg-[#EEF2F6] border border-t-0 ${
+                  isMarketingActive ? "border-slate-300/60" : "border-slate-200"
+                } rounded-b-2xl rounded-t-none space-y-1 shadow-inner/5`}
+              >
                 {sortedAndGroupedMenu.marketing.map((item, idx) => (
                   <SidebarLink
                     key={idx}
@@ -763,7 +787,7 @@ export default function Sidebar() {
 
         {/* 3. PROJECTS Category */}
         {sortedAndGroupedMenu.projects.length > 0 && (
-          <div className="space-y-1">
+          <div className="flex flex-col">
             <CategoryHeader
               label="Projects"
               icon={ProjectIcon}
@@ -776,7 +800,11 @@ export default function Sidebar() {
             />
 
             {openGroups.projects && !isCollapsed && (
-              <div className="mt-1 p-1.5 bg-[#F8FAFC] border border-slate-100/80 rounded-2xl space-y-1 shadow-inner/5">
+              <div
+                className={`p-1.5 bg-[#EEF2F6] border border-t-0 ${
+                  isProjectsActive ? "border-slate-300/60" : "border-slate-200"
+                } rounded-b-2xl rounded-t-none space-y-1 shadow-inner/5`}
+              >
                 {sortedAndGroupedMenu.projects.map((item, idx) => (
                   <SidebarLink
                     key={idx}
@@ -796,7 +824,7 @@ export default function Sidebar() {
 
         {/* 4. HUMAN RESOURCE Category */}
         {sortedAndGroupedMenu.hr.length > 0 && (
-          <div className="space-y-1">
+          <div className="flex flex-col">
             <CategoryHeader
               label="Human Resource"
               icon={hrActivityIcon}
@@ -809,7 +837,11 @@ export default function Sidebar() {
             />
 
             {openGroups.hr && !isCollapsed && (
-              <div className="mt-1 p-1.5 bg-[#F8FAFC] border border-slate-100/80 rounded-2xl space-y-1 shadow-inner/5">
+              <div
+                className={`p-1.5 bg-[#EEF2F6] border border-t-0 ${
+                  isHRActive ? "border-slate-300/60" : "border-slate-200"
+                } rounded-b-2xl rounded-t-none space-y-1 shadow-inner/5`}
+              >
                 {sortedAndGroupedMenu.hr.map((item, idx) => (
                   <SidebarLink
                     key={idx}

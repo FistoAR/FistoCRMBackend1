@@ -97,13 +97,19 @@ const uploadOccasion = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// Auto-ensure title and end_date columns exist on quotes table
+if (db && db.pool) {
+  db.pool.query("ALTER TABLE quotes ADD COLUMN title VARCHAR(255) NULL", () => {});
+  db.pool.query("ALTER TABLE quotes ADD COLUMN end_date DATE NULL", () => {});
+}
+
 // ==================== QUOTES ROUTES ====================
 
 // GET - Fetch all quotes
 router.get("/", (req, res) => {
   const query = `
     SELECT 
-      id, date, quote, occasion, image_url, 
+      id, date, end_date, title, quote, occasion, image_url, 
       created_at, updated_at
     FROM quotes
     ORDER BY date DESC, id DESC
@@ -132,7 +138,7 @@ router.get("/:id", (req, res) => {
 
   const query = `
     SELECT 
-      id, date, quote, occasion, image_url, 
+      id, date, end_date, title, quote, occasion, image_url, 
       created_at, updated_at
     FROM quotes
     WHERE id = ?
@@ -164,7 +170,7 @@ router.get("/:id", (req, res) => {
 
 // POST - Create new quote
 router.post("/", uploadQuote.single("image"), async (req, res) => {
-  const { date, quote, occasion } = req.body;
+  const { date, end_date, title, quote, occasion } = req.body;
 
   if (!date || !quote) {
     return res.status(400).json({
@@ -193,13 +199,13 @@ router.post("/", uploadQuote.single("image"), async (req, res) => {
   }
 
   const query = `
-    INSERT INTO quotes (date, quote, occasion, image_url)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO quotes (date, end_date, title, quote, occasion, image_url)
+    VALUES (?, ?, ?, ?, ?, ?)
   `;
 
   db.pool.query(
     query,
-    [date, quote, occasion || null, imageUrl],
+    [date, end_date || null, title || null, quote, occasion || null, imageUrl],
     (err, result) => {
       if (err) {
         console.error("Insert quote error:", err);
@@ -223,7 +229,7 @@ router.post("/", uploadQuote.single("image"), async (req, res) => {
 // PUT - Update existing quote
 router.put("/:id", uploadQuote.single("image"), async (req, res) => {
   const { id } = req.params;
-  const { date, quote, occasion } = req.body;
+  const { date, end_date, title, quote, occasion } = req.body;
 
   if (!date || !quote) {
     return res.status(400).json({
@@ -307,13 +313,13 @@ router.put("/:id", uploadQuote.single("image"), async (req, res) => {
 
     const updateQuery = `
       UPDATE quotes 
-      SET date = ?, quote = ?, occasion = ?, image_url = ?
+      SET date = ?, end_date = ?, title = ?, quote = ?, occasion = ?, image_url = ?
       WHERE id = ?
     `;
 
     db.pool.query(
       updateQuery,
-      [date, quote, occasion || null, imageUrl, id],
+      [date, end_date || null, title || null, quote, occasion || null, imageUrl, id],
       (updateErr) => {
         if (updateErr) {
           console.error("Update quote error:", updateErr);

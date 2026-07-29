@@ -4,10 +4,10 @@ import { createPortal } from "react-dom";
 import AssEmp from "../../assets/ProjectPages/overview/assEmp.webp";
 import TotalTask from "../../assets/ProjectPages/overview/totalTask.webp";
 import Completed from "../../assets/ProjectPages/overview/completed.webp";
-import OnGoing from "../../assets/ProjectPages/overview/onGoing.webp";
+import OnGoing from "../../assets/ProjectPages/overview/on-going-new.webp";
 import Delayed from "../../assets/ProjectPages/overview/delayed.webp";
-import Overdue from "../../assets/ProjectPages/overview/overdue.webp";
-
+import Overdue from "../../assets/ProjectPages/overview/overdue-new.webp";
+import OnHold from "../../assets/ProjectPages/overview/on-hold-new.webp";
 // ─── SVG ICONS ───────────────────────────────────────────────────────────────
 const Icon = ({ children, className, strokeWidth = "2" }) => (
   <svg
@@ -58,7 +58,14 @@ const MegaphoneIcon = ({ className }) => (
 );
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-const toDateString = (d) => d.toISOString().split("T")[0];
+const toDateString = (d) => {
+  if (!d) return "";
+  const date = new Date(d);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const getInitials = (name) => {
   if (!name) return "??";
   return name
@@ -705,7 +712,7 @@ const statsDataConfig = [
     type: "hold",
     title: "On Hold",
     color: "text-orange-500",
-    iconSrc: Overdue,
+    iconSrc: OnHold,
   },
   {
     type: "ongoing",
@@ -743,6 +750,7 @@ const TodayTasksCard = ({
   unscheduledTask = [],
   dayTask = [],
   employees = [],
+  approvedLeaves = [],
 }) => {
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
   const [employeeCache, setEmployeeCache] = useState({});
@@ -785,6 +793,8 @@ const TodayTasksCard = ({
         return "Activity";
       case "unscheduled":
         return "Unscheduled";
+      case "leave":
+        return "Leave";
       case "noTask":
         return "No Task";
       default:
@@ -844,25 +854,53 @@ const TodayTasksCard = ({
         });
       });
 
+      const approvedLeaveMap = new Map();
+      (approvedLeaves || []).forEach((l) => {
+        if (l.employee_id) {
+          approvedLeaveMap.set(l.employee_id?.toString(), l);
+        }
+      });
+
       (employees || []).forEach((emp) => {
         const empId =
           emp.employee_id?.toString() || emp._id?.$oid || emp._id?.toString();
         if (!withReports.has(empId)) {
-          items.push({
-            id: `no-task-${empId}`,
-            type: "noTask",
-            priority: 0,
-            taskName: "Not started yet !",
-            activityName: null,
-            description: "No report submitted today",
-            employeeId: empId,
-            projectName: "",
-            startDate: "",
-            startTime: "",
-            endDate: new Date().toISOString().split("T")[0],
-            endTime: "",
-            status: "No Task",
-          });
+          const leaveInfo = approvedLeaveMap.get(empId);
+          if (leaveInfo) {
+            items.push({
+              id: `leave-${empId}`,
+              type: "leave",
+              priority: 0,
+              taskName: "On Leave",
+              activityName: null,
+              description: leaveInfo.reason
+                ? `Leave Approved: ${leaveInfo.reason}`
+                : `Leave Approved (${leaveInfo.leave_type || "Leave"})`,
+              employeeId: empId,
+              projectName: "",
+              startDate: leaveInfo.from_date || "",
+              startTime: "",
+              endDate: leaveInfo.to_date || new Date().toISOString().split("T")[0],
+              endTime: "",
+              status: "Leave",
+            });
+          } else {
+            items.push({
+              id: `no-task-${empId}`,
+              type: "noTask",
+              priority: 0,
+              taskName: "Not started yet !",
+              activityName: null,
+              description: "No report submitted today",
+              employeeId: empId,
+              projectName: "",
+              startDate: "",
+              startTime: "",
+              endDate: new Date().toISOString().split("T")[0],
+              endTime: "",
+              status: "No Task",
+            });
+          }
         }
       });
 
@@ -904,7 +942,95 @@ const TodayTasksCard = ({
           };
         }),
       );
-      setTodaysWorkItems(display);
+
+      const getItemTimestamp = (item) => {
+        if (item.reportedAt) {
+          const t = new Date(item.reportedAt).getTime();
+          if (!isNaN(t) && t > 0) return t;
+        }
+        if (item.startTime) {
+          try {
+            const match = item.startTime.match(
+              /(\d+):(\d+)(?::(\d+))?\s*(AM|PM)?/i,
+            );
+            if (match) {
+              let hours = parseInt(match[1], 10);
+              const minutes = parseInt(match[2], 10);
+              const ampm = match[4];
+              if (ampm) {
+                if (ampm.toUpperCase() === "PM" && hours < 12) hours += 12;
+                if (ampm.toUpperCase() === "AM" && hours === 12) hours = 0;
+              }
+              return hours * 3600000 + minutes * 60000;
+            }
+          } catch (_) {}
+        }
+        return 0;
+      };
+
+      // Group items by employeeId
+      const groupedByEmp = {};
+      const empOrder = [];
+      display.forEach((item) => {
+        const empId = item.employeeId?.toString() || "unknown";
+        if (!groupedByEmp[empId]) {
+          groupedByEmp[empId] = [];
+          empOrder.push(empId);
+        }
+        groupedByEmp[empId].push(item);
+      });
+
+      // Sort items within each employee group by timestamp (newest task first)
+      empOrder.forEach((empId) => {
+        groupedByEmp[empId].sort((a, b) => {
+          const tA = getItemTimestamp(a);
+          const tB = getItemTimestamp(b);
+          if (tA > 0 && tB > 0 && tA !== tB) return tB - tA;
+          return a.priority - b.priority;
+        });
+      });
+
+      // Sort employee groups by their latest task timestamp (newest task on top, earliest at the bottom)
+      empOrder.sort((empIdA, empIdB) => {
+        const itemsA = groupedByEmp[empIdA];
+        const itemsB = groupedByEmp[empIdB];
+
+        const hasTasksA = itemsA.some((it) => it.type !== "noTask" && it.type !== "leave");
+        const hasTasksB = itemsB.some((it) => it.type !== "noTask" && it.type !== "leave");
+
+        // Employees who have not added a task (noTask) or are on leave display at the top
+        if (!hasTasksA && hasTasksB) return -1;
+        if (hasTasksA && !hasTasksB) return 1;
+        if (!hasTasksA && !hasTasksB) return 0;
+
+        const timestampsA = itemsA
+          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .map((it) => getItemTimestamp(it))
+          .filter((t) => t > 0);
+        const timestampsB = itemsB
+          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .map((it) => getItemTimestamp(it))
+          .filter((t) => t > 0);
+
+        const maxA = timestampsA.length ? Math.max(...timestampsA) : 0;
+        const maxB = timestampsB.length ? Math.max(...timestampsB) : 0;
+
+        if (maxA !== maxB) return maxB - maxA;
+        return 0;
+      });
+
+      // Flatten the sorted groups into final list
+      const sortedDisplay = [];
+      empOrder.forEach((empId) => {
+        sortedDisplay.push(...groupedByEmp[empId]);
+      });
+
+      const finalDisplay = sortedDisplay.map((item, idx) => ({
+        ...item,
+        color: avatarColors[idx % avatarColors.length],
+      }));
+
+      setTodaysWorkItems(finalDisplay);
       setLoadingEmployees(false);
       setImageErrors({});
     };
@@ -1043,7 +1169,8 @@ const TodayTasksCard = ({
     return todaysWorkItems.map((item) => {
       const showAvatar = item.avatar && !imageErrors[item.id];
       const isHov = tooltipItem?.id === item.id;
-      const isNone = item.type === "noTask";
+      const isLeave = item.type === "leave";
+      const isNone = item.type === "noTask" || isLeave;
       return (
         <div
           key={item.id}
@@ -1056,7 +1183,7 @@ const TodayTasksCard = ({
             position: "relative",
             backgroundColor: isHov ? "#F9FAFB" : "transparent",
             transition: "background-color 0.2s ease",
-            opacity: isNone ? 0.6 : 1,
+            opacity: item.type === "noTask" ? 0.6 : 1,
           }}
           onMouseEnter={() => !isNone && setTooltipItem(item)}
           onMouseMove={(e) =>
@@ -1122,8 +1249,8 @@ const TodayTasksCard = ({
                   fontSize: "0.6vw",
                   padding: "0.1vw 0.42vw",
                   borderRadius: "0.21vw",
-                  backgroundColor: isNone ? "#FEE2E2" : "#F3F4F6",
-                  color: isNone ? "#DC2626" : "#6B7280",
+                  backgroundColor: isLeave ? "#FEF3C7" : item.type === "noTask" ? "#FEE2E2" : "#F3F4F6",
+                  color: isLeave ? "#D97706" : item.type === "noTask" ? "#DC2626" : "#6B7280",
                   fontWeight: "500",
                 }}
               >
@@ -1866,20 +1993,35 @@ const AnnouncementItem = ({ item, apiUrl1, imgError, onImgError }) => {
         >
           <MegaphoneIcon className="w-[1vw] h-[1vw] text-blue-600" />
         </div>
-        <p
-          style={{
-            fontSize: "0.9vw",
-            color: "#374151",
-            lineHeight: "1.55",
-            paddingLeft: "0.4vw",
-            display: "-webkit-box",
-            WebkitLineClamp: showImg ? 3 : 5,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {item.title || item.agenda || item.quote}
-        </p>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {item.title && item.title !== item.quote && (
+            <h4
+              style={{
+                fontSize: "0.92vw",
+                fontWeight: "700",
+                color: "#1E3A8A",
+                margin: "0 0 0.25vw 0",
+                wordBreak: "break-word",
+              }}
+            >
+              {item.title}
+            </h4>
+          )}
+          <p
+            style={{
+              fontSize: "0.85vw",
+              color: "#374151",
+              lineHeight: "1.55",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: showImg ? "8vw" : "14vw",
+              overflowY: "auto",
+              margin: 0,
+            }}
+          >
+            {item.quote}
+          </p>
+        </div>
       </div>
       {showImg && (
         <div style={{ borderRadius: "0.45vw", overflow: "hidden" }}>
@@ -2164,6 +2306,16 @@ const MeetingsCard = ({ apiBaseUrl }) => {
     fetchMeetings();
   }, [apiBaseUrl, dateStr]);
 
+  const addMonths = (date, months) => {
+    const d = new Date(date);
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + months);
+    const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, maxDays));
+    return d;
+  };
+
   const changeDate = (offset) =>
     setSelectedDate((p) => {
       const d = new Date(p);
@@ -2235,11 +2387,7 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           }}
         >
           <button
-            onClick={() =>
-              setSelectedDate(
-                (p) => new Date(p.getFullYear(), p.getMonth() - 1, p.getDate()),
-              )
-            }
+            onClick={() => setSelectedDate((p) => addMonths(p, -1))}
             style={{
               border: "none",
               background: "#F3F4F6",
@@ -2271,11 +2419,7 @@ const MeetingsCard = ({ apiBaseUrl }) => {
             {monthYearString}
           </button>
           <button
-            onClick={() =>
-              setSelectedDate(
-                (p) => new Date(p.getFullYear(), p.getMonth() + 1, p.getDate()),
-              )
-            }
+            onClick={() => setSelectedDate((p) => addMonths(p, 1))}
             style={{
               border: "none",
               background: "#F3F4F6",
@@ -2590,6 +2734,7 @@ const Personal = () => {
   const [unscheduledTask, setUnscheduledTask] = useState([]);
   const [dayTask, setDayTask] = useState([]);
   const [taskEmployees, setTaskEmployees] = useState([]);
+  const [approvedLeaves, setApprovedLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -2597,8 +2742,9 @@ const Personal = () => {
   const memoizedEmployees = useMemo(() => taskEmployees, [taskEmployees]);
 
   useEffect(() => {
+    let isInitial = true;
     const fetchAll = async () => {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       setError(null);
       try {
         const [statsRes, empsRes, tasksRes] = await Promise.all([
@@ -2635,13 +2781,20 @@ const Personal = () => {
         setUnscheduledTask(tasksData.unscheduledTask || []);
         setDayTask(tasksData.dayTask || []);
         setTaskEmployees(tasksData.employees || []);
+        setApprovedLeaves(tasksData.approvedLeaves || []);
       } catch (err) {
         setError(err.message);
       } finally {
-        setLoading(false);
+        if (isInitial) {
+          setLoading(false);
+          isInitial = false;
+        }
       }
     };
     fetchAll();
+
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
   }, [API_BASE_URL]);
 
   return (
@@ -2677,6 +2830,7 @@ const Personal = () => {
             unscheduledTask={unscheduledTask}
             dayTask={dayTask}
             employees={memoizedEmployees}
+            approvedLeaves={approvedLeaves}
           />
         </div>
         <div className="flex flex-col gap-[1.5vh] h-full min-h-0">
