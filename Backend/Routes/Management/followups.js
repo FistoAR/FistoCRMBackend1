@@ -73,9 +73,13 @@ router.post(
       isMarketing,
       project_name,
       project_category,
+      start_date,
+      end_date,
+      review_date,
+      isOnboardModalSubmit,
     } = req.body;
 
-    const dbStatus = status;
+    let dbStatus = status;
 
     if (!clientID || !status) {
       return res.status(400).json({
@@ -93,8 +97,8 @@ router.post(
       if (status === "second_followup") {
         const followupResult = await queryWithRetry(
           `INSERT INTO Followups 
-            (employee_id, clientID, contactPersonID, status, remarks, nextFollowupDate, Following)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              (employee_id, clientID, contactPersonID, status, remarks, nextFollowupDate, Following)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             employee_id,
             clientID,
@@ -166,57 +170,123 @@ router.post(
         if (!targetProjectId && project_name && project_name.trim()) {
           const projResult = await queryWithRetry(
             `INSERT INTO projects
-              (client_id, project_name, project_category, employee_id, budget_status, onboard_status, remarks)
-             VALUES (?, ?, ?, ?, 'pending', 'In progress', ?)`,
+                (client_id, project_name, project_category, employee_id, budget_status, onboard_status, start_date, end_date, review_date, remarks)
+               VALUES (?, ?, ?, ?, 'pending', 'In progress', ?, ?, ?, ?)`,
             [
               clientID,
               project_name.trim(),
               project_category || null,
               employee_id,
+              start_date || null,
+              end_date || null,
+              review_date || null,
               remarks || null,
             ],
           );
           targetProjectId = projResult.insertId;
         }
-      } else if (dbStatus === "ProjectOnboard" || dbStatus === "project_onboard") {
-        if (targetProjectId) {
-          await queryWithRetry(
-            `UPDATE projects SET onboard_status = 'onboarded', updated_at = NOW() WHERE id = ?`,
-            [targetProjectId]
-          );
-        } else {
-          // Check if client has existing project
+      } else if (
+        dbStatus === "ProjectOnboard" ||
+        dbStatus === "project_onboard"
+      ) {
+        const pName =
+          project_name && project_name.trim() ? project_name.trim() : null;
+        const pCat =
+          project_category && project_category.trim()
+            ? project_category.trim()
+            : null;
+        const targetOnboardStatus =
+          isOnboardModalSubmit === "true" || isOnboardModalSubmit === true
+            ? "onboarded"
+            : "In progress";
+
+        let projIdToUpdate =
+          targetProjectId && Number(targetProjectId) > 0
+            ? targetProjectId
+            : null;
+        if (!projIdToUpdate) {
           const existingProjects = await queryWithRetry(
             `SELECT id FROM projects WHERE client_id = ? ORDER BY id DESC LIMIT 1`,
-            [clientID]
+            [clientID],
+          );
+          if (existingProjects.length > 0) {
+            projIdToUpdate = existingProjects[0].id;
+          }
+        }
+
+        if (projIdToUpdate) {
+          await queryWithRetry(
+            `UPDATE projects 
+               SET onboard_status = ?,
+                   project_name = COALESCE(?, project_name),
+                   project_category = COALESCE(?, project_category),
+                   start_date = COALESCE(?, start_date),
+                   end_date = COALESCE(?, end_date),
+                   review_date = COALESCE(?, review_date),
+                   updated_at = NOW()
+               WHERE id = ?`,
+            [
+              targetOnboardStatus,
+              pName,
+              pCat,
+              start_date || null,
+              end_date || null,
+              review_date || null,
+              projIdToUpdate,
+            ],
+          );
+          targetProjectId = projIdToUpdate;
+        } else {
+          const projResult = await queryWithRetry(
+            `INSERT INTO projects
+                (client_id, project_name, project_category, employee_id, budget_status, onboard_status, start_date, end_date, review_date, remarks)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+            [
+              clientID,
+              pName || "Default Project",
+              pCat,
+              employee_id,
+              targetOnboardStatus,
+              start_date || null,
+              end_date || null,
+              review_date || null,
+              remarks || null,
+            ],
+          );
+          targetProjectId = projResult.insertId;
+        }
+      } else if (dbStatus === "Droped" || dbStatus === "droped") {
+        if (targetProjectId) {
+          await queryWithRetry(
+            `UPDATE projects SET onboard_status = 'cancelled', updated_at = NOW() WHERE id = ?`,
+            [targetProjectId],
+          );
+        } else {
+          const existingProjects = await queryWithRetry(
+            `SELECT id FROM projects WHERE client_id = ? ORDER BY id DESC LIMIT 1`,
+            [clientID],
           );
           if (existingProjects.length > 0) {
             targetProjectId = existingProjects[0].id;
             await queryWithRetry(
-              `UPDATE projects SET onboard_status = 'onboarded', updated_at = NOW() WHERE id = ?`,
-              [targetProjectId]
+              `UPDATE projects SET onboard_status = 'cancelled', updated_at = NOW() WHERE id = ?`,
+              [targetProjectId],
             );
-          } else {
-            const pName = (project_name && project_name.trim()) ? project_name.trim() : "Default Project";
-            const projResult = await queryWithRetry(
-              `INSERT INTO projects
-                (client_id, project_name, project_category, employee_id, budget_status, onboard_status, remarks)
-               VALUES (?, ?, ?, ?, 'pending', 'onboarded', ?)`,
-              [
-                clientID,
-                pName,
-                project_category || null,
-                employee_id,
-                remarks || null,
-              ],
-            );
-            targetProjectId = projResult.insertId;
           }
         }
+        dbStatus = "ProjectOnboard";
+      }
+
+      if (isOnboardModalSubmit === "true" || isOnboardModalSubmit === true) {
+        return res.status(200).json({
+          success: true,
+          message: "Project status and dates updated successfully",
+          projectId: targetProjectId,
+        });
       }
 
       const followupResult = await queryWithRetry(
-        `INSERT INTO ManagementFollowups 
+        `INSERT INTO ManagementFollowup 
           (employee_id, clientID, projectId,
             contactPersonID, status, remarks, nextFollowupDate, quotation_path)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -237,13 +307,23 @@ router.post(
       const followupId = followupResult.insertId;
 
       const hasMeetingData =
-        (parsedMeetingData.title?.trim() || parsedMeetingData.agenda?.trim() || remarks?.trim()) &&
+        (parsedMeetingData.title?.trim() ||
+          parsedMeetingData.agenda?.trim() ||
+          remarks?.trim()) &&
         (parsedMeetingData.date || nextFollowup) &&
-        (dbStatus === "Lead" || dbStatus === "meeting" || parsedMeetingData.type || parsedMeetingData.title);
+        (dbStatus === "Lead" ||
+          dbStatus === "meeting" ||
+          parsedMeetingData.type ||
+          parsedMeetingData.title);
 
       if (hasMeetingData) {
-        const meetingDate = parsedMeetingData.date || nextFollowup || new Date().toISOString().split("T")[0];
-        const meetingTitle = parsedMeetingData.title?.trim() || (dbStatus === "Lead" ? "Lead Meeting" : "Followup Meeting");
+        const meetingDate =
+          parsedMeetingData.date ||
+          nextFollowup ||
+          new Date().toISOString().split("T")[0];
+        const meetingTitle =
+          parsedMeetingData.title?.trim() ||
+          (dbStatus === "Lead" ? "Lead Meeting" : "Followup Meeting");
 
         await queryWithRetry(
           `INSERT INTO ManagementMeetings 
@@ -435,10 +515,10 @@ router.get("/marketingLeeds", async (req, res) => {
     // For other statuses, get management followups
     const latestManagementFollowupQuery = `
       SELECT mf.*
-      FROM ManagementFollowups mf
+      FROM ManagementFollowup mf
       JOIN (
         SELECT marketing_client_id, MAX(created_at) AS last_date
-        FROM ManagementFollowups
+        FROM ManagementFollowup
         WHERE employee_id = ? AND isMarketing = 1
         GROUP BY marketing_client_id
       ) lf ON mf.marketing_client_id = lf.marketing_client_id 
@@ -447,13 +527,13 @@ router.get("/marketingLeeds", async (req, res) => {
         AND mf.isMarketing = 1
     `;
 
-    const latestManagementFollowups = await queryWithRetry(
+    const latestManagementFollowup = await queryWithRetry(
       latestManagementFollowupQuery,
       [employee_id, ...marketingClientIDs],
     );
 
     const latestManagementFollowupMap = {};
-    latestManagementFollowups.forEach((f) => {
+    latestManagementFollowup.forEach((f) => {
       latestManagementFollowupMap[f.marketing_client_id] = f;
     });
 
@@ -546,7 +626,7 @@ router.get("/marketingLeeds", async (req, res) => {
         cp.contactNumber, 
         cp.email, 
         cp.designation
-      FROM ManagementFollowups mf
+      FROM ManagementFollowup mf
       LEFT JOIN ContactPersons cp ON mf.contactPersonID = cp.id
       WHERE mf.marketing_client_id IN (${filteredPlaceholders})
         AND mf.isMarketing = 1
@@ -574,7 +654,7 @@ router.get("/marketingLeeds", async (req, res) => {
     const meetingQuery = `
       SELECT m.*, mf.marketing_client_id as clientID
       FROM ManagementMeetings m
-      JOIN ManagementFollowups mf ON m.followupID = mf.id
+      JOIN ManagementFollowup mf ON m.followupID = mf.id
       WHERE mf.marketing_client_id IN (${filteredPlaceholders})
         AND mf.isMarketing = 1
       ORDER BY m.date DESC, m.created_at DESC
@@ -652,18 +732,14 @@ router.get("/counts", async (req, res) => {
   try {
     const { employee_id } = req.query;
 
-    if (!employee_id) {
-      return res.status(400).json({ error: "Employee ID is required" });
-    }
-
     const followupCountsQuery = `
       SELECT 
         f.status,
         COUNT(*) as count
-      FROM ManagementFollowups f
+      FROM ManagementFollowup f
       JOIN (
         SELECT MAX(id) AS max_id
-        FROM ManagementFollowups
+        FROM ManagementFollowup
         ${employee_id ? "WHERE employee_id = ?" : ""}
         GROUP BY clientID, projectId
       ) latest ON f.id = latest.max_id
@@ -677,7 +753,7 @@ router.get("/counts", async (req, res) => {
     const meetingsCountQuery = `
       SELECT COUNT(*) as count
       FROM ManagementMeetings m
-      JOIN ManagementFollowups fu ON m.followupID = fu.id
+      JOIN ManagementFollowup fu ON m.followupID = fu.id
       ${employee_id ? "WHERE fu.employee_id = ?" : ""}
     `;
     const meetingsResult = await queryWithRetry(meetingsCountQuery, params);
@@ -771,10 +847,10 @@ router.get("/marketingLeedsCount", async (req, res) => {
       SELECT 
         mf.marketing_client_id,
         mf.status
-      FROM ManagementFollowups mf
+      FROM ManagementFollowup mf
       JOIN (
         SELECT marketing_client_id, MAX(created_at) AS last_date
-        FROM ManagementFollowups
+        FROM ManagementFollowup
         WHERE employee_id = ? AND isMarketing = 1
         GROUP BY marketing_client_id
       ) lf ON mf.marketing_client_id = lf.marketing_client_id AND mf.created_at = lf.last_date
@@ -783,13 +859,13 @@ router.get("/marketingLeedsCount", async (req, res) => {
         AND mf.isMarketing = 1
     `;
 
-    const latestManagementFollowups = await queryWithRetry(
+    const latestManagementFollowup = await queryWithRetry(
       latestManagementFollowupQuery,
       [employee_id, ...marketingClientIDs, employee_id],
     );
 
     const statusMap = {};
-    latestManagementFollowups.forEach((row) => {
+    latestManagementFollowup.forEach((row) => {
       statusMap[row.marketing_client_id] = row.status;
     });
 
@@ -844,7 +920,7 @@ router.get("/:followupId", async (req, res) => {
 
   try {
     const followup = await queryWithRetry(
-      `SELECT * FROM ManagementFollowups WHERE id = ?`,
+      `SELECT * FROM ManagementFollowup WHERE id = ?`,
       [followupId],
     );
 
@@ -918,18 +994,23 @@ router.get("/", async (req, res) => {
         c.updated_at AS client_updated_at,
         p.project_name,
         p.project_category,
+        p.onboard_status AS project_onboard_status,
+        p.updated_at AS project_updated_at,
         COALESCE(ed.employee_name, f.employee_id) AS employee_name
-      FROM ManagementFollowups f
+      FROM ManagementFollowup f
       JOIN (
         SELECT MAX(id) AS max_id
-        FROM ManagementFollowups
+        FROM ManagementFollowup
         GROUP BY clientID, projectId
       ) latest ON f.id = latest.max_id
       LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
       LEFT JOIN projects p ON f.projectId = p.id
       LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
       WHERE (f.status IN (${statusPlaceholders}) OR f.status = '' OR f.status IS NULL)
-      ORDER BY f.created_at DESC
+      ORDER BY CASE 
+        WHEN p.onboard_status IN ('onboarded', 'completed', 'cancelled') THEN p.updated_at 
+        ELSE f.created_at 
+      END DESC
     `;
 
     let params = [...dbStatuses];
@@ -956,7 +1037,7 @@ router.get("/", async (req, res) => {
         SELECT 
           f.*,
           COALESCE(ed.employee_name, f.employee_id) AS employee_name
-        FROM ManagementFollowups f
+        FROM ManagementFollowup f
         LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
         WHERE f.clientID IN (${placeholders})
         ORDER BY f.clientID, f.created_at DESC
@@ -969,7 +1050,7 @@ router.get("/", async (req, res) => {
             f.clientID,
             f.status AS followup_status
           FROM ManagementMeetings m
-          LEFT JOIN ManagementFollowups f ON m.followupID = f.id
+          LEFT JOIN ManagementFollowup f ON m.followupID = f.id
           WHERE f.clientID IN (${placeholders})
           ORDER BY m.date DESC, m.time DESC
         `;
@@ -1019,6 +1100,8 @@ router.get("/", async (req, res) => {
             requirements: row.requirements,
             project_name: row.project_name || null,
             project_category: row.project_category || null,
+            onboard_status: row.project_onboard_status || null,
+            project_updated_at: row.project_updated_at || null,
             created_at: row.created_at || row.client_created_at,
             updated_at: row.client_updated_at,
             contactPersons,
@@ -1042,7 +1125,7 @@ router.get("/", async (req, res) => {
                 (h.projectId == null && row.projectId == 0) ||
                 (h.projectId == 0 && row.projectId == null) ||
                 row.projectId == null ||
-                row.projectId == 0)
+                row.projectId == 0),
           ),
           meetings: meetingsGrouped[row.clientID] || [],
         };
@@ -1056,7 +1139,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /history/:client_id - Get history from ManagementFollowups for Followup.jsx
+// GET /history/:client_id - Get history from ManagementFollowup for Followup.jsx
 router.get("/history/:client_id", async (req, res) => {
   try {
     const { client_id } = req.params;
@@ -1070,7 +1153,7 @@ router.get("/history/:client_id", async (req, res) => {
         c.company_name, 
         c.contactPersons, 
         COALESCE(ed.employee_name, f.employee_id) as employee_name
-      FROM ManagementFollowups f
+      FROM ManagementFollowup f
       LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
       LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
       WHERE f.clientID = ?
@@ -1108,9 +1191,7 @@ router.get("/history/:client_id", async (req, res) => {
           if (Array.isArray(contacts) && contacts.length > 0) {
             const personId = f.contactPersonID || f.contact_person_id;
             const matched = personId
-              ? contacts.find(
-                  (c) => String(c.id) === String(personId),
-                )
+              ? contacts.find((c) => String(c.id) === String(personId))
               : contacts[0];
             const target = matched || contacts[0];
             contactPersonName = target.name || "-";
@@ -1143,8 +1224,10 @@ router.get("/history/:client_id", async (req, res) => {
 
     res.status(200).json({ success: true, data: formattedHistory, meetings });
   } catch (err) {
-    console.error("Error fetching ManagementFollowups history:", err);
-    res.status(500).json({ error: "Failed to fetch ManagementFollowups history" });
+    console.error("Error fetching ManagementFollowup history:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch ManagementFollowup history" });
   }
 });
 
@@ -1153,7 +1236,7 @@ router.delete("/:followupId", async (req, res) => {
 
   try {
     const followup = await queryWithRetry(
-      `SELECT quotation_path FROM ManagementFollowups WHERE id = ?`,
+      `SELECT quotation_path FROM ManagementFollowup WHERE id = ?`,
       [followupId],
     );
 
@@ -1170,7 +1253,7 @@ router.delete("/:followupId", async (req, res) => {
       return res.status(404).json({ error: "Followup not found" });
     }
 
-    await queryWithRetry(`DELETE FROM ManagementFollowups WHERE id = ?`, [
+    await queryWithRetry(`DELETE FROM ManagementFollowup WHERE id = ?`, [
       followupId,
     ]);
 
@@ -1254,17 +1337,23 @@ router.post(
       await queryWithRetry(
         `UPDATE ManagementMeetings 
          SET status = 'completed',
+             date = COALESCE(?, date),
              attendees_client = ?,
              attendees_our_side = ?,
              agenda = COALESCE(?, agenda),
              outcomes = ?,
+             startTime = COALESCE(?, startTime),
+             endTime = COALESCE(?, endTime),
              mom_recorded_at = NOW()
          WHERE id = ?`,
         [
+          conductedDate || null,
           attendeesClient || null,
           attendeesOurSide || null,
           agenda || null,
           outcomes || null,
+          startTime || null,
+          endTime || null,
           meetingId,
         ],
       );

@@ -15,7 +15,7 @@ router.get("/employees", async (req, res) => {
         WHERE employee_id IS NOT NULL
         UNION
         SELECT DISTINCT employee_id 
-        FROM ManagementFollowups 
+        FROM ManagementFollowup 
         WHERE employee_id IS NOT NULL
       ) c
       LEFT JOIN employees_details ed ON c.employee_id = ed.employee_id
@@ -34,7 +34,7 @@ router.get("/employees", async (req, res) => {
         FROM (
           SELECT DISTINCT employee_id FROM ClientsDataManagement WHERE employee_id IS NOT NULL
           UNION
-          SELECT DISTINCT employee_id FROM ManagementFollowups WHERE employee_id IS NOT NULL
+          SELECT DISTINCT employee_id FROM ManagementFollowup WHERE employee_id IS NOT NULL
         ) AS combined
         ORDER BY employee_id
       `;
@@ -55,11 +55,9 @@ router.get("/overview", async (req, res) => {
   try {
     const { employee_id, from_date, to_date } = req.query;
 
-    // Helper for date condition building
     const buildDateClause = (colName, fDate, tDate) => {
       if (fDate && !tDate) return `AND DATE(${colName}) = ?`;
-      if (fDate && tDate)
-        return `AND DATE(${colName}) >= ? AND DATE(${colName}) <= ?`;
+      if (fDate && tDate) return `AND DATE(${colName}) >= ? AND DATE(${colName}) <= ?`;
       if (!fDate && tDate) return `AND DATE(${colName}) <= ?`;
       return "";
     };
@@ -70,196 +68,266 @@ router.get("/overview", async (req, res) => {
       else if (!fDate && tDate) paramArr.push(tDate);
     };
 
-    // 1. Total Customers
-    const totalCustomersQuery = `
-      SELECT COUNT(*) as total 
-      FROM ClientsDataManagement 
-      WHERE active = 1
-      ${buildDateClause("created_at", from_date, to_date)}
-      ${employee_id ? "AND employee_id = ?" : ""}
-    `;
+    const empFilter = employee_id ? "AND c.employee_id = ?" : "";
+    const empParam = employee_id ? [employee_id] : [];
 
+    // ─── 1. Total Clients ───────────────────────────────────────────────────
     const totalParams = [];
     pushDateParams(totalParams, from_date, to_date);
     if (employee_id) totalParams.push(employee_id);
 
-    const totalCustomersResult = await queryWithRetry(
-      totalCustomersQuery,
-      totalParams,
-    );
-    const totalCustomers = totalCustomersResult[0].total;
+    const [totalResult] = await Promise.all([
+      queryWithRetry(
+        `SELECT COUNT(*) AS total FROM ClientsDataManagement c
+         WHERE c.active = 1
+         ${buildDateClause("c.created_at", from_date, to_date)}
+         ${empFilter}`,
+        totalParams
+      ),
+    ]);
+    const totalClients = totalResult[0].total;
 
-    // 2. Get latest status for each client created in the date range
-    const latestStatusQuery = `
-      SELECT 
-        f1.clientID,
-        f1.status,
-        f1.nextFollowupDate,
-        f1.created_at as followup_date
-      FROM ManagementFollowups f1
-      INNER JOIN (
-        SELECT clientID, MAX(id) as max_id
-        FROM ManagementFollowups
-        GROUP BY clientID
-      ) f2 ON f1.clientID = f2.clientID AND f1.id = f2.max_id
-      INNER JOIN ClientsDataManagement c ON f1.clientID = c.id
-      WHERE c.active = 1
-      ${buildDateClause("c.created_at", from_date, to_date)}
-      ${employee_id ? "AND c.employee_id = ?" : ""}
-    `;
+    // ─── 2. Level-1 breakdown (clientsdataFollowup) ─────────────────────────
+    const l1Params = [];
+    pushDateParams(l1Params, from_date, to_date);
+    if (employee_id) l1Params.push(employee_id);
 
-    const latestParams = [];
-    pushDateParams(latestParams, from_date, to_date);
-    if (employee_id) latestParams.push(employee_id);
-
-    const latestStatuses = await queryWithRetry(
-      latestStatusQuery,
-      latestParams,
+    const l1Rows = await queryWithRetry(
+      `SELECT c.id, lf.status AS latest_status, lf.next_followup_date
+       FROM ClientsDataManagement c
+       LEFT JOIN (
+         SELECT client_id, MAX(id) AS max_id FROM clientsdataFollowup GROUP BY client_id
+       ) lid ON c.id = lid.client_id
+       LEFT JOIN clientsdataFollowup lf ON lid.max_id = lf.id
+       WHERE c.active = 1
+       ${buildDateClause("c.created_at", from_date, to_date)}
+       ${empFilter}`,
+      l1Params
     );
 
-    // 3. Count clients with no followups
-    const noFollowupQuery = `
-      SELECT COUNT(*) as count
-      FROM ClientsDataManagement c
-      LEFT JOIN ManagementFollowups f ON c.id = f.clientID
-      WHERE f.clientID IS NULL 
-        AND c.active = 1
-        ${buildDateClause("c.created_at", from_date, to_date)}
-        ${employee_id ? "AND c.employee_id = ?" : ""}
-    `;
+    // next_followup_date stored as YYYY-MM-DD string — compare as plain strings to avoid timezone issues
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD IST
+    const isL1Missed = (nfd) => {
+      if (!nfd) return false;
+      const raw = String(nfd).trim();
+      // If stored as YYYY-MM-DD, compare directly; if DD/MM/YYYY convert first
+      const dateStr = raw.includes("T") || raw.includes(" ")
+        ? new Date(raw).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+        : raw.split("/").length === 3
+          ? `${raw.split("/")[2]}-${raw.split("/")[1]}-${raw.split("/")[0]}`
+          : raw;
+      return dateStr < todayStr;
+    };
 
-    const noFollowupParams = [];
-    pushDateParams(noFollowupParams, from_date, to_date);
-    if (employee_id) noFollowupParams.push(employee_id);
+    let l1_notFollowupYet     = 0;
+    let l1_inProgress         = 0, l1_inProgress_missed  = 0;
+    let l1_notPicking         = 0, l1_notPicking_missed   = 0;
+    let l1_notInterested      = 0, l1_notInterested_missed= 0;
+    let l1_followupTaken      = 0;
+    const l1_followupTakenIds = [];
 
-    const noFollowupResult = await queryWithRetry(
-      noFollowupQuery,
-      noFollowupParams,
-    );
-    const noFollowupCount = noFollowupResult[0].count;
-
-    // Initialize counters
-    let freshDataCount = noFollowupCount;
-    let notPickingCount = 0;
-    let inProgressCount = 0;
-    let meetingCount = 0;
-    let proposedCount = 0;
-    let billingCount = 0;
-    let leadInprogressCount = 0;
-    let leadOnboardedCount = 0;
-    let notInterestedCount = 0;
-    let dropCount = 0;
-    let cancelledCount = 0;
-
-    let totalMissedFollowups = 0;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    latestStatuses.forEach((row) => {
-      const isMissed =
-        row.nextFollowupDate && new Date(row.nextFollowupDate) < today;
-      const st = row.status;
-
-      if (
-        isMissed &&
-        ![
-          "lead",
-          "Lead",
-          "project_onboard",
-          "projectOnboarded",
-          "dropped",
-          "Droped",
-          "droped",
-          "cancelled",
-        ].includes(st)
-      ) {
-        totalMissedFollowups++;
-      }
-
-      if (
-        st === "not_picking" ||
-        st === "Not picking/busy/others" ||
-        st === "Not picking/ busy/ others"
-      ) {
-        notPickingCount++;
-      } else if (
-        st === "inProgress" ||
-        st === "inprogress" ||
-        st === "first_followup" ||
-        st === "second_followup" ||
-        st === "Followup Taken" ||
-        st === "followup_taken"
-      ) {
-        inProgressCount++;
-      } else if (st === "meeting" || st === "Meeting") {
-        meetingCount++;
-      } else if (st === "proposed" || st === "proposal" || st === "Proposal") {
-        proposedCount++;
-      } else if (st === "billing" || st === "Quotation" || st === "quotation") {
-        billingCount++;
-      } else if (st === "lead" || st === "Lead") {
-        leadInprogressCount++;
-      } else if (st === "project_onboard" || st === "projectOnboarded") {
-        leadOnboardedCount++;
-      } else if (st === "not_interested" || st === "Not Interested") {
-        notInterestedCount++;
-      } else if (st === "dropped" || st === "droped" || st === "Droped") {
-        dropCount++;
-      } else if (st === "cancelled" || st === "Cancelled") {
-        cancelledCount++;
-      } else {
-        inProgressCount++;
+    l1Rows.forEach((row) => {
+      const st  = row.latest_status;
+      const nfd = row.next_followup_date;
+      if (!st || st.trim() === "") {
+        l1_notFollowupYet++;
+      } else if (st === "In progress") {
+        l1_inProgress++;
+        if (isL1Missed(nfd)) l1_inProgress_missed++;
+      } else if (st === "Not picking/ busy/ others" || st === "Not picking/busy/others") {
+        l1_notPicking++;
+        if (isL1Missed(nfd)) l1_notPicking_missed++;
+      } else if (st === "Not Interested") {
+        l1_notInterested++;
+        if (isL1Missed(nfd)) l1_notInterested_missed++;
+      } else if (st === "Followup Taken") {
+        l1_followupTaken++;
+        l1_followupTakenIds.push(row.id);
       }
     });
 
-    const activeFollowupsTotal =
-      notPickingCount + inProgressCount + meetingCount + totalMissedFollowups;
-    const leadsTotal =
-      proposedCount + billingCount + leadInprogressCount + leadOnboardedCount;
-    const cancelledDroppedTotal = dropCount + cancelledCount;
+    // Count projects belonging to "Followup Taken" clients
+    let followupTakenProjectCount = 0;
+    if (l1_followupTakenIds.length > 0) {
+      const placeholders = l1_followupTakenIds.map(() => "?").join(",");
+      const projCountRows = await queryWithRetry(
+        `SELECT COUNT(*) AS total FROM projects WHERE client_id IN (${placeholders})`,
+        l1_followupTakenIds
+      );
+      followupTakenProjectCount = projCountRows[0].total;
+    }
 
-    const response = {
-      success: true,
-      data: {
-        totalCustomers: totalCustomers,
-        freshData: {
-          total: freshDataCount,
-        },
-        followups: {
-          total: activeFollowupsTotal,
-        },
-        leads: {
-          total: leadsTotal,
-        },
-        others: {
-          total: notInterestedCount,
-        },
-        cancelledDropped: {
-          total: cancelledDroppedTotal,
-        },
-        totalMissedFollowups: totalMissedFollowups,
-        distribution: [
-          { name: "Not Picking / Busy / Others", value: notPickingCount },
-          { name: "Not Interested", value: notInterestedCount },
-          { name: "In Progress", value: inProgressCount },
-          { name: "Shared Proposal", value: proposedCount },
-          { name: "Meetings", value: meetingCount },
-          { name: "Missed Follow Up", value: totalMissedFollowups },
-          { name: "Payment Proposal", value: billingCount },
-          { name: "Lead Inprogress", value: leadInprogressCount },
-          { name: "Lead Onboarded", value: leadOnboardedCount },
-          { name: "Lead Cancelled", value: cancelledCount },
-          { name: "Dropped", value: dropCount },
-        ],
-        dateRange: {
-          from: from_date || null,
-          to: to_date || null,
-        },
-      },
+    const l1_total = l1_inProgress + l1_notPicking + l1_notInterested + l1_followupTaken;
+
+
+    // ─── 3. Level-2 breakdown (ManagementFollowup per project) ─────────────
+    const l2Params = [];
+    pushDateParams(l2Params, from_date, to_date);
+    if (employee_id) l2Params.push(employee_id);
+
+    const l2Rows = await queryWithRetry(
+      `SELECT f.status, f.nextFollowupDate
+       FROM ManagementFollowup f
+       INNER JOIN (
+         SELECT clientID, projectId, MAX(id) AS max_id
+         FROM ManagementFollowup
+         GROUP BY clientID, projectId
+       ) latest ON f.clientID = latest.clientID AND f.projectId = latest.projectId AND f.id = latest.max_id
+       INNER JOIN ClientsDataManagement c ON f.clientID = c.id
+       WHERE c.active = 1
+       ${buildDateClause("c.created_at", from_date, to_date)}
+       ${employee_id ? "AND c.employee_id = ?" : ""}`,
+      l2Params
+    );
+
+    let l2_followup         = 0, l2_followup_missed   = 0;
+    let l2_lead             = 0, l2_lead_missed       = 0;
+    let l2_notPicking       = 0, l2_notPicking_missed = 0;
+    let l2_quotation        = 0, l2_quotation_missed  = 0;
+    let l2_proposal         = 0, l2_proposal_missed   = 0;
+    let l2_onboarded        = 0; // terminal — no missed
+    let l2_droped           = 0; // terminal — no missed
+
+    // nextFollowupDate in ManagementFollowup — same robust check
+    const isMissed = (nfd) => {
+      if (!nfd) return false;
+      const raw = String(nfd).trim();
+      const dateStr = raw.includes("T") || raw.includes(" ")
+        ? new Date(raw).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+        : raw.split("/").length === 3
+          ? `${raw.split("/")[2]}-${raw.split("/")[1]}-${raw.split("/")[0]}`
+          : raw;
+      return dateStr < todayStr;
     };
 
-    res.status(200).json(response);
+    l2Rows.forEach((row) => {
+      const st  = row.status || "";
+      const nfd = row.nextFollowupDate;
+      // followup statuses
+      if (
+        st === "inprogress" || st === "inProgress" ||
+        st === "first_followup" || st === "second_followup" ||
+        st === "followup_taken" || st === "Followup Taken" ||
+        st === "meeting" || st === "Meeting"
+      ) {
+        l2_followup++;
+        if (isMissed(nfd)) l2_followup_missed++;
+      } else if (st === "lead" || st === "Lead") {
+        l2_lead++;
+        if (isMissed(nfd)) l2_lead_missed++;
+      } else if (
+        st === "not_picking" || st === "Not picking/busy/others" ||
+        st === "Not picking/ busy/ others"
+      ) {
+        l2_notPicking++;
+        if (isMissed(nfd)) l2_notPicking_missed++;
+      } else if (
+        st === "billing" || st === "Quotation" || st === "quotation"
+      ) {
+        l2_quotation++;
+        if (isMissed(nfd)) l2_quotation_missed++;
+      } else if (
+        st === "proposed" || st === "proposal" || st === "Proposal" || st === "Proposed"
+      ) {
+        l2_proposal++;
+        if (isMissed(nfd)) l2_proposal_missed++;
+      } else if (
+        st === "project_onboard" || st === "projectOnboarded" || st === "ProjectOnboard"
+      ) {
+        l2_onboarded++;
+      } else if (
+        st === "dropped" || st === "droped" || st === "Droped"
+      ) {
+        l2_droped++;
+      }
+    });
+
+    const l2_total = l2_followup + l2_lead + l2_notPicking + l2_quotation + l2_proposal + l2_onboarded + l2_droped;
+
+    // ─── 4. Onboarded breakdown — mirrors the Project Onboard tab ─────────────
+    // Count only records that have a ManagementFollowup with project_onboard status
+    // Sub-filtered by projects.onboard_status (same as Followup.jsx Project Onboard tab)
+    const projParams = [];
+    pushDateParams(projParams, from_date, to_date);
+    if (employee_id) projParams.push(employee_id);
+
+    const projRows = await queryWithRetry(
+      `SELECT p.onboard_status
+       FROM ManagementFollowup f
+       INNER JOIN (
+         SELECT clientID, projectId, MAX(id) AS max_id
+         FROM ManagementFollowup
+         WHERE status IN ('project_onboard', 'projectOnboarded', 'ProjectOnboard')
+         GROUP BY clientID, projectId
+       ) latest ON f.clientID = latest.clientID AND f.projectId = latest.projectId AND f.id = latest.max_id
+       LEFT JOIN projects p ON f.projectId = p.id
+       INNER JOIN ClientsDataManagement c ON f.clientID = c.id
+       WHERE c.active = 1
+       ${buildDateClause("c.created_at", from_date, to_date)}
+       ${employee_id ? "AND c.employee_id = ?" : ""}`,
+      projParams
+    );
+
+    let proj_pending   = 0;
+    let proj_onboarded = 0;
+    let proj_cancelled = 0;
+
+    projRows.forEach((row) => {
+      const st = (row.onboard_status || "").toLowerCase();
+      if (st === "onboarded" || st === "completed") {
+        proj_onboarded++;
+      } else if (st === "cancelled") {
+        proj_cancelled++;
+      } else {
+        // "In progress" or anything else → Pending
+        proj_pending++;
+      }
+    });
+
+    const proj_total = proj_pending + proj_onboarded + proj_cancelled;
+
+    // ─── 5. Active Following (has any level-1 or level-2 record) ─────────────
+    const activeFollowing = totalClients - l1_notFollowupYet;
+
+    // ─── Response ────────────────────────────────────────────────────────────
+    res.status(200).json({
+      success: true,
+      data: {
+        totalClients,
+        notFollowupYet: l1_notFollowupYet,
+        activeFollowing,
+        level1: {
+          total: l1_total,
+          breakdown: [
+            { label: "In Progress",             count: l1_inProgress,    missedCount: l1_inProgress_missed    },
+            { label: "Not Picking/Busy/Others", count: l1_notPicking,    missedCount: l1_notPicking_missed    },
+            { label: "Not Interested",          count: l1_notInterested, missedCount: l1_notInterested_missed },
+            { label: "Followup Taken",          count: l1_followupTaken, missedCount: 0, projectCount: followupTakenProjectCount },
+          ],
+        },
+        level2: {
+          total: l2_total,
+          breakdown: [
+            { label: "Followup",                count: l2_followup,   missedCount: l2_followup_missed   },
+            { label: "Lead",                    count: l2_lead,       missedCount: l2_lead_missed        },
+            { label: "Not Picking/Busy/Others", count: l2_notPicking, missedCount: l2_notPicking_missed  },
+            { label: "Quotation",               count: l2_quotation,  missedCount: l2_quotation_missed   },
+            { label: "Proposal",                count: l2_proposal,   missedCount: l2_proposal_missed    },
+            { label: "Onboarded",               count: l2_onboarded,  missedCount: 0 },
+            { label: "Dropped",                 count: l2_droped,     missedCount: 0 },
+          ],
+        },
+        onboarded: {
+          total: proj_total,
+          breakdown: [
+            { label: "Pending",    count: proj_pending   },
+            { label: "Onboarded", count: proj_onboarded },
+            { label: "Cancelled", count: proj_cancelled },
+          ],
+        },
+        dateRange: { from: from_date || null, to: to_date || null },
+      },
+    });
   } catch (error) {
     console.error("Error fetching management analytics overview:", error);
     res.status(500).json({
@@ -269,6 +337,7 @@ router.get("/overview", async (req, res) => {
     });
   }
 });
+
 
 // ✅ Get timeline for Management
 router.get("/timeline", async (req, res) => {
@@ -299,10 +368,10 @@ router.get("/timeline", async (req, res) => {
         MONTH(f.created_at) AS month_number,
         DAY(f.created_at) AS day_number,
         DATE_FORMAT(f.created_at, '%Y-%m-%d') AS date_key
-      FROM ManagementFollowups f
+      FROM ManagementFollowup f
       INNER JOIN (
         SELECT clientID, MAX(id) as max_id
-        FROM ManagementFollowups
+        FROM ManagementFollowup
         ${employee_id ? "WHERE employee_id = ?" : ""}
         GROUP BY clientID
       ) latest ON f.clientID = latest.clientID AND f.id = latest.max_id
@@ -401,7 +470,85 @@ router.get("/timeline", async (req, res) => {
 // ✅ Get report data for Management with history
 router.get("/report", async (req, res) => {
   try {
-    const { employee_id } = req.query;
+    const { employee_id, level } = req.query;
+
+    if (level === "level1") {
+      const sql1 = `
+        SELECT
+          c.id AS clientID,
+          c.company_name,
+          c.customer_name,
+          c.contactPersons,
+          c.reference,
+          c.city,
+          c.state,
+          c.created_at,
+          (SELECT p2.project_name FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1) AS project_name,
+          (SELECT p2.project_category FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1) AS project_category,
+          lf.id AS followup_id,
+          lf.status,
+          lf.remarks,
+          lf.created_at AS followupDate,
+          lf.next_followup_date AS nextFollowupDate,
+          e.employee_name AS employee_name
+        FROM ClientsDataManagement c
+        LEFT JOIN employees_details e ON c.employee_id = e.employee_id
+        LEFT JOIN (
+          SELECT client_id, MAX(id) AS max_id FROM clientsdataFollowup GROUP BY client_id
+        ) lid ON c.id = lid.client_id
+        LEFT JOIN clientsdataFollowup lf ON lid.max_id = lf.id
+        WHERE c.active = 1
+        ${employee_id ? "AND c.employee_id = ?" : ""}
+        ORDER BY c.created_at DESC
+      `;
+      const reportParams1 = employee_id ? [employee_id] : [];
+      const rows1 = await queryWithRetry(sql1, reportParams1);
+
+      const data1 = rows1.map((row) => {
+        let phone = "-";
+        let contactName = "-";
+        if (row.contactPersons) {
+          try {
+            const contacts =
+              typeof row.contactPersons === "string"
+                ? JSON.parse(row.contactPersons)
+                : row.contactPersons;
+            if (Array.isArray(contacts) && contacts.length > 0) {
+              phone = contacts[0].phone || contacts[0].contactNumber || "-";
+              contactName = contacts[0].name || "-";
+            }
+          } catch (e) {}
+        }
+        const cityStr = row.city && row.city !== "-" ? row.city : "";
+        const stateStr = row.state && row.state !== "-" ? row.state : "";
+        let location = "-";
+        if (cityStr && stateStr) location = `${cityStr}, ${stateStr}`;
+        else if (cityStr) location = cityStr;
+        else if (stateStr) location = stateStr;
+
+        return {
+          clientID: row.clientID,
+          company_name: row.company_name || "-",
+          customer_name: row.customer_name || "-",
+          project_name: row.project_name || "-",
+          category: row.project_category || "-",
+          reference: row.reference || "-",
+          phone,
+          contactName,
+          city: row.city || "-",
+          state: row.state || "-",
+          location,
+          created_at: row.created_at,
+          employee_name: row.employee_name || "-",
+          status: row.status || "not_followed_up",
+          remarks: row.remarks || "-",
+          followupDate: row.followupDate || row.created_at,
+          nextFollowupDate: row.nextFollowupDate,
+        };
+      });
+
+      return res.status(200).json({ success: true, data: data1 });
+    }
 
     const sql = `
       SELECT
@@ -409,9 +556,12 @@ router.get("/report", async (req, res) => {
         c.company_name,
         c.customer_name,
         c.contactPersons,
+        c.reference,
         c.city,
         c.state,
         c.created_at,
+        COALESCE(p.project_name, (SELECT p2.project_name FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1)) AS project_name,
+        COALESCE(p.project_category, (SELECT p2.project_category FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1)) AS project_category,
         fu.id AS followup_id,
         fu.status,
         fu.remarks,
@@ -422,7 +572,8 @@ router.get("/report", async (req, res) => {
         e.employee_name AS employee_name
       FROM ClientsDataManagement c
       LEFT JOIN employees_details e ON c.employee_id = e.employee_id
-      LEFT JOIN ManagementFollowups fu ON fu.clientID = c.id
+      LEFT JOIN ManagementFollowup fu ON fu.clientID = c.id
+      LEFT JOIN projects p ON fu.projectId = p.id
       LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
       WHERE c.active = 1
       ${employee_id ? "AND c.employee_id = ?" : ""}
@@ -467,8 +618,11 @@ router.get("/report", async (req, res) => {
       if (!clientMap.has(row.clientID)) {
         clientMap.set(row.clientID, {
           clientID: row.clientID,
-          company_name: row.company_name,
-          customer_name: row.customer_name,
+          company_name: row.company_name || "-",
+          customer_name: row.customer_name || "-",
+          project_name: row.project_name || "-",
+          category: row.project_category || "-",
+          reference: row.reference || "-",
           phone: phone,
           contactName: contactName,
           city: row.city || "-",
@@ -575,6 +729,7 @@ router.get("/meetings", async (req, res) => {
         c.contactPersons AS client_contact_persons,
         c.city,
         c.state,
+        COALESCE(p.project_name, (SELECT p2.project_name FROM projects p2 WHERE p2.client_id = fu.clientID ORDER BY p2.id DESC LIMIT 1)) AS project_name,
         cp.name AS contact_person_name,
         cp.contactNumber AS contact_person_phone,
         cp.designation AS contact_person_designation,
@@ -583,8 +738,9 @@ router.get("/meetings", async (req, res) => {
           (SELECT ed.employee_name FROM employees_details ed WHERE ed.employee_id = c.employee_id LIMIT 1)
         ) AS employee_name
       FROM ManagementMeetings m
-      JOIN ManagementFollowups fu ON m.followupID = fu.id
+      JOIN ManagementFollowup fu ON m.followupID = fu.id
       LEFT JOIN ClientsDataManagement c ON fu.clientID = c.id
+      LEFT JOIN projects p ON fu.projectId = p.id
       LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
       WHERE 1=1
       ${filters}
@@ -652,6 +808,7 @@ router.get("/meetings", async (req, res) => {
         clientID: row.clientID,
         company_name: row.company_name || "-",
         customer_name: row.customer_name || "-",
+        project_name: row.project_name || "-",
         location,
         contact_person_name: contactName || "-",
         contact_person_phone: contactPhone || "-",
@@ -723,13 +880,11 @@ router.get("/client-history/:clientId", async (req, res) => {
     res.status(200).json({ success: true, data: processed });
   } catch (err) {
     console.error("❌ Error fetching client followups:", err);
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: "Failed to fetch followups",
-        message: err.message,
-      });
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch followups",
+      message: err.message,
+    });
   }
 });
 

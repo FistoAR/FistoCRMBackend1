@@ -260,6 +260,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
   );
 
   // Filters - Detailed report tab
+  const [reportLevel, setReportLevel] = useState("level1"); // level1 | level2
   const [reportFromDate, setReportFromDate] = useState("");
   const [reportToDate, setReportToDate] = useState("");
   const [reportSearch, setReportSearch] = useState("");
@@ -287,7 +288,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const itemsPerPage = 10;
 
   // History Modal
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -344,17 +345,16 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
   const formatStatus = (status) => {
     if (!status) return "-";
-    if (status === "first_followup") return "First Followup";
-    if (status === "second_followup") return "Second Followup";
-    if (status === "not_picking") return "Not Picking";
+    if (status === "not_followed_up") return "Not Followed Up Yet";
+    if (status === "first_followup" || status === "second_followup" || status === "inprogress" || status === "inProgress") return "Followup";
+    if (status === "not_picking") return "Not Picking / Busy / Others";
     if (status === "not_interested") return "Not Interested";
-    if (status === "proposed") return "Shared Proposal";
+    if (status === "proposed" || status === "proposal") return "Proposal";
     if (status === "meeting") return "Meetings";
-    if (status === "billing") return "Payment Proposal";
-    if (status === "lead") return "Lead Inprogress";
-    if (status === "project_onboard") return "Lead Onboarded";
-    if (status === "cancelled") return "Lead Cancelled";
-    if (status === "converted") return "Converted / Lead";
+    if (status === "billing" || status === "quotation") return "Quotation";
+    if (status === "lead") return "Lead";
+    if (status === "project_onboard" || status === "projectOnboarded") return "Onboarded";
+    if (status === "cancelled") return "Cancelled";
     if (status === "droped" || status === "dropped") return "Dropped";
     return status
       .split("_")
@@ -446,13 +446,15 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     }
   };
 
-  const fetchReportData = async () => {
+  const fetchReportData = async (lvl = reportLevel) => {
     try {
       setReportLoading(true);
       const empId = getEmployeeId();
-      const url = empId
-        ? `${API_URL}/management/analytics/report?employee_id=${empId}`
-        : `${API_URL}/management/analytics/report`;
+      const params = new URLSearchParams();
+      params.append("level", lvl);
+      if (empId) params.append("employee_id", empId);
+
+      const url = `${API_URL}/management/analytics/report?${params.toString()}`;
 
       const res = await fetch(url);
       const result = await res.json();
@@ -499,11 +501,11 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     } else if (subTab === "timeline") {
       fetchTimelineData();
     } else if (subTab === "report") {
-      fetchReportData();
+      fetchReportData(reportLevel);
     } else if (subTab === "meetings") {
       fetchMeetingsData();
     }
-  }, [subTab, selectedEmployee, propEmployeeId]);
+  }, [subTab, reportLevel, selectedEmployee, propEmployeeId]);
 
   useEffect(() => {
     if (subTab === "overview") {
@@ -523,128 +525,56 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     }
   }, [meetingFromDate, meetingToDate, meetingStatusFilter]);
 
-  // 1. First Distribution Pie Chart Data:
-  // Not picking/busy/others, Not interested, In Progress, Shared proposal, Meetings, Missed Follow Up
+  // ── Pie chart data – Level-1 (ClientMaster statuses) ──────────────────────
   const activeFollowupsPieData = useMemo(() => {
-    const activeCategories = [
-      { name: "Not Picking / Busy / Others", color: "#60A5FA" },
-      { name: "Not Interested", color: "#F59E0B" },
-      { name: "In Progress", color: "#3B82F6" },
-      { name: "Shared Proposal", color: "#A7F3D0" },
-      { name: "Meetings", color: "#8B5CF6" },
-      { name: "Missed Follow Up", color: "#EF4444" },
+    const cats = [
+      { name: "In Progress",             color: "#3B82F6" },
+      { name: "Not Picking/Busy/Others", color: "#60A5FA" },
+      { name: "Not Interested",          color: "#F59E0B" },
+      { name: "Followup Taken",          color: "#8B5CF6" },
     ];
-    if (!analyticsData?.distribution) {
-      return activeCategories.map((c) => ({
-        name: c.name,
-        value: 0,
-        color: c.color,
-      }));
-    }
-    const distMap = new Map(
-      analyticsData.distribution.map((i) => [i.name, i.value]),
-    );
-    return activeCategories.map((c) => ({
-      name: c.name,
-      value: distMap.get(c.name) || 0,
-      color: c.color,
+    const bd = analyticsData?.level1?.breakdown || [];
+    const map = new Map(bd.map((i) => [i.label, { value: i.count, missed: i.missedCount || 0 }]));
+    return cats.map((c) => ({ 
+      name: c.name, 
+      value: map.get(c.name)?.value || 0, 
+      missed: map.get(c.name)?.missed || 0, 
+      color: c.color 
     }));
   }, [analyticsData]);
 
-  // 2. Second Distribution Pie Chart Data:
-  // Payment proposal, Lead inprogress, Lead Onboarded, Lead Cancelled, Dropped
+  // ── Pie chart data – Level-2 (ManagementFollowup statuses) ─────────────────
   const conversionOutcomePieData = useMemo(() => {
-    const outcomeCategories = [
-      { name: "Payment Proposal", color: "#34D399" },
-      { name: "Lead Inprogress", color: "#3B82F6" },
-      { name: "Lead Onboarded", color: "#10B981" },
-      { name: "Lead Cancelled", color: "#F87171" },
-      { name: "Dropped", color: "#6B7280" },
+    const cats = [
+      { name: "Followup",                color: "#3B82F6" },
+      { name: "Lead",                    color: "#10B981" },
+      { name: "Not Picking/Busy/Others", color: "#60A5FA" },
+      { name: "Quotation",               color: "#34D399" },
+      { name: "Proposal",                color: "#A7F3D0" },
+      { name: "Onboarded",               color: "#059669" },
+      { name: "Dropped",                 color: "#6B7280" },
     ];
-    if (!analyticsData?.distribution) {
-      return outcomeCategories.map((c) => ({
-        name: c.name,
-        value: 0,
-        color: c.color,
-      }));
-    }
-    const distMap = new Map(
-      analyticsData.distribution.map((i) => [i.name, i.value]),
-    );
-    return outcomeCategories.map((c) => ({
-      name: c.name,
-      value: distMap.get(c.name) || 0,
-      color: c.color,
-    }));
+    const bd = analyticsData?.level2?.breakdown || [];
+    const map = new Map(bd.map((i) => [i.label, i.count]));
+    return cats.map((c) => ({ name: c.name, value: map.get(c.name) || 0, color: c.color }));
   }, [analyticsData]);
 
-  const totalCustomers = analyticsData?.totalCustomers || 0;
-  const freshDataCount = analyticsData?.freshData?.total || 0;
-  const followupsCount = analyticsData?.followups?.total || 0;
-  const leadsCount = analyticsData?.leads?.total || 0;
+  // ── Card values ─────────────────────────────────────────────────────────────
+  const totalClients      = analyticsData?.totalClients      || 0;
+  const notFollowupYet    = analyticsData?.notFollowupYet    || 0;
+  const activeFollowing   = analyticsData?.activeFollowing   || 0;
+  const level1Total       = analyticsData?.level1?.total     || 0;
+  const level2Total       = analyticsData?.level2?.total     || 0;
+  const onboardedTotal    = analyticsData?.onboarded?.total  || 0;
+  const level1Breakdown   = analyticsData?.level1?.breakdown || [];
+  const level2Breakdown   = analyticsData?.level2?.breakdown || [];
+  const onboardedBreakdown= analyticsData?.onboarded?.breakdown || [];
 
-  const notInterestedCount = useMemo(() => {
-    if (!analyticsData?.distribution) return 0;
-    const item = analyticsData.distribution.find(
-      (i) => i.name === "Not Interested",
-    );
-    return item ? item.value : 0;
-  }, [analyticsData]);
-
-  // Breakdown metrics for hover tooltip popovers
-  const breakdownData = useMemo(() => {
-    if (!analyticsData?.distribution) {
-      return {
-        activeFollowups: [],
-        leads: [],
-        cancelledDropped: [],
-      };
-    }
-    const distMap = new Map(
-      analyticsData.distribution.map((i) => [i.name, i.value]),
-    );
-
-    return {
-      activeFollowups: [
-        {
-          label: "Not Picking / Busy / Others",
-          count: distMap.get("Not Picking / Busy / Others") || 0,
-        },
-        { label: "In Progress", count: distMap.get("In Progress") || 0 },
-        {
-          label: "Shared Proposal",
-          count: distMap.get("Shared Proposal") || 0,
-        },
-        { label: "Meetings", count: distMap.get("Meetings") || 0 },
-        {
-          label: "Missed Follow Up",
-          count: distMap.get("Missed Follow Up") || 0,
-        },
-      ],
-      leads: [
-        {
-          label: "Payment Proposal",
-          count: distMap.get("Payment Proposal") || 0,
-        },
-        {
-          label: "Lead Inprogress",
-          count: distMap.get("Lead Inprogress") || 0,
-        },
-        { label: "Lead Onboarded", count: distMap.get("Lead Onboarded") || 0 },
-      ],
-      cancelledDropped: [
-        { label: "Lead Cancelled", count: distMap.get("Lead Cancelled") || 0 },
-        { label: "Dropped", count: distMap.get("Dropped") || 0 },
-      ],
-    };
-  }, [analyticsData]);
-
-  const cancelledDroppedCount = useMemo(() => {
-    return breakdownData.cancelledDropped.reduce(
-      (acc, curr) => acc + curr.count,
-      0,
-    );
-  }, [breakdownData]);
+  // kept for backward compat (pie charts still use these names)
+  const totalCustomers  = totalClients;
+  const freshDataCount  = notFollowupYet;
+  const followupsCount  = level1Total;
+  const leadsCount      = level2Total;
 
   // Filtered Report Data
   const filteredReportData = useMemo(() => {
@@ -684,8 +614,22 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       const matchesStatus =
         !reportStatusFilter ||
         row.status === reportStatusFilter ||
-        (reportStatusFilter === "inprogress" &&
-          (row.status === "inProgress" || row.status === "inprogress")) ||
+        (reportStatusFilter === "In progress" &&
+          (row.status === "In progress" || row.status === "In Progress" || row.status === "inProgress")) ||
+        (reportStatusFilter === "not_picking" &&
+          (row.status === "not_picking" || row.status?.toLowerCase().includes("not picking"))) ||
+        (reportStatusFilter === "not_interested" &&
+          (row.status === "not_interested" || row.status?.toLowerCase().includes("not interested"))) ||
+        (reportStatusFilter === "Followup Taken" &&
+          (row.status === "Followup Taken" || row.status === "followup_taken")) ||
+        (reportStatusFilter === "first_followup" &&
+          (row.status === "first_followup" || row.status === "second_followup" || row.status === "inprogress" || row.status === "inProgress" || row.status === "Followup")) ||
+        (reportStatusFilter === "billing" &&
+          (row.status === "billing" || row.status === "quotation" || row.status === "Quotation")) ||
+        (reportStatusFilter === "proposed" &&
+          (row.status === "proposed" || row.status === "proposal" || row.status === "Proposal")) ||
+        (reportStatusFilter === "project_onboard" &&
+          (row.status === "project_onboard" || row.status === "projectOnboarded" || row.status === "ProjectOnboard")) ||
         (reportStatusFilter === "dropped" &&
           (row.status === "droped" || row.status === "dropped"));
 
@@ -878,9 +822,12 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   <input
                     type="date"
                     value={overviewToDate}
+                    disabled={!overviewFromDate}
                     min={overviewFromDate || undefined}
                     onChange={(e) => setOverviewToDate(e.target.value)}
-                    className="px-[0.6vw] py-[0.25vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                    className={`px-[0.6vw] py-[0.25vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white ${
+                      !overviewFromDate ? "opacity-50 cursor-not-allowed bg-gray-100" : ""
+                    }`}
                   />
                 </div>
                 {(overviewFromDate || overviewToDate) && (
@@ -922,6 +869,38 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
           {/* Reports Tab Filters */}
           {subTab === "report" && (
             <div className="flex items-center gap-[0.8vw] relative">
+              {/* Level 1 / Level 2 Sub-tab Toggle */}
+              <div className="flex items-center bg-gray-100/90 p-[0.2vw] rounded-lg border border-gray-200/60 shadow-inner">
+                <button
+                  onClick={() => {
+                    setReportLevel("level1");
+                    setReportStatusFilter("");
+                    setCurrentPage(1);
+                  }}
+                  className={`px-[0.8vw] py-[0.3vw] rounded-md cursor-pointer font-semibold text-[0.78vw] transition-all duration-200 ${
+                    reportLevel === "level1"
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/70"
+                  }`}
+                >
+                  First Level
+                </button>
+                <button
+                  onClick={() => {
+                    setReportLevel("level2");
+                    setReportStatusFilter("");
+                    setCurrentPage(1);
+                  }}
+                  className={`px-[0.8vw] py-[0.3vw] rounded-md cursor-pointer font-semibold text-[0.78vw] transition-all duration-200 ${
+                    reportLevel === "level2"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/70"
+                  }`}
+                >
+                  Second Level
+                </button>
+              </div>
+
               {/* Search Bar */}
               <input
                 type="text"
@@ -984,7 +963,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                     {/* Status Filter inside panel */}
                     <div className="flex flex-col gap-[0.4vw]">
                       <label className="text-[0.78vw] font-semibold text-gray-700">
-                        Status:
+                        Status ({reportLevel === "level1" ? "First Level" : "Second Level"}):
                       </label>
                       <select
                         value={reportStatusFilter}
@@ -995,19 +974,31 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                         className="w-full px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-gray-700"
                       >
                         <option value="">All Statuses</option>
-                        <option value="first_followup">First Followup</option>
-                        <option value="not_picking">
-                          Not Picking / Busy / Others
-                        </option>
-                        <option value="not_interested">Not Interested</option>
-                        <option value="inprogress">In Progress</option>
-                        <option value="proposed">Shared Proposal</option>
-                        <option value="meeting">Meetings</option>
-                        <option value="billing">Payment Proposal</option>
-                        <option value="lead">Lead Inprogress</option>
-                        <option value="project_onboard">Lead Onboarded</option>
-                        <option value="cancelled">Lead Cancelled</option>
-                        <option value="dropped">Dropped</option>
+                        {reportLevel === "level1" ? (
+                          <>
+                            <option value="In progress">In Progress</option>
+                            <option value="Not picking/ busy/ others">
+                              Not Picking / Busy / Others
+                            </option>
+                            <option value="Not Interested">Not Interested</option>
+                            <option value="Followup Taken">Followup Taken</option>
+                            <option value="not_followed_up">
+                              Not Followed Up Yet
+                            </option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="first_followup">Followup</option>
+                            <option value="lead">Lead</option>
+                            <option value="not_picking">
+                              Not Picking / Busy / Others
+                            </option>
+                            <option value="billing">Quotation</option>
+                            <option value="proposed">Proposal</option>
+                            <option value="project_onboard">Onboarded</option>
+                            <option value="dropped">Dropped</option>
+                          </>
+                        )}
                       </select>
                     </div>
 
@@ -1042,12 +1033,15 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                           <input
                             type="date"
                             value={reportToDate}
+                            disabled={!reportFromDate}
                             min={reportFromDate || undefined}
                             onChange={(e) => {
                               setReportToDate(e.target.value);
                               setCurrentPage(1);
                             }}
-                            className="w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                            className={`w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white ${
+                              !reportFromDate ? "opacity-50 cursor-not-allowed bg-gray-100" : ""
+                            }`}
                           />
                         </div>
                       </div>
@@ -1126,9 +1120,12 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 <input
                   type="date"
                   value={meetingToDate}
+                  disabled={!meetingFromDate}
                   min={meetingFromDate || undefined}
                   onChange={(e) => setMeetingToDate(e.target.value)}
-                  className="px-[0.6vw] py-[0.25vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                  className={`px-[0.6vw] py-[0.25vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white ${
+                    !meetingFromDate ? "opacity-50 cursor-not-allowed bg-gray-100" : ""
+                  }`}
                 />
               </div>
               <select
@@ -1178,49 +1175,43 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
             </div>
           ) : (
             <div className="flex flex-col gap-[1.5vw] h-full overflow-y-auto  p-[1.5vw]">
-              {/* Cards grid */}
-              <div className="grid grid-cols-6 gap-[1vw] flex-shrink-0">
+              {/* ── 6 Dashboard Cards ── */}
+              <div className="grid grid-cols-5 gap-[1vw] flex-shrink-0">
                 {[
                   {
-                    title: "Total Client Data",
-                    value: totalCustomers,
-                    color: "bg-blue-50 text-blue-600 border-blue-200",
+                    title: "Total Clients",
+                    value: totalClients,
+                    color: "bg-blue-50 text-blue-700 border-blue-200",
                     breakdown: null,
                   },
                   {
-                    title: "Fresh Data",
-                    value: freshDataCount,
+                    title: "Not Followup Yet",
+                    value: notFollowupYet,
                     color: "bg-gray-50 text-gray-600 border-gray-200",
                     breakdown: null,
                   },
                   {
-                    title: "Active Followups",
-                    value: followupsCount,
+                    title: "First Level Followups",
+                    value: level1Total,
                     color: "bg-purple-50 text-purple-600 border-purple-200",
-                    breakdown: breakdownData.activeFollowups,
+                    breakdown: level1Breakdown,
                   },
                   {
-                    title: "Not Interested",
-                    value: notInterestedCount,
-                    color: "bg-amber-50 text-amber-600 border-amber-200",
-                    breakdown: null,
-                  },
-                  {
-                    title: "Leads (Payment/Onboard)",
-                    value: leadsCount,
+                    title: "Second Level Followups",
+                    value: level2Total,
                     color: "bg-emerald-50 text-emerald-600 border-emerald-200",
-                    breakdown: breakdownData.leads,
+                    breakdown: level2Breakdown,
                   },
                   {
-                    title: "Cancelled / Dropped",
-                    value: cancelledDroppedCount,
-                    color: "bg-rose-50 text-rose-600 border-rose-200",
-                    breakdown: breakdownData.cancelledDropped,
+                    title: "Onboarded",
+                    value: onboardedTotal,
+                    color: "bg-amber-50 text-amber-600 border-amber-200",
+                    breakdown: onboardedBreakdown,
                   },
                 ].map((card, idx) => (
                   <div
                     key={idx}
-                    className={`group relative p-[0.8vw] rounded-xl border flex flex-col justify-between ${card.color} cursor-pointer`}
+                    className={`group relative p-[0.8vw] rounded-xl border flex flex-col justify-between ${card.color} cursor-pointer overflow-visible`}
                   >
                     <div className="space-y-[0.3vw]">
                       <p className="text-[1.7vw] font-bold leading-none mb-[0.2vw] text-left">
@@ -1231,23 +1222,25 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                       </span>
                     </div>
 
-                    {/* Hover Popover Breakdown for Grouped Cards */}
+                    {/* Hover Popover Breakdown */}
                     {card.breakdown && card.breakdown.length > 0 && (
-                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-[0.5vw] hidden group-hover:flex flex-col bg-gray-900 text-white rounded-lg p-[0.6vw] text-[0.7vw] shadow-xl z-50 min-w-[11vw] space-y-[0.3vw] pointer-events-none">
-                        <div className="font-bold border-b border-gray-700 pb-[0.2vw] text-gray-300">
-                          {card.title} Breakdown:
+                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-[0.4vw] hidden group-hover:flex flex-col bg-gray-900 text-white rounded-lg p-[0.6vw] text-[0.7vw] shadow-xl z-[9999] min-w-[13vw] space-y-[0.3vw] pointer-events-none">
+                        <div className="font-bold border-b border-gray-700 pb-[0.25vw] mb-[0.2vw] text-gray-300 text-[0.72vw] uppercase tracking-wide">
+                          {card.title}
                         </div>
                         {card.breakdown.map((item, bIdx) => (
                           <div
                             key={bIdx}
-                            className="flex justify-between items-center gap-[0.5vw]"
+                            className="flex justify-between items-center gap-[1vw]"
                           >
                             <span className="text-gray-300">{item.label}</span>
-                            <span className="font-bold text-white">
+                            <span className="font-bold text-white bg-gray-700 px-[0.4vw] py-[0.1vw] rounded text-[0.68vw] min-w-[1.4vw] text-center">
                               {item.count}
                             </span>
                           </div>
                         ))}
+                        {/* arrow */}
+                        <div className="absolute -top-[0.3vw] left-1/2 -translate-x-1/2 w-[0.5vw] h-[0.5vw] bg-gray-900 rotate-45" />
                       </div>
                     )}
                   </div>
@@ -1259,7 +1252,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 {/* 1. Active Followups Distribution */}
                 <div className="border border-gray-200 rounded-xl p-[1.2vw] flex flex-col min-h-0 bg-white">
                   <h4 className="text-[0.85vw] font-bold text-gray-800 border-b border-gray-100 pb-[0.4vw] mb-[0.8vw] flex-shrink-0">
-                    Followups & Engagement Distribution
+                    First Level Followup
                   </h4>
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="w-full h-full flex items-center justify-evenly gap-[1.5vw]">
@@ -1320,22 +1313,39 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                         </ResponsiveContainer>
                       </div>
                       <div className="flex flex-col gap-[1vw]">
-                        {activeFollowupsPieData.map((entry, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center gap-[0.6vw]"
-                          >
+                        {activeFollowupsPieData.map((entry, index) => {
+                          const bdItem = level1Breakdown.find(
+                            (b) => b.label === entry.name
+                          );
+                          const missed = bdItem?.missedCount || 0;
+                          return (
                             <div
-                              className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
-                              style={{ backgroundColor: entry.color }}
+                              key={index}
+                              className="flex items-center gap-[0.6vw] flex-wrap"
                             >
-                              {entry.value}
+                              <div
+                                className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
+                                style={{ backgroundColor: entry.color }}
+                              >
+                                {entry.value}
+                              </div>
+                              <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
+                                {entry.name}
+                              </span>
+                              {missed > 0 && (
+                                <span className="px-[0.45vw] py-[0.1vw] bg-red-50 border border-red-200 text-red-600 text-[0.65vw] font-semibold rounded-full whitespace-nowrap">
+                                  {missed} Missed
+                                </span>
+                              )}
+                              {entry.name === "Followup Taken" &&
+                                bdItem?.projectCount !== undefined && bdItem.projectCount > 0 && (
+                                  <span className="px-[0.45vw] py-[0.1vw] bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.65vw] font-semibold rounded-full whitespace-nowrap">
+                                    {bdItem.projectCount} Projects
+                                  </span>
+                                )}
                             </div>
-                            <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
-                              {entry.name}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1344,7 +1354,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 {/* 2. Leads & Conversion Outcomes Pie Chart */}
                 <div className="border border-gray-200 rounded-xl p-[1.2vw] flex flex-col min-h-0 bg-white">
                   <h4 className="text-[0.85vw] font-bold text-gray-800 border-b border-gray-100 pb-[0.4vw] mb-[0.8vw] flex-shrink-0">
-                    Leads & Conversion Outcomes
+                    Second Level Followup
                   </h4>
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="w-full h-full flex items-center justify-evenly gap-[1.5vw]">
@@ -1405,22 +1415,33 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                         </ResponsiveContainer>
                       </div>
                       <div className="flex flex-col gap-[1vw]">
-                        {conversionOutcomePieData.map((entry, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center gap-[0.6vw]"
-                          >
+                        {conversionOutcomePieData.map((entry, index) => {
+                          const bdItem = level2Breakdown.find(
+                            (b) => b.label === entry.name
+                          );
+                          const missed = bdItem?.missedCount || 0;
+                          return (
                             <div
-                              className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
-                              style={{ backgroundColor: entry.color }}
+                              key={index}
+                              className="flex items-center gap-[0.6vw] flex-wrap"
                             >
-                              {entry.value}
+                              <div
+                                className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
+                                style={{ backgroundColor: entry.color }}
+                              >
+                                {entry.value}
+                              </div>
+                              <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
+                                {entry.name}
+                              </span>
+                              {missed > 0 && (
+                                <span className="px-[0.45vw] py-[0.1vw] bg-red-50 border border-red-200 text-red-600 text-[0.65vw] font-semibold rounded-full whitespace-nowrap">
+                                  {missed} Missed
+                                </span>
+                              )}
                             </div>
-                            <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
-                              {entry.name}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1446,35 +1467,35 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   <table className="w-full table-fixed border-collapse">
                     <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
                       <tr>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3.5vw]">
-                          S.No
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3.5vw]">
+                          S.NO
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8.5vw]">
                           Date
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[11vw]">
-                          Company
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                          Company Name
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
-                          Customer
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                          Customer Name
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
-                          Phone
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                          Project Name
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
-                          Location
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                          Category
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                          Reference
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
                           Status
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200">
-                          Remarks
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8.5vw]">
+                          Next Followup Date
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
-                          Handled By
-                        </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.8vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">
-                          Action
+                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[6vw]">
+                          Actions
                         </th>
                       </tr>
                     </thead>
@@ -1487,25 +1508,28 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                             key={idx}
                             className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30"
                           >
-                            <td className="px-[0.6vw] py-[0.8vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
+                            <td className="px-[0.6vw] py-[0.6vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
                               {serialNumber}
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-850 border-r border-gray-200 truncate">
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-850 border-r border-gray-200 truncate">
                               {formatDateFormatted(
                                 row.followupDate || row.created_at,
                               )}
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 font-semibold border-r border-gray-200">
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
                               <CopyTooltip text={row.company_name} />
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
                               <CopyTooltip text={row.customer_name} />
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
-                              <CopyTooltip text={row.phone} />
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 font-medium border-r border-gray-200">
+                              <CopyTooltip text={row.project_name} />
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
-                              <CopyTooltip text={row.location} />
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                              <CopyTooltip text={row.category} />
+                            </td>
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                              <CopyTooltip text={row.reference} />
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] border-r border-gray-200">
                               <span
@@ -1514,7 +1538,8 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                                   row.status === "lead"
                                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                                     : row.status?.includes("interested") ||
-                                        row.status === "droped"
+                                        row.status === "droped" ||
+                                        row.status === "dropped"
                                       ? "bg-red-50 text-red-700 border border-red-200"
                                       : "bg-blue-50 text-blue-700 border border-blue-200"
                                 }`}
@@ -1522,13 +1547,10 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                                 {formatStatus(row.status)}
                               </span>
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-600 border-r border-gray-200">
-                              <CopyTooltip text={row.remarks} />
-                            </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
-                              <CopyTooltip
-                                text={row.employee_name || row.employee_id}
-                              />
+                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                              {row.nextFollowupDate
+                                ? formatDateOnly(row.nextFollowupDate)
+                                : "-"}
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] text-center">
                               <button
@@ -1540,7 +1562,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                                     row.phone,
                                   )
                                 }
-                                className="text-blue-600 hover:text-blue-800 font-semibold text-[0.8vw] flex items-center justify-center gap-[0.2vw] mx-auto hover:underline cursor-pointer"
+                                className="text-blue-600 hover:text-blue-800 font-semibold text-[0.78vw] flex items-center justify-center gap-[0.2vw] mx-auto hover:underline cursor-pointer"
                               >
                                 <History size={14} /> History
                               </button>
@@ -1625,26 +1647,26 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                             <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3vw]">
                               S.No
                             </th>
-                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
-                              Title
-                            </th>
                             <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
                               Date & Time
                             </th>
-                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Company Name
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Project Name
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Title
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">
                               Type
                             </th>
                             <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
-                              Company
-                            </th>
-                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
-                              Customer
+                              Agenda
                             </th>
                             <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
                               Contact Person
-                            </th>
-                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
-                              Location
                             </th>
                             <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">
                               Status
@@ -1678,23 +1700,26 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                                 <td className="px-[0.5vw] py-[0.5vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
                                   {idx + 1}
                                 </td>
-                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
-                                  <CopyTooltip text={m.title} />
-                                </td>
                                 <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200 whitespace-nowrap">
                                   <div>{meetingDate}</div>
                                   <div className="text-[0.7vw] text-gray-500">
                                     {m.time || ""}
                                   </div>
                                 </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
+                                  <CopyTooltip text={m.company_name} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-medium border-r border-gray-200">
+                                  <CopyTooltip text={m.project_name} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
+                                  <CopyTooltip text={m.title} />
+                                </td>
                                 <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
                                   {m.type || "-"}
                                 </td>
-                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                                  <CopyTooltip text={m.company_name} />
-                                </td>
-                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                                  <CopyTooltip text={m.customer_name} />
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                                  <CopyTooltip text={m.agenda} />
                                 </td>
                                 <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
                                   <CopyTooltip
@@ -1703,16 +1728,6 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                                       m.contact_person_name !== "-"
                                         ? `${m.contact_person_name}${m.contact_person_phone && m.contact_person_phone !== "-" ? ` (${m.contact_person_phone})` : ""}`
                                         : "-"
-                                    }
-                                  />
-                                </td>
-                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
-                                  <CopyTooltip
-                                    text={
-                                      m.meeting_location &&
-                                      m.meeting_location !== "-"
-                                        ? m.meeting_location
-                                        : m.location
                                     }
                                   />
                                 </td>

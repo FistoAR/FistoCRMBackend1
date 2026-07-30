@@ -1,6 +1,6 @@
 /**
  * Fisto CRM Database Schema Specification
- * Generated automatically on 2026-07-29T12:05:54.327Z
+ * Generated automatically on 2026-07-30T10:25:41.963Z
  */
 
 const databaseSchema = {
@@ -373,6 +373,24 @@ const databaseSchema = {
     {
       column: "technical_presentation",
       type: "longtext",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_start_time",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_end_time",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_duration",
+      type: "varchar(100)",
       nullable: true,
       default: "NULL",
     },
@@ -1716,9 +1734,9 @@ const databaseSchema = {
   ],
 
   /**
-   * Table: ManagementFollowups
+   * Table: ManagementFollowup
    */
-  ManagementFollowups: [
+  ManagementFollowup: [
     {
       column: "id",
       type: "int(11)",
@@ -1757,6 +1775,94 @@ const databaseSchema = {
       type: "enum('Followup Taken','Not picking/busy/others','Lead','Quotation','Proposal','ProjectOnboard','Droped')",
       nullable: true,
       default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "nextFollowupDate",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "remarks",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "quotation_path",
+      type: "longtext",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "isMarketing",
+      type: "tinyint(1)",
+      nullable: true,
+      default: "0",
+    },
+    {
+      column: "marketing_client_id",
+      type: "int(11)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "created_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+    },
+    {
+      column: "updated_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+      extra: "on update current_timestamp()",
+    },
+  ],
+
+  /**
+   * Table: ManagementFollowups
+   */
+  ManagementFollowups: [
+    {
+      column: "id",
+      type: "int(11)",
+      nullable: false,
+      key: "PRI",
+      extra: "auto_increment",
+    },
+    {
+      column: "clientID",
+      type: "int(11)",
+      nullable: true,
+      default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "projectId",
+      type: "int(11)",
+      nullable: true,
+      default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "employee_id",
+      type: "varchar(50)",
+      nullable: false,
+      key: "MUL",
+    },
+    {
+      column: "contactPersonID",
+      type: "int(11)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "status",
+      type: "enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested','project_onboard','cancelled')",
+      nullable: false,
       key: "MUL",
     },
     {
@@ -1892,6 +1998,18 @@ const databaseSchema = {
       nullable: true,
       default: "current_timestamp()",
       extra: "on update current_timestamp()",
+    },
+    {
+      column: "startTime",
+      type: "varchar(200)",
+      nullable: true,
+      default: "''",
+    },
+    {
+      column: "endTime",
+      type: "varchar(200)",
+      nullable: true,
+      default: "''",
     },
   ],
 

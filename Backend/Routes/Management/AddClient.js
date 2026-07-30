@@ -686,12 +686,12 @@ router.delete("/:id", async (req, res) => {
 
     // 3. Delete from ManagementMeetings associated with this client's followups
     await queryWithRetry(
-      `DELETE FROM ManagementMeetings WHERE followupID IN (SELECT id FROM ManagementFollowups WHERE clientID=?)`,
+      `DELETE FROM ManagementMeetings WHERE followupID IN (SELECT id FROM ManagementFollowup WHERE clientID=?)`,
       [id],
     );
 
-    // 4. Delete from ManagementFollowups
-    await queryWithRetry("DELETE FROM ManagementFollowups WHERE clientID=?", [
+    // 4. Delete from ManagementFollowup
+    await queryWithRetry("DELETE FROM ManagementFollowup WHERE clientID=?", [
       id,
     ]);
 
@@ -791,12 +791,12 @@ router.delete("/project/:project_id", async (req, res) => {
 
     // 3. Delete from ManagementMeetings associated with followups for this client
     await queryWithRetry(
-      `DELETE FROM ManagementMeetings WHERE followupID IN (SELECT id FROM ManagementFollowups WHERE clientID=?)`,
+      `DELETE FROM ManagementMeetings WHERE followupID IN (SELECT id FROM ManagementFollowup WHERE clientID=?)`,
       [proj.client_id],
     );
 
-    // 4. Delete from ManagementFollowups for this client
-    await queryWithRetry("DELETE FROM ManagementFollowups WHERE clientID=?", [
+    // 4. Delete from ManagementFollowup for this client
+    await queryWithRetry("DELETE FROM ManagementFollowup WHERE clientID=?", [
       proj.client_id,
     ]);
 
@@ -873,52 +873,57 @@ router.post("/clientFollowup", async (req, res) => {
       projectId = projectResult.insertId;
     }
 
-    // 2. Insert into ManagementFollowups table for all status updates
-    const mgmtFollowupResult = await queryWithRetry(
-      `INSERT INTO ManagementFollowups
-        (clientID, projectId, employee_id, contactPersonID, status, nextFollowupDate, remarks)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        client_id,
-        projectId,
-        employee_id,
-        contact_person_id || null,
-        status,
-        next_followup_date || null,
-        remarks || null,
-      ],
-    );
+    let mgmtFollowupResult = null;
+    let followupId = null;
 
-    const followupId = mgmtFollowupResult.insertId;
+    // 2. Insert into ManagementFollowup table ONLY IF status is 'Followup Taken'
+    if (status === "Followup Taken") {
+      mgmtFollowupResult = await queryWithRetry(
+        `INSERT INTO ManagementFollowup
+          (clientID, projectId, employee_id, contactPersonID, status, nextFollowupDate, remarks)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          client_id,
+          projectId,
+          employee_id,
+          contact_person_id || null,
+          status,
+          next_followup_date || null,
+          remarks || null,
+        ],
+      );
 
-    // 2b. If meeting details provided in body, insert into ManagementMeetings
-    if (req.body.meeting_data) {
-      let meetingData = req.body.meeting_data;
-      if (typeof meetingData === "string") {
-        try { meetingData = JSON.parse(meetingData); } catch (e) {}
-      }
+      followupId = mgmtFollowupResult.insertId;
 
-      if (meetingData && meetingData.title?.trim() && meetingData.date && meetingData.type) {
-        await queryWithRetry(
-          `INSERT INTO ManagementMeetings 
-            (followupID, title, date, time, type, agenda, link, location, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            followupId,
-            meetingData.title.trim(),
-            meetingData.date,
-            meetingData.time || null,
-            meetingData.type || null,
-            meetingData.agenda || remarks || null,
-            meetingData.link || null,
-            meetingData.location || null,
-            meetingData.status || "inprogress",
-          ],
-        );
+      // 2b. If meeting details provided in body, insert into ManagementMeetings
+      if (req.body.meeting_data) {
+        let meetingData = req.body.meeting_data;
+        if (typeof meetingData === "string") {
+          try { meetingData = JSON.parse(meetingData); } catch (e) {}
+        }
+
+        if (meetingData && meetingData.title?.trim() && meetingData.date && meetingData.type) {
+          await queryWithRetry(
+            `INSERT INTO ManagementMeetings 
+              (followupID, title, date, time, type, agenda, link, location, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              followupId,
+              meetingData.title.trim(),
+              meetingData.date,
+              meetingData.time || null,
+              meetingData.type || null,
+              meetingData.agenda || remarks || null,
+              meetingData.link || null,
+              meetingData.location || null,
+              meetingData.status || "inprogress",
+            ],
+          );
+        }
       }
     }
 
-    // 3. Insert into clientsdataFollowup table ONLY IF NOT adding a new project from 'Add Project' button
+    // 3. Insert into clientsdataFollowup table for all client-master followups (unless is_add_project)
     if (!is_add_project) {
       await queryWithRetry(
         `INSERT INTO clientsdataFollowup

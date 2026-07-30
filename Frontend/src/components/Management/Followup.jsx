@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Calendar,
   X,
+  XCircle,
   Download,
   UserCheck,
   History,
@@ -22,6 +23,7 @@ import ClientAddModal from "./ClientAdd";
 import Notification from "../ToastProp";
 import searchIcon from "../../assets/Marketing/search.webp";
 import filter from "../../assets/ProjectPages/filter.webp";
+import fistoLogo from "../../assets/Fisto Logo.png";
 import { useConfirm } from "../ConfirmContext";
 
 const RECORDS_PER_PAGE = 10;
@@ -64,6 +66,7 @@ const Followup = () => {
   const filterRef = useRef(null);
   const [employeeId, setEmployeeId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [referenceFilter, setReferenceFilter] = useState("");
   const [followupToggle, setFollowupToggle] = useState("all");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
@@ -132,7 +135,10 @@ const Followup = () => {
   };
 
   const handleOnboardSubmit = async () => {
-    if (onboardFormData.status === "projectOnboard" || onboardFormData.status === "ProjectOnboard") {
+    if (
+      onboardFormData.status === "projectOnboard" ||
+      onboardFormData.status === "ProjectOnboard"
+    ) {
       if (
         !onboardFormData.projectName ||
         !onboardFormData.category ||
@@ -152,9 +158,18 @@ const Followup = () => {
     try {
       const formData = new FormData();
       formData.append("employee_id", employeeId);
-      formData.append("clientID", onboardClient.id);
-      if (onboardClient.projectId) {
-        formData.append("projectId", onboardClient.projectId);
+      const realClientId =
+        onboardClient.clientID ||
+        (onboardClient.id ? String(onboardClient.id).split("_")[0] : "");
+      const realProjectId =
+        onboardClient.projectId ||
+        (onboardClient.id && String(onboardClient.id).includes("_")
+          ? String(onboardClient.id).split("_")[1]
+          : "");
+
+      formData.append("clientID", realClientId);
+      if (realProjectId && Number(realProjectId) > 0) {
+        formData.append("projectId", realProjectId);
       }
       let contactPersonId = "";
       try {
@@ -165,9 +180,13 @@ const Followup = () => {
         if (contacts && contacts[0]) contactPersonId = contacts[0].id || "";
       } catch (e) {}
       formData.append("contactPersonId", contactPersonId);
-      
-      const targetStatus = onboardFormData.status === "projectOnboard" ? "ProjectOnboard" : "Droped";
+
+      const targetStatus =
+        onboardFormData.status === "projectOnboard"
+          ? "ProjectOnboard"
+          : "Droped";
       formData.append("status", targetStatus);
+      formData.append("isOnboardModalSubmit", "true");
       formData.append("project_name", onboardFormData.projectName);
       formData.append("project_category", onboardFormData.category);
       formData.append("start_date", onboardFormData.startDate);
@@ -217,12 +236,7 @@ const Followup = () => {
   const handleBudgetConfirmYes = () => {
     const data = budgetConfirm.projectData;
     setBudgetConfirm({ open: false, projectData: null });
-    // Navigate to the management page – derive role from current URL
-    // pathname looks like: /fisto_crm/admin/followup → parts[2] = 'admin'
-    const pathParts = window.location.pathname.split("/").filter(Boolean);
-    // pathParts[0] = 'fisto_crm', pathParts[1] = role ('admin', etc.)
-    const role = pathParts.length >= 2 ? pathParts[1] : "admin";
-    navigate(`/${role}/management`, {
+    navigate(`/budgets`, {
       state: {
         openTab: "Project Budget",
         prefillProject: data,
@@ -266,22 +280,22 @@ const Followup = () => {
   useEffect(() => {
     setClients([]);
     setLoading(true);
-    if (fetchTimeoutRef.current) {
-      clearTimeout(fetchTimeoutRef.current);
+
+    if (activeFetchAbortControllerRef.current) {
+      activeFetchAbortControllerRef.current.abort();
     }
 
-    fetchTimeoutRef.current = setTimeout(() => {
-      if (mainTab === "meetings") {
-        fetchMeetings();
-      } else {
-        fetchClients();
-      }
-    }, 400);
+    const controller = new AbortController();
+    activeFetchAbortControllerRef.current = controller;
+
+    if (mainTab === "meetings") {
+      fetchMeetings(controller.signal);
+    } else {
+      fetchClients(controller.signal);
+    }
 
     return () => {
-      if (fetchTimeoutRef.current) {
-        clearTimeout(fetchTimeoutRef.current);
-      }
+      controller.abort();
     };
   }, [mainTab, subTab]);
 
@@ -301,9 +315,7 @@ const Followup = () => {
   const fetchCounts = async () => {
     setCountsLoading(true);
     try {
-      const response = await fetch(
-        `${API_URL}/ManagementFollowups/counts`,
-      );
+      const response = await fetch(`${API_URL}/ManagementFollowups/counts`);
       const data = await response.json();
 
       if (data.success) {
@@ -316,11 +328,15 @@ const Followup = () => {
     }
   };
 
-  const fetchMeetings = async () => {
+  const activeFetchAbortControllerRef = useRef(null);
+
+  const fetchMeetings = async (signal) => {
     try {
       const url = `${API_URL}/management/analytics/meetings`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal });
       const data = await response.json();
+
+      if (signal?.aborted) return;
 
       if (data.success && Array.isArray(data.data)) {
         const mappedMeetings = data.data.map((m) => {
@@ -357,44 +373,73 @@ const Followup = () => {
         setMeetings(mappedMeetings);
       }
     } catch (error) {
+      if (error.name === "AbortError") return;
       console.error("Error fetching meetings:", error);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchClients = async () => {
+  const fetchClients = async (signal) => {
     try {
-      let url = `${API_URL}`;
       let statusParam = subTab;
-      url = `${API_URL}/ManagementFollowups?status=${statusParam}`;
+      const url = `${API_URL}/ManagementFollowups?status=${statusParam}`;
 
-      const response = await fetch(url);
+      const response = await fetch(url, { signal });
       const data = await response.json();
+
+      if (signal?.aborted) return;
 
       const finalRecords = (data.data || []).map((records) => {
         return {
           ...records.client_details,
           id: `${records.client_details?.id}_${records.projectId || 0}`,
           clientID: records.client_details?.id,
-          projectId: records.projectId,
-          employee_name: records.employee_name || records.client_details?.employee_name || records.client_details?.employee_id || "",
+          project_name:
+            records.project_name || records.client_details?.project_name || "",
+          project_category:
+            records.project_category ||
+            records.client_details?.project_category ||
+            "",
+          onboard_status:
+            records.client_details?.onboard_status ||
+            records.project_onboard_status ||
+            "",
+          employee_name:
+            records.employee_name ||
+            records.client_details?.employee_name ||
+            records.client_details?.employee_id ||
+            "",
           status:
             records.latest_status?.status ||
             records.client_details?.status ||
             "",
+          remarks:
+            records.latest_status?.remarks ||
+            records.client_details?.remarks ||
+            "",
           latest_followup_date:
-            records.latest_status?.created_at ||
-            records.client_details?.created_at,
+            ["onboarded", "completed", "cancelled"].includes(
+              records.client_details?.onboard_status ||
+                records.project_onboard_status,
+            ) && records.client_details?.project_updated_at
+              ? records.client_details?.project_updated_at
+              : records.latest_status?.created_at ||
+                records.client_details?.created_at,
         };
       });
 
       setClientsHistory(data.data || []);
       setClients(finalRecords || []);
     } catch (error) {
+      if (error.name === "AbortError") return;
       console.error("Error fetching clients:", error);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
@@ -474,30 +519,22 @@ const Followup = () => {
     try {
       const doc = new jsPDF();
 
-      // Page styling / colors
-      doc.setFillColor(226, 235, 255); // light blue matching header
-      doc.rect(0, 0, 210, 40, "F");
+      const img = new Image();
+      img.src = fistoLogo;
+      img.onload = () => {
+        generateMOMPDFDoc(doc, meeting, img);
+      };
+      img.onerror = () => {
+        generateMOMPDFDoc(doc, meeting, null);
+      };
+    } catch (error) {
+      console.error("PDF generation error:", error);
+      showToast("Error", "Failed to export PDF.");
+    }
+  };
 
-      // Title
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.setTextColor(26, 54, 93);
-      doc.text("Minutes of Meeting (MOM)", 14, 25);
-
-      // Metadata / Date
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      const generatedDate = new Date().toLocaleString("en-IN");
-      doc.text(`Exported: ${generatedDate}`, 145, 15);
-
-      // Details block
-      doc.setFontSize(11);
-      doc.setTextColor(50, 50, 50);
-      doc.setFont("helvetica", "bold");
-      doc.text("Meeting Details", 14, 50);
-      doc.setFont("helvetica", "normal");
-
+  const generateMOMPDFDoc = (doc, meeting, logoImg) => {
+    try {
       const companyName = meeting.client_details?.company_name || "-";
       const meetingTitle = meeting.title || "-";
       const scheduledDate = meeting.date
@@ -509,64 +546,165 @@ const Followup = () => {
       const scheduledTime = meeting.time || "-";
       const meetingType = meeting.type || "-";
 
+      // Top Primary Blue Accent Bar
+      doc.setFillColor(37, 99, 235); // #2563eb
+      doc.rect(0, 0, 210, 4, "F");
+
+      // Render Fisto Logo on Top Left if loaded
+      if (logoImg) {
+        doc.addImage(logoImg, "PNG", 14, 10, 32, 12);
+      } else {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        doc.setTextColor(37, 99, 235);
+        doc.text("FISTO", 14, 18);
+      }
+
+      // Title on Top Right Area
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      doc.text("Minutes of Meeting ", 196, 16, { align: "right" });
+
+      // Metadata / Export Timestamp
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(100, 116, 139);
+      const generatedDate = new Date().toLocaleString("en-IN");
+      doc.text(`Exported: ${generatedDate}`, 196, 22, { align: "right" });
+
+      // Decorative Divider Line
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(14, 27, 196, 27);
+
+      // Section 1: Meeting Details Card Box
+      doc.setFillColor(248, 250, 252); // Soft gray background card
+      doc.roundedRect(14, 32, 182, 38, 2, 2, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(14, 32, 182, 38, 2, 2, "D");
+
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 41, 59);
+      doc.setFont("helvetica", "bold");
+      doc.text("Meeting Overview", 18, 40);
+
       autoTable(doc, {
-        startY: 55,
+        startY: 43,
+        margin: { left: 18, right: 18 },
         body: [
           ["Company Name", companyName, "Meeting Title", meetingTitle],
           ["Scheduled Date", scheduledDate, "Scheduled Time", scheduledTime],
           ["Meeting Type", meetingType, "", ""],
         ],
         theme: "plain",
-        styles: { fontSize: 10, cellPadding: 2 },
+        styles: { fontSize: 9, cellPadding: 1.8 },
         columnStyles: {
-          0: { fontStyle: "bold", textColor: [100, 100, 100], width: 35 },
-          1: { width: 60 },
-          2: { fontStyle: "bold", textColor: [100, 100, 100], width: 35 },
-          3: { width: 60 },
+          0: { fontStyle: "bold", textColor: [100, 116, 139], width: 32 },
+          1: { width: 56, fontStyle: "bold", textColor: [15, 23, 42] },
+          2: { fontStyle: "bold", textColor: [100, 116, 139], width: 32 },
+          3: { width: 56, fontStyle: "bold", textColor: [15, 23, 42] },
         },
       });
 
-      // MOM Details Block
-      const currentY = doc.lastAutoTable.finalY + 10;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("Minutes of Meeting Details", 14, currentY);
+      // Section 2: Detailed MOM Discussion Table
+      const formatCleanDate = (dateVal) => {
+        if (!dateVal) return "-";
+        try {
+          const d = new Date(dateVal);
+          if (!isNaN(d.getTime())) {
+            const day = String(d.getDate()).padStart(2, "0");
+            const month = String(d.getMonth() + 1).padStart(2, "0");
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+          }
+          const raw = String(dateVal).split("T")[0];
+          const parts = raw.split("-");
+          if (parts.length === 3) {
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
+          }
+        } catch (e) {}
+        return String(dateVal);
+      };
 
-      const conductedDate = meeting.mom_recorded_at
-        ? formatDateToIST(meeting.mom_recorded_at).split(",")[0]
-        : scheduledDate;
+      const conductedDate = meeting.date
+        ? formatCleanDate(meeting.date)
+        : meeting.mom_recorded_at
+          ? formatCleanDate(meeting.mom_recorded_at)
+          : scheduledDate;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text("Minutes of Meeting Details", 14, 78);
 
       autoTable(doc, {
-        startY: currentY + 5,
+        startY: 82,
+        margin: { left: 14, right: 14 },
+        head: [["Category / Field", "Details"]],
         body: [
           ["Conducted Date", conductedDate],
-          ["Meeting Timing", formatTimeToIST(meeting.time)],
-          ["Attendees (Client Side)", meeting.attendees_client || meeting.attendeesClient || "-"],
-          ["Attendees (Our Side)", meeting.attendees_our_side || meeting.attendeesOurSide || "-"],
-          ["Agenda Discussed", meeting.agenda && meeting.agenda !== "-" ? meeting.agenda : (meeting.remarks || "-")],
-          ["Outcomes & Decisions", meeting.outcomes && meeting.outcomes !== "-" ? meeting.outcomes : (meeting.mom_outcomes || meeting.remarks || "-")],
+          [
+            "Meeting Timing",
+            meeting.startTime && meeting.endTime
+              ? `${meeting.startTime} to ${meeting.endTime}`
+              : meeting.time
+                ? `${meeting.time}${meeting.endTime ? ` to ${meeting.endTime}` : ""}`
+                : meeting.mom_startTime && meeting.mom_endTime
+                  ? `${meeting.mom_startTime} to ${meeting.mom_endTime}`
+                  : meeting.time || "-",
+          ],
+          [
+            "Attendees (Client Side)",
+            meeting.attendees_client || meeting.attendeesClient || "-",
+          ],
+          [
+            "Attendees (Our Side)",
+            meeting.attendees_our_side || meeting.attendeesOurSide || "-",
+          ],
+          [
+            "Agenda Discussed",
+            meeting.agenda && meeting.agenda !== "-"
+              ? meeting.agenda
+              : meeting.remarks || "-",
+          ],
+          [
+            "Outcomes & Decisions",
+            meeting.outcomes && meeting.outcomes !== "-"
+              ? meeting.outcomes
+              : meeting.mom_outcomes || meeting.remarks || "-",
+          ],
         ],
         theme: "grid",
-        styles: { fontSize: 10, cellPadding: 4, overflow: "linebreak" },
+        headStyles: {
+          fillColor: [37, 99, 235],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          fontSize: 9.5,
+          cellPadding: 3,
+        },
+        styles: { fontSize: 9, cellPadding: 3.5, overflow: "linebreak" },
         columnStyles: {
           0: {
             fontStyle: "bold",
-            textColor: [50, 50, 50],
-            fillColor: [245, 247, 250],
-            width: 50,
+            textColor: [30, 41, 59],
+            fillColor: [248, 250, 252],
+            width: 48,
           },
-          1: { width: 140 },
+          1: { width: 134, textColor: [15, 23, 42] },
         },
       });
 
-      // Footer
+      // Page Footer
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, 280, 196, 280);
         doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text("Fisto CRM - Management Module", 14, 285);
-        doc.text(`Page ${i} of ${pageCount}`, 180, 285);
+        doc.setTextColor(148, 163, 184);
+        doc.text("Fisto CRM - Management Module", 14, 286);
+        doc.text(`Page ${i} of ${pageCount}`, 196, 286, { align: "right" });
       }
 
       const filename = `MOM_${companyName.replace(/\s+/g, "_")}_${scheduledDate}.pdf`;
@@ -772,9 +910,14 @@ const Followup = () => {
 
     if (subTab === "projectOnboard") {
       filtered = filtered.filter((client) => {
-        const projStatus = client.onboard_status || client.project_onboard_status || "In progress";
-        if (onboardSubTab === "pending") return projStatus === "In progress" || projStatus === "pending";
-        if (onboardSubTab === "completed") return projStatus === "onboarded" || projStatus === "completed";
+        const projStatus =
+          client.onboard_status ||
+          client.project_onboard_status ||
+          "In progress";
+        if (onboardSubTab === "pending")
+          return projStatus === "In progress" || projStatus === "pending";
+        if (onboardSubTab === "completed")
+          return projStatus === "onboarded" || projStatus === "completed";
         if (onboardSubTab === "cancelled") return projStatus === "cancelled";
         return true;
       });
@@ -803,6 +946,14 @@ const Followup = () => {
     filtered = filtered.filter(filterByNextFollowupDate);
     filtered = filtered.filter(filterByMissedFollowup);
     filtered = filtered.filter(filterByStatus);
+
+    if (referenceFilter) {
+      filtered = filtered.filter(
+        (c) =>
+          (c.reference || "").trim().toLowerCase() ===
+          referenceFilter.trim().toLowerCase(),
+      );
+    }
 
     return filtered;
   };
@@ -855,6 +1006,7 @@ const Followup = () => {
     setnextFollowupDate("");
     setShowMissedFollowups(false);
     setStatusFilter("");
+    setReferenceFilter("");
   };
 
   const hasActiveFilters =
@@ -862,13 +1014,15 @@ const Followup = () => {
     endDate ||
     nextFollowupDate ||
     showMissedFollowups ||
-    statusFilter;
+    statusFilter ||
+    referenceFilter;
 
   const activeFilterCount =
     (startDate || endDate ? 1 : 0) +
     (nextFollowupDate ? 1 : 0) +
     (showMissedFollowups ? 1 : 0) +
-    (statusFilter ? 1 : 0);
+    (statusFilter ? 1 : 0) +
+    (referenceFilter ? 1 : 0);
 
   const showFollowupFilters = ["inprogress"].includes(subTab);
 
@@ -979,57 +1133,74 @@ const Followup = () => {
     <div className="text-black min-h-[92%] max-h-[100%] w-[100%] max-w-[100%] overflow-hidden">
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
         <div className="bg-white rounded-xl overflow-hidden shadow-sm h-[6%] flex-shrink-0">
-          <div className="flex border-b border-gray-200 overflow-x-auto h-full">
-            {[
-              ...getSubTabs(),
-              {
-                key: "meetings",
-                label: "Meetings",
-                isMeeting: true,
-              },
-            ].map((tab) => {
-              const isMeeting = tab.isMeeting;
-              const isActive = isMeeting
-                ? mainTab === "meetings"
-                : mainTab === "followups" && subTab === tab.key;
-              const count = isMeeting
-                ? (tabCounts.meetings !== undefined ? tabCounts.meetings : meetings.length)
-                : tabCounts[tab.countKey] || 0;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => {
-                    if (isMeeting) {
-                      setMainTab("meetings");
-                      setMeetingSubTab("scheduled");
-                    } else {
-                      setMainTab("followups");
-                      setSubTab(tab.key);
-                    }
-                  }}
-                  className={`px-[1.2vw] cursor-pointer font-medium text-[0.88vw] whitespace-nowrap transition-colors flex items-center gap-[0.4vw] ${
-                    isActive
-                      ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  {tab.label}
-                  <span
-                    className={`text-[0.65vw] px-[0.35vw] py-[0.2vw] rounded-full min-w-[1.5vw] text-center ${
+          <div className="flex items-center justify-between border-b border-gray-200 overflow-x-auto h-full px-[0.5vw]">
+            <div className="flex items-center h-full">
+              {[
+                ...getSubTabs(),
+                {
+                  key: "meetings",
+                  label: "Meetings",
+                  isMeeting: true,
+                },
+              ].map((tab) => {
+                const isMeeting = tab.isMeeting;
+                const isActive = isMeeting
+                  ? mainTab === "meetings"
+                  : mainTab === "followups" && subTab === tab.key;
+                const count = isMeeting
+                  ? tabCounts.meetings !== undefined
+                    ? tabCounts.meetings
+                    : meetings.length
+                  : tabCounts[tab.countKey] || 0;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      if (isMeeting) {
+                        setMainTab("meetings");
+                        setMeetingSubTab("scheduled");
+                      } else {
+                        setMainTab("followups");
+                        setSubTab(tab.key);
+                      }
+                    }}
+                    className={`px-[1.2vw] h-full cursor-pointer font-medium text-[0.88vw] whitespace-nowrap transition-colors flex items-center gap-[0.4vw] ${
                       isActive
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-200 text-gray-600"
+                        ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
+                        : "text-gray-600 hover:text-gray-900"
                     }`}
                   >
-                    {countsLoading ? (
-                      <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
-                    ) : (
-                      formatCount(count)
-                    )}
-                  </span>
-                </button>
-              );
-            })}
+                    {tab.label}
+                    <span
+                      className={`text-[0.65vw] px-[0.35vw] py-[0.2vw] rounded-full min-w-[1.5vw] text-center ${
+                        isActive
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {countsLoading ? (
+                        <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
+                      ) : (
+                        formatCount(count)
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-[0.4vw] pr-[0.8vw]">
+              <span className="text-[0.78vw] text-gray-500 font-medium">
+                Total Followups:
+              </span>
+              <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[0.8vw] font-bold px-[0.6vw] py-[0.15vw] rounded-full">
+                {countsLoading
+                  ? "..."
+                  : (tabCounts.followup || 0) +
+                    (tabCounts.quotation || 0) +
+                    (tabCounts.projectOnboard || 0) +
+                    (tabCounts.droped || 0)}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1077,10 +1248,22 @@ const Followup = () => {
                     { key: "cancelled", label: "Onboard Cancelled" },
                   ].map((tab) => {
                     const count = clients.filter((c) => {
-                      const projStatus = c.onboard_status || c.project_onboard_status || "In progress";
-                      if (tab.key === "pending") return projStatus === "In progress" || projStatus === "pending";
-                      if (tab.key === "completed") return projStatus === "onboarded" || projStatus === "completed";
-                      if (tab.key === "cancelled") return projStatus === "cancelled";
+                      const projStatus =
+                        c.onboard_status ||
+                        c.project_onboard_status ||
+                        "In progress";
+                      if (tab.key === "pending")
+                        return (
+                          projStatus === "In progress" ||
+                          projStatus === "pending"
+                        );
+                      if (tab.key === "completed")
+                        return (
+                          projStatus === "onboarded" ||
+                          projStatus === "completed"
+                        );
+                      if (tab.key === "cancelled")
+                        return projStatus === "cancelled";
                       return true;
                     }).length;
                     const isActive = onboardSubTab === tab.key;
@@ -1178,6 +1361,18 @@ const Followup = () => {
                     </div>
                   )}
 
+                  {referenceFilter && (
+                    <div className="flex items-center gap-[0.3vw] bg-indigo-50 text-indigo-700 border border-indigo-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
+                      <span>Reference: {referenceFilter}</span>
+                      <button
+                        onClick={() => setReferenceFilter("")}
+                        className="hover:bg-indigo-100 rounded-full p-[0.1vw]"
+                      >
+                        <X size={"0.7vw"} />
+                      </button>
+                    </div>
+                  )}
+
                   {showMissedFollowups && (
                     <div className="flex items-center gap-[0.3vw] bg-red-50 text-red-700 border border-red-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
                       <span>Missed Followups</span>
@@ -1189,6 +1384,13 @@ const Followup = () => {
                       </button>
                     </div>
                   )}
+
+                  <button
+                    onClick={clearAllFilters}
+                    className="text-[0.72vw] text-blue-600 hover:text-blue-800 underline font-medium ml-[0.3vw] cursor-pointer"
+                  >
+                    Clear All
+                  </button>
                 </div>
               )}
             </div>
@@ -1217,73 +1419,73 @@ const Followup = () => {
               </div>
 
               <div className="relative" ref={filterRef}>
-                  <button
-                    onClick={() => setShowFilterDropdown(!showFilterDropdown)}
-                    className={`rounded-full hover:bg-gray-100 flex items-center gap-2 text-[0.8vw] px-[0.6vw] py-[0.3vw] text-gray-700 cursor-pointer ${
-                      hasActiveFilters
-                        ? "bg-blue-100 border border-blue-300"
-                        : "bg-gray-200"
-                    }`}
-                  >
-                    <img src={filter} alt="" className="w-[1.1vw] h-[1.1vw] " />
-                    Filter
-                    {hasActiveFilters && (
-                      <span className="bg-blue-600 text-white text-[0.6vw] px-[0.4vw] py-[0.05vw] rounded-full flex justify-center items-center">
-                        {activeFilterCount}
-                      </span>
-                    )}
-                  </button>
+                <button
+                  onClick={() => setShowFilterDropdown(!showFilterDropdown)}
+                  className={`rounded-full hover:bg-gray-100 flex items-center gap-2 text-[0.8vw] px-[0.6vw] py-[0.3vw] text-gray-700 cursor-pointer ${
+                    hasActiveFilters
+                      ? "bg-blue-100 border border-blue-300"
+                      : "bg-gray-200"
+                  }`}
+                >
+                  <img src={filter} alt="" className="w-[1.1vw] h-[1.1vw] " />
+                  Filter
+                  {hasActiveFilters && (
+                    <span className="bg-blue-600 text-white text-[0.6vw] px-[0.4vw] py-[0.05vw] rounded-full flex justify-center items-center">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
 
-                  {showFilterDropdown && (
-                    <div className="absolute right-0 mt-[0.3vw] w-[16vw] bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-                      <div className="p-[0.8vw]">
-                        <div className="flex items-center justify-between mb-[0.8vw]">
-                          <span className="font-semibold text-[0.85vw]">
-                            Filters
-                          </span>
-                          <button
-                            onClick={() => setShowFilterDropdown(false)}
-                            className="p-[0.2vw] hover:bg-gray-100 rounded-full"
-                          >
-                            <X size={"0.9vw"} className="text-gray-500" />
-                          </button>
-                        </div>
-
-                        <div className="mb-[1vw]">
-                          <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
-                            Date Range
-                          </label>
-                          <div className="flex flex-col gap-[0.4vw]">
-                            <div className="flex items-center gap-[0.3vw]">
-                              <span className="text-[0.7vw] text-gray-500 w-[2.5vw]">
-                                From:
-                              </span>
-                              <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="flex-1 px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                              />
-                            </div>
-                            <div className="flex items-center gap-[0.3vw]">
-                              <span className="text-[0.7vw] text-gray-500 w-[2.5vw]">
-                                To:
-                              </span>
-                              <input
-                                type="date"
-                                value={endDate}
-                                min={startDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="flex-1 px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                                disabled={!startDate}
-                              />
-                            </div>
+                {showFilterDropdown && (
+                  <div className="absolute right-0 mt-[0.3vw] w-[16vw] bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                    <div className="p-[0.8vw]">
+                      <div className="flex items-center justify-between mb-[0.8vw]">
+                        <span className="font-semibold text-[0.85vw]">
+                          Filters
+                        </span>
+                        <button
+                          onClick={() => setShowFilterDropdown(false)}
+                          className="p-[0.2vw] hover:bg-gray-100 rounded-full"
+                        >
+                          <X size={"0.9vw"} className="text-gray-500" />
+                        </button>
+                      </div>
+                      <div className="mb-[1vw]">
+                        <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          Date Range
+                        </label>
+                        <div className="flex flex-col gap-[0.4vw]">
+                          <div className="flex items-center gap-[0.3vw]">
+                            <span className="text-[0.7vw] text-gray-500 w-[2.5vw]">
+                              From:
+                            </span>
+                            <input
+                              type="date"
+                              value={startDate}
+                              onChange={(e) => setStartDate(e.target.value)}
+                              className="flex-1 px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div className="flex items-center gap-[0.3vw]">
+                            <span className="text-[0.7vw] text-gray-500 w-[2.5vw]">
+                              To:
+                            </span>
+                            <input
+                              type="date"
+                              value={endDate}
+                              min={startDate}
+                              onChange={(e) => setEndDate(e.target.value)}
+                              className="flex-1 px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                              disabled={!startDate}
+                            />
                           </div>
                         </div>
-
-
-                        {/* Next Followup Date — only for Followup & Quotation tabs */}
-                        {(mainTab === "followups" ||
+                      </div>{" "}
+                      {/* Next Followup Date — for Followup & Quotation tabs */}
+                      {subTab !== "projectOnboard" &&
+                        subTab !== "drop" &&
+                        subTab !== "droped" &&
+                        (mainTab === "followups" ||
                           mainTab === "followup" ||
                           mainTab === "quotation") && (
                           <div className="mb-[1vw]">
@@ -1300,9 +1502,9 @@ const Followup = () => {
                             />
                           </div>
                         )}
-
-                        {/* Scheduled Date — only for Meetings Scheduled sub-tab */}
-                        {mainTab === "meetings" && meetingSubTab === "scheduled" && (
+                      {/* Scheduled Date — only for Meetings Scheduled sub-tab */}
+                      {mainTab === "meetings" &&
+                        meetingSubTab === "scheduled" && (
                           <div className="mb-[1vw]">
                             <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
                               Scheduled Date
@@ -1317,10 +1519,11 @@ const Followup = () => {
                             />
                           </div>
                         )}
-
-
-                        {/* Status Filter — only for Followup & Quotation tabs */}
-                        {(mainTab === "followups" ||
+                      {/* Status Filter — only for Followup & Quotation tabs */}
+                      {subTab !== "projectOnboard" &&
+                        subTab !== "drop" &&
+                        subTab !== "droped" &&
+                        (mainTab === "followups" ||
                           mainTab === "followup" ||
                           mainTab === "quotation") && (
                           <div className="mb-[1vw]">
@@ -1367,9 +1570,39 @@ const Followup = () => {
                             </select>
                           </div>
                         )}
-
-                        {/* Missed Toggle — Followups or Meetings Scheduled */}
-                        {(mainTab !== "meetings" || meetingSubTab === "scheduled") && (
+                      {/* Reference Filter */}
+                      {mainTab !== "meetings" && (
+                        <div className="mb-[1vw]">
+                          <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                            Reference Filter
+                          </label>
+                          <select
+                            value={referenceFilter}
+                            onChange={(e) => {
+                              setReferenceFilter(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white cursor-pointer"
+                          >
+                            <option value="">All References</option>
+                            {[
+                              ...new Set(
+                                clients.map((c) => c.reference).filter(Boolean),
+                              ),
+                            ].map((ref) => (
+                              <option key={ref} value={ref}>
+                                {ref}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {/* Missed Toggle — Followups or Meetings Scheduled (hidden on projectOnboard & droped) */}
+                      {subTab !== "projectOnboard" &&
+                        subTab !== "drop" &&
+                        subTab !== "droped" &&
+                        (mainTab !== "meetings" ||
+                          meetingSubTab === "scheduled") && (
                           <div className="mb-[1vw] pt-[0.4vw] border-t border-gray-100 flex items-center justify-between">
                             <div className="flex flex-col">
                               <span className="text-[0.78vw] font-semibold text-red-600">
@@ -1404,27 +1637,31 @@ const Followup = () => {
                             </button>
                           </div>
                         )}
-
-                        {hasActiveFilters && (
-                          <button
-                            onClick={clearAllFilters}
-                            className="w-full flex items-center justify-center gap-[0.3vw] text-[0.7vw] text-red-600 hover:text-red-700 cursor-pointer mt-[0.7vw] py-[0.4vw] border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                          >
-                            <X size={"0.8vw"} />
-                            Clear All Filters
-                          </button>
-                        )}
-                      </div>
+                      {hasActiveFilters && (
+                        <button
+                          onClick={clearAllFilters}
+                          className="w-full flex items-center justify-center gap-[0.3vw] text-[0.7vw] text-red-600 hover:text-red-700 cursor-pointer mt-[0.7vw] py-[0.4vw] border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                          <X size={"0.8vw"} />
+                          Clear All Filters
+                        </button>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex-1 min-h-0">
             {loading ? (
-              <div className="flex items-center justify-center h-full min-h-[400px]">
-                <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
+              <div className="p-[1vw] space-y-[0.8vw]">
+                <div className="h-[2.5vw] bg-gray-200 animate-pulse rounded-lg w-full"></div>
+                <div className="h-[2.2vw] bg-gray-100 animate-pulse rounded-lg w-full"></div>
+                <div className="h-[2.2vw] bg-gray-100 animate-pulse rounded-lg w-full"></div>
+                <div className="h-[2.2vw] bg-gray-100 animate-pulse rounded-lg w-full"></div>
+                <div className="h-[2.2vw] bg-gray-100 animate-pulse rounded-lg w-full"></div>
+                <div className="h-[2.2vw] bg-gray-100 animate-pulse rounded-lg w-full"></div>
               </div>
             ) : mainTab === "meetings" ? (
               (() => {
@@ -1479,9 +1716,7 @@ const Followup = () => {
                     if (!m.date) return false;
                     const mDate = new Date(m.date);
                     const filterDate = new Date(nextFollowupDate);
-                    if (
-                      mDate.toDateString() !== filterDate.toDateString()
-                    )
+                    if (mDate.toDateString() !== filterDate.toDateString())
                       return false;
                   }
 
@@ -1619,7 +1854,8 @@ const Followup = () => {
                                           : "-"}
                                       </span>
                                       {(() => {
-                                        if (meeting.status !== "inprogress") return null;
+                                        if (meeting.status !== "inprogress")
+                                          return null;
                                         if (!meeting.date) return null;
                                         const d = new Date(meeting.date);
                                         d.setHours(0, 0, 0, 0);
@@ -1635,7 +1871,9 @@ const Followup = () => {
                                     </div>
                                   </td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center font-medium">
-                                    {formatTimeToIST(meeting.time)}
+                                    {formatTimeToIST(meeting.time)
+                                      ?.replace(/\s*IST\s*/g, "")
+                                      .trim() || "-"}
                                   </td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">
                                     {meeting.type || "-"}
@@ -1745,20 +1983,34 @@ const Followup = () => {
                         Customer Name
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Employee Name
-                      </th>
-                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Project Name
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Category
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Status
+                        Reference
                       </th>
-                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Next Followup Date
-                      </th>
+                      {subTab === "projectOnboard" ||
+                      subTab === "drop" ||
+                      subTab === "droped" ? (
+                        <>
+                          {(subTab === "drop" || subTab === "droped") && (
+                            <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                              Remarks
+                            </th>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                            Status
+                          </th>
+                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                            Next Followup Date
+                          </th>
+                        </>
+                      )}
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Actions
                       </th>
@@ -1802,32 +2054,51 @@ const Followup = () => {
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                             {client.customer_name || "-"}
                           </td>
-                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium text-gray-700">
-                            {client.employee_name || client.employee_id || "-"}
-                          </td>
-                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium text-blue-600">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center font-medium text-blue-600">
                             {client.project_name || "-"}
                           </td>
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                             {client.project_category || "-"}
                           </td>
-                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
-                            {getStatusLabel(client.status)}
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200 text-center">
+                            {client.reference || "-"}
                           </td>
-                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] border border-gray-200 text-center">
-                            <div className="flex justify-center items-center gap-[0.3vw]">
-                              {client?.nextFollowupDate
-                                ? formatDateToIST(
-                                    client.nextFollowupDate,
-                                  ).split(",")[0]
-                                : "-"}
-                              {isMissed && (
-                                <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] ml-[0.4vw] rounded">
-                                  Missed
-                                </span>
+                          {subTab === "projectOnboard" ||
+                          subTab === "drop" ||
+                          subTab === "droped" ? (
+                            <>
+                              {(subTab === "drop" || subTab === "droped") && (
+                                <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200 max-w-[12vw]">
+                                  <div
+                                    className="line-clamp-2"
+                                    title={client.remarks}
+                                  >
+                                    {client.remarks || "-"}
+                                  </div>
+                                </td>
                               )}
-                            </div>
-                          </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
+                                {getStatusLabel(client.status)}
+                              </td>
+                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] border border-gray-200 text-center">
+                                <div className="flex justify-center items-center gap-[0.3vw]">
+                                  {client?.nextFollowupDate
+                                    ? formatDateToIST(
+                                        client.nextFollowupDate,
+                                      ).split(",")[0]
+                                    : "-"}
+                                  {isMissed && (
+                                    <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] ml-[0.4vw] rounded">
+                                      Missed
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            </>
+                          )}
                           <td className="px-[0.4vw] py-[0.52vw] border border-gray-200">
                             {mainTab === "clientsData" ? (
                               <div className="flex justify-center items-center gap-[0.4vw]">
@@ -1866,49 +2137,64 @@ const Followup = () => {
                                 </button>
                                 {subTab === "projectOnboard" ? (
                                   <>
+                                    <button
+                                      onClick={() =>
+                                        handleFollowup(client, true)
+                                      }
+                                      className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-purple-700 hover:bg-purple-50 border border-purple-300 transition-colors cursor-pointer"
+                                      title="View Followup History"
+                                    >
+                                      <History size={"0.8vw"} />
+                                      <span>History</span>
+                                    </button>
+                                    {(onboardSubTab === "pending" ||
+                                      onboardSubTab === "cancelled") && (
+                                      <button
+                                        onClick={() => {
+                                          setOnboardClient(client);
+                                          setOnboardFormData({
+                                            projectName:
+                                              client.project_name || "",
+                                            category:
+                                              client.project_category || "",
+                                            startDate: "",
+                                            endDate: "",
+                                            reviewDate: "",
+                                            status: "projectOnboard",
+                                            remarks: "",
+                                          });
+                                          setIsOnboardModalOpen(true);
+                                        }}
+                                        className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-green-700 hover:bg-green-50 border border-green-300 transition-colors cursor-pointer"
+                                        title="Onboard Project"
+                                      >
+                                        <UserCheck size={"0.8vw"} />
+                                        <span>Onboard</span>
+                                      </button>
+                                    )}
                                     {onboardSubTab === "pending" && (
-                                      <>
-                                        <button
-                                          onClick={() => {
-                                            setOnboardClient(client);
-                                            setOnboardFormData({
-                                              projectName: client.project_name || "",
-                                              category: client.project_category || "",
-                                              startDate: "",
-                                              endDate: "",
-                                              reviewDate: "",
-                                              status: "projectOnboard",
-                                              remarks: "",
-                                            });
-                                            setIsOnboardModalOpen(true);
-                                          }}
-                                          className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-green-700 hover:bg-green-50 border border-green-300 transition-colors cursor-pointer"
-                                          title="Onboard Project"
-                                        >
-                                          <UserCheck size={"0.8vw"} />
-                                          <span>Onboard</span>
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            setOnboardClient(client);
-                                            setOnboardFormData({
-                                              projectName: client.project_name || "",
-                                              category: client.project_category || "",
-                                              startDate: "",
-                                              endDate: "",
-                                              reviewDate: "",
-                                              status: "cancelled",
-                                              remarks: "",
-                                            });
-                                            setIsOnboardModalOpen(true);
-                                          }}
-                                          className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer"
-                                          title="Cancel Onboard"
-                                        >
-                                          <XCircle size={"0.8vw"} />
-                                          <span>Cancel</span>
-                                        </button>
-                                      </>
+                                      <button
+                                        onClick={() => {
+                                          setOnboardClient(client);
+                                          setOnboardFormData({
+                                            projectName:
+                                              client.project_name || "",
+                                            category:
+                                              client.project_category || "",
+                                            startDate: "",
+                                            endDate: "",
+                                            reviewDate: "",
+                                            status: "cancelled",
+                                            remarks: "",
+                                          });
+                                          setIsOnboardModalOpen(true);
+                                        }}
+                                        className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer"
+                                        title="Cancel Onboard"
+                                      >
+                                        <XCircle size={"0.8vw"} />
+                                        <span>Cancel</span>
+                                      </button>
                                     )}
                                   </>
                                 ) : (
@@ -2008,24 +2294,31 @@ const Followup = () => {
 
       {/* Onboard Project Modal */}
       {isOnboardModalOpen && onboardClient && (
-        <div className="fixed inset-0 bg-white/30 backdrop-blur-[.2vw] flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-[40vw] flex flex-col p-[1.5vw]">
-            <div className="flex items-center justify-between border-b border-gray-200 pb-[1vw] mb-[1vw]">
-              <h2 className="text-[1.1vw] font-semibold text-gray-900">
-                Onboard Project - {onboardClient.company_name}
-              </h2>
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-[1.5vw]">
+          <div className="bg-white rounded-2xl shadow-xl w-[38vw] flex flex-col overflow-hidden border border-gray-100 transition-all">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-white px-[1.5vw] py-[1.2vw] border-b border-blue-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-[1.1vw] font-bold text-gray-800 tracking-tight">
+                  {onboardClient.company_name}
+                </h2>
+                <p className="text-[0.8vw] text-blue-600 font-medium mt-[0.1vw]">
+                  {onboardClient.customer_name}
+                </p>
+              </div>
               <button
                 onClick={() => setIsOnboardModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 text-[1.5vw] cursor-pointer"
+                className="w-[2vw] h-[2vw] rounded-full bg-white/80 hover:bg-white text-gray-400 hover:text-gray-600 flex items-center justify-center transition-colors cursor-pointer border border-gray-100 shadow-sm"
               >
-                ×
+                <X size={"1.1vw"} />
               </button>
             </div>
 
-            <div className="flex flex-col gap-[1vw]">
+            {/* Form Body */}
+            <div className="p-[1.5vw] flex flex-col gap-[1.2vw] bg-white">
               <div>
-                <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                  Status *
+                <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                  Status <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={onboardFormData.status}
@@ -2035,22 +2328,23 @@ const Followup = () => {
                       status: e.target.value,
                     })
                   }
-                  className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] cursor-pointer focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-[1vw] py-[0.6vw] border border-gray-200 rounded-xl text-[0.88vw] bg-gray-50/50 hover:bg-white focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition cursor-pointer"
                   required
                 >
-                  <option value="projectOnboard">Onboard</option>
-                  <option value="cancelled">Cancelled</option>
+                  <option value="projectOnboard">Onboard Project</option>
+                  <option value="cancelled">Cancel Onboard</option>
                 </select>
               </div>
 
               {onboardFormData.status === "projectOnboard" ? (
-                <>
+                <div className="space-y-[1vw] bg-gray-50/40 p-[1.2vw] rounded-xl border border-gray-100">
                   <div>
-                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                      Project Name *
+                    <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                      Project Name <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
+                      placeholder="Enter project title"
                       value={onboardFormData.projectName}
                       onChange={(e) =>
                         setOnboardFormData({
@@ -2058,17 +2352,18 @@ const Followup = () => {
                           projectName: e.target.value,
                         })
                       }
-                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-[1vw] py-[0.55vw] border border-gray-200 rounded-xl text-[0.88vw] bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                      Type (Category) *
+                    <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                      Type (Category) <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
+                      placeholder="e.g. Web App, Mobile App"
                       value={onboardFormData.category}
                       onChange={(e) =>
                         setOnboardFormData({
@@ -2076,36 +2371,45 @@ const Followup = () => {
                           category: e.target.value,
                         })
                       }
-                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-[1vw] py-[0.55vw] border border-gray-200 rounded-xl text-[0.88vw] bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition"
                       required
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-[1vw]">
                     <div>
-                      <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                        Expected Start Date *
+                      <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                        Expected Start Date{" "}
+                        <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
                         value={onboardFormData.startDate}
-                        onChange={(e) =>
-                          setOnboardFormData({
-                            ...onboardFormData,
-                            startDate: e.target.value,
-                          })
-                        }
-                        className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                        onChange={(e) => {
+                          const newStartDate = e.target.value;
+                          setOnboardFormData((prev) => ({
+                            ...prev,
+                            startDate: newStartDate,
+                            endDate:
+                              prev.endDate && prev.endDate < newStartDate
+                                ? ""
+                                : prev.endDate,
+                          }));
+                        }}
+                        className="w-full px-[0.9vw] py-[0.55vw] border border-gray-200 rounded-xl text-[0.88vw] bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition cursor-pointer"
                         required
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                        Expected End Date *
+                      <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                        Expected End Date{" "}
+                        <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
+                        disabled={!onboardFormData.startDate}
+                        min={onboardFormData.startDate || ""}
                         value={onboardFormData.endDate}
                         onChange={(e) =>
                           setOnboardFormData({
@@ -2113,14 +2417,18 @@ const Followup = () => {
                             endDate: e.target.value,
                           })
                         }
-                        className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-[0.9vw] py-[0.55vw] border border-gray-200 rounded-xl text-[0.88vw] transition ${
+                          onboardFormData.startDate
+                            ? "bg-white cursor-pointer focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                            : "bg-gray-100/70 text-gray-400 cursor-not-allowed"
+                        }`}
                         required
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                    <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
                       Review Date
                     </label>
                     <input
@@ -2132,14 +2440,14 @@ const Followup = () => {
                           reviewDate: e.target.value,
                         })
                       }
-                      className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-[0.9vw] py-[0.55vw] border border-gray-200 rounded-xl text-[0.88vw] bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition cursor-pointer"
                     />
                   </div>
-                </>
+                </div>
               ) : (
-                <div>
-                  <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
-                    Remarks / Reason *
+                <div className="bg-gray-50/40 p-[1.2vw] rounded-xl border border-gray-100">
+                  <label className="block text-[0.85vw] font-semibold text-gray-700 mb-[0.4vw]">
+                    Remarks / Reason <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     value={onboardFormData.remarks}
@@ -2150,7 +2458,7 @@ const Followup = () => {
                       })
                     }
                     rows={4}
-                    className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-[1vw] py-[0.6vw] border border-gray-200 rounded-xl text-[0.88vw] bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition resize-none"
                     placeholder="Enter reason for cancellation..."
                     required
                   />
@@ -2158,22 +2466,42 @@ const Followup = () => {
               )}
             </div>
 
-            <div className="flex justify-end gap-[1vw] mt-[1.5vw] border-t border-gray-200 pt-[1vw]">
-              <button
-                onClick={() => setIsOnboardModalOpen(false)}
-                className="px-[1.2vw] py-[0.6vw] border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-[0.85vw] transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleOnboardSubmit}
-                className="px-[1.2vw] py-[0.6vw] bg-[#2563EB] text-white rounded-lg hover:bg-blue-700 text-[0.85vw] transition font-semibold cursor-pointer"
-              >
-                {onboardFormData.status === "projectOnboard"
-                  ? "Onboard Project"
-                  : "Submit"}
-              </button>
-            </div>
+            {/* Actions Footer */}
+            {(() => {
+              const isFormValid =
+                onboardFormData.status === "projectOnboard"
+                  ? onboardFormData.projectName?.trim() &&
+                    onboardFormData.category?.trim() &&
+                    onboardFormData.startDate &&
+                    onboardFormData.endDate
+                  : onboardFormData.remarks?.trim();
+
+              return (
+                <div className="flex items-center justify-end gap-[0.8vw] px-[1.5vw] py-[1vw] bg-gray-50/80 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsOnboardModalOpen(false)}
+                    className="px-[1.2vw] py-[0.55vw] border border-gray-200 rounded-xl text-gray-600 hover:text-gray-800 bg-white hover:bg-gray-100 text-[0.85vw] font-medium transition cursor-pointer shadow-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isFormValid}
+                    onClick={handleOnboardSubmit}
+                    className={`px-[1.4vw] py-[0.55vw] text-white rounded-xl text-[0.85vw] font-semibold transition-all shadow-sm ${
+                      isFormValid
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 cursor-pointer shadow-blue-500/20 active:scale-[0.98]"
+                        : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-70"
+                    }`}
+                  >
+                    {onboardFormData.status === "projectOnboard"
+                      ? "Onboard Project"
+                      : "Submit"}
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2232,7 +2560,7 @@ const Followup = () => {
               <div className="grid grid-cols-3 gap-[1vw]">
                 <div>
                   <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                    Conducted Date *
+                    Conducted Date <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="date"
@@ -2245,7 +2573,7 @@ const Followup = () => {
                 </div>
                 <div>
                   <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                    Start Time *
+                    Start Time <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="time"
@@ -2258,7 +2586,7 @@ const Followup = () => {
                 </div>
                 <div>
                   <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                    End Time *
+                    End Time <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="time"
@@ -2275,7 +2603,8 @@ const Followup = () => {
               <div className="grid grid-cols-2 gap-[1vw]">
                 <div>
                   <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                    Attendees – Client Side
+                    Attendees – Client Side{" "}
+                    <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     rows={3}
@@ -2292,7 +2621,7 @@ const Followup = () => {
                 </div>
                 <div>
                   <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                    Attendees – Our Side
+                    Attendees – Our Side <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     rows={3}
@@ -2312,7 +2641,7 @@ const Followup = () => {
               {/* Agenda */}
               <div>
                 <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                  Agenda Discussed
+                  Agenda Discussed <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   rows={3}
@@ -2328,7 +2657,8 @@ const Followup = () => {
               {/* Outcomes */}
               <div>
                 <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                  Outcomes / Action Points
+                  Outcomes / Action Points{" "}
+                  <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   rows={3}
@@ -2352,8 +2682,17 @@ const Followup = () => {
               </button>
               <button
                 onClick={handleMOMSubmit}
-                disabled={momSubmitting}
-                className="px-[1.2vw] py-[0.6vw] bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-[0.85vw] transition font-medium cursor-pointer disabled:opacity-60"
+                disabled={
+                  momSubmitting ||
+                  !momForm.conductedDate ||
+                  !momForm.startTime ||
+                  !momForm.endTime ||
+                  !momForm.attendeesClient?.trim() ||
+                  !momForm.attendeesOurSide?.trim() ||
+                  !momForm.agenda?.trim() ||
+                  !momForm.outcomes?.trim()
+                }
+                className="px-[1.2vw] py-[0.6vw] bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-[0.85vw] transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {momSubmitting ? "Saving..." : "Save MOM"}
               </button>
@@ -2369,9 +2708,6 @@ const Followup = () => {
             {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-[1.8vw] py-[1.2vw]">
               <div className="flex items-center gap-[0.6vw]">
-                <div className="w-[2.2vw] h-[2.2vw] bg-white/20 rounded-full flex items-center justify-center">
-                  <UserCheck size={"1.1vw"} className="text-white" />
-                </div>
                 <div>
                   <h2 className="text-[1.05vw] font-bold text-white">
                     Project Onboarded Successfully! 🎉

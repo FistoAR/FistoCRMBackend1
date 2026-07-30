@@ -507,6 +507,11 @@ const ClientMaster = () => {
             <span className="text-[0.85vw] text-gray-500 mr-[0.4vw]">
               ({filteredClients.length})
             </span>
+            {subTab === "followup_taken" && (
+              <span className="text-[0.78vw] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-[0.55vw] py-[0.15vw] rounded-full mr-[0.4vw]">
+                Total Projects: {filteredClients.reduce((acc, client) => acc + (Array.isArray(client.projects) && client.projects.length > 0 ? client.projects.length : 1), 0)}
+              </span>
+            )}
 
             {/* Active Filter Chips next to title */}
             {(startDate || endDate) && (
@@ -736,21 +741,23 @@ const ClientMaster = () => {
                       </div>
                     )}
 
-                    {/* Status filter */}
-                    <div className="mb-[1vw]">
-                      <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
-                        Status Filter
-                      </label>
-                      <select
-                        value={statusFilter}
-                        onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                        className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 bg-white cursor-pointer"
-                      >
-                        <option value="">All Statuses</option>
-                        <option value="Not picking/busy/others">Not picking/busy/others</option>
-                        <option value="In progress">In progress</option>
-                      </select>
-                    </div>
+                    {/* Status filter - only for In Progress tab */}
+                    {subTab === "in_progress" && (
+                      <div className="mb-[1vw]">
+                        <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          Status Filter
+                        </label>
+                        <select
+                          value={statusFilter}
+                          onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                          className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 bg-white cursor-pointer"
+                        >
+                          <option value="">All Statuses</option>
+                          <option value="Not picking/busy/others">Not picking/busy/others</option>
+                          <option value="In progress">In progress</option>
+                        </select>
+                      </div>
+                    )}
 
                     {/* Missed Followups Toggle - only in In Progress tab */}
                     {subTab === "in_progress" && (
@@ -884,13 +891,13 @@ const ClientMaster = () => {
                       ) : subTab === "followup_taken" ? (
                         <>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
-                            Project Created Date
-                          </th>
-                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
                             Project Name
                           </th>
                           <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
                             Category
+                          </th>
+                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                            Reference
                           </th>
                         </>
                       ) : (
@@ -992,19 +999,43 @@ const ClientMaster = () => {
                           ) : subTab === "followup_taken" ? (
                             <>
                               <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
-                                {formatDateToIST(proj?.created_at || client.created_at)}
-                              </td>
-                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center font-medium text-blue-700">
-                                {proj?.project_name || "-"}
+                                <div className="font-medium text-gray-900">{proj?.project_name || "-"}</div>
+                                <div className="text-[0.72vw] text-gray-500 font-normal">
+                                  {formatDateToIST(proj?.created_at || client.created_at)}
+                                </div>
                               </td>
                               <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
                                 {proj?.project_category || "-"}
                               </td>
+                              {pIdx === 0 && (
+                                <td rowSpan={rowSpan} className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center align-middle">
+                                  {client.reference || "-"}
+                                </td>
+                              )}
                             </>
                           ) : (
                             <>
                               <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
-                                {client.latest_status || "-"}
+                                <div className="flex flex-col items-center gap-[0.2vw]">
+                                  <span>{client.latest_status || "-"}</span>
+                                  {subTab === "in_progress" && (() => {
+                                    const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+                                    const nfRaw = client.next_followup_date;
+                                    if (!nfRaw) return null;
+                                    const raw = String(nfRaw).trim();
+                                    const nfStr = raw.includes("T") || raw.includes(" ")
+                                      ? new Date(raw).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+                                      : raw.split("/").length === 3
+                                        ? `${raw.split("/")[2]}-${raw.split("/")[1]}-${raw.split("/")[0]}`
+                                        : raw;
+                                    if (nfStr >= todayIST) return null;
+                                    return (
+                                      <span className="px-[0.4vw] py-[0.1vw] bg-red-50 border border-red-200 text-red-600 text-[0.6vw] font-semibold rounded-full whitespace-nowrap">
+                                        Missed Followup
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
                               </td>
                               <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
                                 {formatDateToIST(client.next_followup_date)}
