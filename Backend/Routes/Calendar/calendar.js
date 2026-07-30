@@ -11,6 +11,48 @@ const buildViewerFilter = (viewerId) => {
   };
 };
 
+// Helper to format event response with technical_presentation data
+const formatEventResponse = (event) => {
+  if (!event) return event;
+  let techData = event.technical_presentation;
+  if (typeof techData === "string" && techData.trim()) {
+    try {
+      techData = JSON.parse(techData);
+    } catch (e) {
+      techData = null;
+    }
+  }
+  return {
+    ...event,
+    technical_presentation: techData || null,
+    technicalPresentation: techData || null,
+  };
+};
+
+// Ensure table schema compatibility for Technical Presentation and Actual Meeting Durations
+const initCalendarDb = async () => {
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events MODIFY COLUMN event_type VARCHAR(100) NOT NULL DEFAULT 'Meeting'");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN technical_presentation JSON NULL");
+  } catch (e) {
+    try {
+      await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN technical_presentation LONGTEXT NULL");
+    } catch (err) {}
+  }
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_start_time VARCHAR(100) NULL");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_end_time VARCHAR(100) NULL");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_duration VARCHAR(100) NULL");
+  } catch (e) {}
+};
+initCalendarDb();
+
 // ✅ GET - All employees list for attendee selection
 router.get("/employees", async (req, res) => {
   try {
@@ -107,16 +149,16 @@ router.get("/", async (req, res) => {
           `;
           const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
           
-          return {
+          return formatEventResponse({
             ...event,
             attendees: attendeeDetails,
-          };
+          });
         }
         
-        return {
+        return formatEventResponse({
           ...event,
           attendees: [],
-        };
+        });
       })
     );
 
@@ -184,16 +226,16 @@ router.get("/range", async (req, res) => {
           `;
           const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
           
-          return {
+          return formatEventResponse({
             ...event,
             attendees: attendeeDetails,
-          };
+          });
         }
         
-        return {
+        return formatEventResponse({
           ...event,
           attendees: [],
-        };
+        });
       })
     );
 
@@ -240,16 +282,16 @@ router.get("/date/:date", async (req, res) => {
           `;
           const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
           
-          return {
+          return formatEventResponse({
             ...event,
             attendees: attendeeDetails,
-          };
+          });
         }
         
-        return {
+        return formatEventResponse({
           ...event,
           attendees: [],
-        };
+        });
       })
     );
 
@@ -296,16 +338,16 @@ router.get("/employee/:employeeId", async (req, res) => {
           `;
           const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
           
-          return {
+          return formatEventResponse({
             ...event,
             attendees: attendeeDetails,
-          };
+          });
         }
         
-        return {
+        return formatEventResponse({
           ...event,
           attendees: [],
-        };
+        });
       })
     );
 
@@ -352,16 +394,16 @@ router.get("/type/:eventtype", async (req, res) => {
           `;
           const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
           
-          return {
+          return formatEventResponse({
             ...event,
             attendees: attendeeDetails,
-          };
+          });
         }
         
-        return {
+        return formatEventResponse({
           ...event,
           attendees: [],
-        };
+        });
       })
     );
 
@@ -448,11 +490,25 @@ router.post("/", async (req, res) => {
       validatedAttendees = attendees;
     }
 
+    let techPresData = null;
+    if (req.body.technical_presentation || req.body.technicalPresentation) {
+      techPresData = typeof (req.body.technical_presentation || req.body.technicalPresentation) === 'string'
+        ? (req.body.technical_presentation || req.body.technicalPresentation)
+        : JSON.stringify(req.body.technical_presentation || req.body.technicalPresentation);
+    } else if (eventtype === "Technical Presentation" || req.body.meetingType === "Technical Presentation") {
+      techPresData = JSON.stringify({
+        meetingType: "Technical Presentation",
+        presenter1: req.body.presenter1 || { name: req.body.presenter1Name || "", topic: req.body.presenter1Topic || "" },
+        presenter2: req.body.presenter2 || { name: req.body.presenter2Name || "", topic: req.body.presenter2Topic || "" },
+        motivationalQuote: req.body.motivationalQuote || "Learning never exhausts the mind; it empowers the future."
+      });
+    }
+
     const insertEventQuery = `
       INSERT INTO calendar_events 
       (employee_id, title, event_type, start_time, end_time, date, end_date, 
-       agenda, link, day, form_type, attendees, priority, subtype, mode, audience, event_status, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       agenda, link, day, form_type, attendees, priority, subtype, mode, audience, event_status, remarks, technical_presentation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const result = await queryWithRetry(insertEventQuery, [
@@ -474,6 +530,7 @@ router.post("/", async (req, res) => {
       audience || null,
       eventStatus || null,
       remarks || null,
+      techPresData,
     ]);
 
     const eventId = result.insertId;
@@ -502,10 +559,10 @@ router.post("/", async (req, res) => {
       attendeeDetails = await queryWithRetry(attendeeQuery, validatedAttendees);
     }
 
-    const responseEvent = {
+    const responseEvent = formatEventResponse({
       ...createdEvent,
       attendees: attendeeDetails,
-    };
+    });
 
     if (req.io) {
       req.io.to("calendar_room").emit("calendar_event_created", {
@@ -552,9 +609,14 @@ router.put("/:id", async (req, res) => {
       "priority",
       "subtype",
       "mode",
-      "eventStatus",
-      "remarks",
-      "audience",
+      "technical_presentation",
+      "technicalPresentation",
+      "actual_start_time",
+      "actual_end_time",
+      "actual_duration",
+      "actualStartTime",
+      "actualEndTime",
+      "actualDuration",
     ];
 
     const updateFields = [];
@@ -580,6 +642,10 @@ router.put("/:id", async (req, res) => {
           }
           updateFields.push("attendees = ?");
           updateValues.push(JSON.stringify(req.body.attendees));
+        } else if (field === "technical_presentation" || field === "technicalPresentation") {
+          updateFields.push("technical_presentation = ?");
+          const val = typeof req.body[field] === 'string' ? req.body[field] : JSON.stringify(req.body[field]);
+          updateValues.push(val);
         } else {
           const dbField =
             field === "eventtype" ? "event_type" :
@@ -587,10 +653,12 @@ router.put("/:id", async (req, res) => {
             field === "endTime" ? "end_time" :
             field === "endDate" ? "end_date" :
             field === "formType" ? "form_type" :
-            field === "eventStatus" ? "event_status" : field;
+            field === "eventStatus" ? "event_status" :
+            field === "actualStartTime" ? "actual_start_time" :
+            field === "actualEndTime" ? "actual_end_time" :
+            field === "actualDuration" ? "actual_duration" : field;
           
           updateFields.push(`${dbField} = ?`);
-          // Convert empty strings for time fields to NULL so DB stores NULL
           let val = req.body[field];
           if ((field === "startTime" || field === "endTime") && (val === "" || val === null)) {
             val = null;
@@ -647,10 +715,10 @@ router.put("/:id", async (req, res) => {
       attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
     }
 
-    const responseEvent = {
+    const responseEvent = formatEventResponse({
       ...updatedEvent,
       attendees: attendeeDetails,
-    };
+    });
 
     if (req.io) {
       req.io.to("calendar_room").emit("calendar_event_updated", {
@@ -743,7 +811,74 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ✅ GET - Single event by ID (MUST be last)
+// ✅ PATCH - Start / End Meeting by Host
+router.patch("/:id/meeting-status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, employeeID } = req.body; // action: 'start' or 'end'
+
+    const getEventQuery = `SELECT * FROM calendar_events WHERE id = ?`;
+    const events = await queryWithRetry(getEventQuery, [id]);
+    if (events.length === 0) {
+      return res.status(404).json({ status: false, message: "Event not found" });
+    }
+    const event = events[0];
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (action === "start") {
+      const updateQuery = `
+        UPDATE calendar_events
+        SET actual_start_time = ?, event_status = 'In Progress'
+        WHERE id = ?
+      `;
+      await queryWithRetry(updateQuery, [nowIso, id]);
+    } else if (action === "end") {
+      const actualStart = event.actual_start_time ? new Date(event.actual_start_time) : null;
+      let durationStr = "1 min";
+      if (actualStart && !isNaN(actualStart.getTime())) {
+        const diffMs = now.getTime() - actualStart.getTime();
+        const totalMins = Math.max(1, Math.round(diffMs / (1000 * 60)));
+        if (totalMins >= 60) {
+          const hrs = Math.floor(totalMins / 60);
+          const mins = totalMins % 60;
+          durationStr = mins > 0 ? `${hrs} hr ${mins} mins` : `${hrs} hr`;
+        } else {
+          durationStr = `${totalMins} mins`;
+        }
+      }
+
+      const updateQuery = `
+        UPDATE calendar_events
+        SET actual_end_time = ?, actual_duration = ?, event_status = 'Completed'
+        WHERE id = ?
+      `;
+      await queryWithRetry(updateQuery, [nowIso, durationStr, id]);
+    } else {
+      return res.status(400).json({ status: false, message: "Invalid action. Use 'start' or 'end'" });
+    }
+
+    const updatedEvents = await queryWithRetry(getEventQuery, [id]);
+    const responseEvent = formatEventResponse(updatedEvents[0]);
+
+    if (req.io) {
+      req.io.to("calendar_room").emit("calendar_event_updated", {
+        status: true,
+        data: responseEvent,
+      });
+    }
+
+    res.json({
+      status: true,
+      message: `Meeting ${action === "start" ? "started" : "ended"} successfully`,
+      data: responseEvent,
+    });
+  } catch (error) {
+    console.error("Meeting status error:", error);
+    res.status(500).json({ status: false, message: "Error updating meeting status", error: error.message });
+  }
+});
 router.get("/:id", async (req, res) => {
   try {
     const query = `

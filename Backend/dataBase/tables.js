@@ -1,6 +1,6 @@
 /**
  * Fisto CRM Database Schema Specification
- * Generated automatically on 2026-07-17T10:20:42.276Z
+ * Generated automatically on 2026-07-29T13:30:05.848Z
  */
 
 const databaseSchema = {
@@ -263,7 +263,7 @@ const databaseSchema = {
     },
     {
       column: "event_type",
-      type: "enum('Quotation','Invoice','Payment Following','Client Following','Meeting','Project Discuss','Personal','Special day','Announcement')",
+      type: "varchar(100)",
       nullable: false,
       default: "'Meeting'",
       key: "MUL",
@@ -370,6 +370,30 @@ const databaseSchema = {
       nullable: true,
       default: "NULL",
     },
+    {
+      column: "technical_presentation",
+      type: "longtext",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_start_time",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_end_time",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "actual_duration",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
   ],
 
   /**
@@ -467,6 +491,69 @@ const databaseSchema = {
       type: "tinyint(1)",
       nullable: true,
       default: "0",
+    },
+  ],
+
+  /**
+   * Table: clientsdataFollowup
+   */
+  clientsdataFollowup: [
+    {
+      column: "id",
+      type: "int(11)",
+      nullable: false,
+      key: "PRI",
+      extra: "auto_increment",
+    },
+    {
+      column: "client_id",
+      type: "int(11)",
+      nullable: false,
+      key: "MUL",
+    },
+    {
+      column: "employee_id",
+      type: "varchar(50)",
+      nullable: false,
+      key: "MUL",
+    },
+    {
+      column: "contact_person_id",
+      type: "int(11)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "status",
+      type: "enum('Followup Taken','Not picking/busy/others','Not Interested','In progress')",
+      nullable: true,
+      default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "next_followup_date",
+      type: "varchar(255)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "remarks",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "created_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+    },
+    {
+      column: "updated_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+      extra: "on update current_timestamp()",
     },
   ],
 
@@ -789,63 +876,6 @@ const databaseSchema = {
       nullable: true,
       default: "current_timestamp()",
       extra: "on update current_timestamp()",
-    },
-  ],
-
-  /**
-   * Table: dummy1
-   */
-  dummy1: [
-    {
-      column: "sno",
-      type: "int(11)",
-      nullable: true,
-      default: "NULL",
-    },
-    {
-      column: "name",
-      type: "varchar(100)",
-      nullable: true,
-      default: "NULL",
-    },
-  ],
-
-  /**
-   * Table: dummy_projects
-   */
-  dummy_projects: [
-    {
-      column: "id",
-      type: "int(11)",
-      nullable: false,
-      key: "PRI",
-      extra: "auto_increment",
-    },
-    {
-      column: "company_name",
-      type: "varchar(100)",
-      nullable: false,
-    },
-    {
-      column: "customer_name",
-      type: "varchar(100)",
-      nullable: false,
-    },
-    {
-      column: "project_name",
-      type: "varchar(150)",
-      nullable: false,
-    },
-    {
-      column: "project_category",
-      type: "varchar(100)",
-      nullable: false,
-    },
-    {
-      column: "created_at",
-      type: "timestamp",
-      nullable: true,
-      default: "current_timestamp()",
     },
   ],
 
@@ -1183,24 +1213,6 @@ const databaseSchema = {
       type: "timestamp",
       nullable: true,
       default: "current_timestamp()",
-    },
-  ],
-
-  /**
-   * Table: Fake_company
-   */
-  Fake_company: [
-    {
-      column: "id",
-      type: "int(11)",
-      nullable: false,
-      key: "PRI",
-      extra: "auto_increment",
-    },
-    {
-      column: "companyName",
-      type: "varchar(255)",
-      nullable: false,
     },
   ],
 
@@ -1740,7 +1752,7 @@ const databaseSchema = {
       key: "MUL",
     },
     {
-      column: "marketing_client_id",
+      column: "projectId",
       type: "int(11)",
       nullable: true,
       default: "NULL",
@@ -1749,8 +1761,8 @@ const databaseSchema = {
     {
       column: "employee_id",
       type: "varchar(50)",
-      nullable: true,
-      default: "NULL",
+      nullable: false,
+      key: "MUL",
     },
     {
       column: "contactPersonID",
@@ -1760,8 +1772,16 @@ const databaseSchema = {
     },
     {
       column: "status",
-      type: "enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested')",
-      nullable: false,
+      type: "enum('Followup Taken','Not picking/busy/others','Lead','Quotation','Proposal','ProjectOnboard','Droped')",
+      nullable: true,
+      default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "nextFollowupDate",
+      type: "date",
+      nullable: true,
+      default: "NULL",
     },
     {
       column: "remarks",
@@ -1770,34 +1790,10 @@ const databaseSchema = {
       default: "NULL",
     },
     {
-      column: "nextFollowupDate",
-      type: "varchar(255)",
-      nullable: true,
-      default: "NULL",
-    },
-    {
-      column: "quotation",
+      column: "quotation_path",
       type: "longtext",
       nullable: true,
       default: "NULL",
-    },
-    {
-      column: "purchaseOrder",
-      type: "longtext",
-      nullable: true,
-      default: "NULL",
-    },
-    {
-      column: "invoice",
-      type: "longtext",
-      nullable: true,
-      default: "NULL",
-    },
-    {
-      column: "isMarketing",
-      type: "tinyint(1)",
-      nullable: true,
-      default: "0",
     },
     {
       column: "created_at",
@@ -1828,31 +1824,28 @@ const databaseSchema = {
     {
       column: "followupID",
       type: "int(11)",
-      nullable: true,
-      default: "NULL",
+      nullable: false,
       key: "MUL",
     },
     {
       column: "title",
       type: "varchar(255)",
-      nullable: true,
-      default: "NULL",
+      nullable: false,
     },
     {
       column: "date",
-      type: "varchar(255)",
-      nullable: true,
-      default: "NULL",
+      type: "date",
+      nullable: false,
     },
     {
       column: "time",
-      type: "varchar(255)",
+      type: "time",
       nullable: true,
       default: "NULL",
     },
     {
       column: "type",
-      type: "varchar(255)",
+      type: "varchar(100)",
       nullable: true,
       default: "NULL",
     },
@@ -1864,20 +1857,132 @@ const databaseSchema = {
     },
     {
       column: "link",
-      type: "text",
+      type: "varchar(500)",
       nullable: true,
       default: "NULL",
     },
     {
       column: "location",
-      type: "text",
+      type: "varchar(255)",
       nullable: true,
       default: "NULL",
     },
     {
       column: "status",
-      type: "enum('inprogress','completed')",
+      type: "enum('inprogress','completed','cancelled')",
       nullable: false,
+      default: "'inprogress'",
+      key: "MUL",
+    },
+    {
+      column: "attendees_client",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "attendees_our_side",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "outcomes",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "mom_recorded_at",
+      type: "datetime",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "created_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+    },
+    {
+      column: "updated_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+      extra: "on update current_timestamp()",
+    },
+  ],
+
+  /**
+   * Table: ManagementOnboardedProjects
+   */
+  ManagementOnboardedProjects: [
+    {
+      column: "id",
+      type: "int(11)",
+      nullable: false,
+      key: "PRI",
+      extra: "auto_increment",
+    },
+    {
+      column: "client_id",
+      type: "int(11)",
+      nullable: false,
+    },
+    {
+      column: "company_name",
+      type: "varchar(255)",
+      nullable: false,
+    },
+    {
+      column: "customer_name",
+      type: "varchar(255)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "project_name",
+      type: "varchar(255)",
+      nullable: false,
+    },
+    {
+      column: "category",
+      type: "varchar(255)",
+      nullable: false,
+    },
+    {
+      column: "start_date",
+      type: "date",
+      nullable: false,
+    },
+    {
+      column: "end_date",
+      type: "date",
+      nullable: false,
+    },
+    {
+      column: "review_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "remarks",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "budget_status",
+      type: "varchar(50)",
+      nullable: false,
+      default: "'pending'",
+    },
+    {
+      column: "onboarded_by",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
     },
     {
       column: "created_at",
@@ -2486,6 +2591,93 @@ const databaseSchema = {
   ],
 
   /**
+   * Table: projects
+   */
+  projects: [
+    {
+      column: "id",
+      type: "int(11)",
+      nullable: false,
+      key: "PRI",
+      extra: "auto_increment",
+    },
+    {
+      column: "client_id",
+      type: "int(11)",
+      nullable: false,
+      key: "MUL",
+    },
+    {
+      column: "project_name",
+      type: "varchar(255)",
+      nullable: false,
+    },
+    {
+      column: "project_category",
+      type: "varchar(100)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "budget_status",
+      type: "varchar(50)",
+      nullable: true,
+      default: "'pending'",
+      key: "MUL",
+    },
+    {
+      column: "onboard_status",
+      type: "enum('In progress','onboarded','cancelled')",
+      nullable: true,
+      default: "'In progress'",
+    },
+    {
+      column: "start_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "end_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "review_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "remarks",
+      type: "text",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "employee_id",
+      type: "varchar(50)",
+      nullable: true,
+      default: "NULL",
+      key: "MUL",
+    },
+    {
+      column: "created_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+    },
+    {
+      column: "updated_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+      extra: "on update current_timestamp()",
+    },
+  ],
+
+  /**
    * Table: project_budgets
    */
   project_budgets: [
@@ -2623,6 +2815,82 @@ const databaseSchema = {
       nullable: true,
       default: "current_timestamp()",
       extra: "on update current_timestamp()",
+    },
+    {
+      column: "title",
+      type: "varchar(255)",
+      nullable: true,
+      default: "NULL",
+    },
+    {
+      column: "end_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+  ],
+
+  /**
+   * Table: role_tab_access
+   */
+  role_tab_access: [
+    {
+      column: "id",
+      type: "int(11)",
+      nullable: false,
+      key: "PRI",
+      extra: "auto_increment",
+    },
+    {
+      column: "designation",
+      type: "varchar(100)",
+      nullable: false,
+    },
+    {
+      column: "group_key",
+      type: "varchar(50)",
+      nullable: false,
+    },
+    {
+      column: "tab_label",
+      type: "varchar(100)",
+      nullable: false,
+    },
+    {
+      column: "path",
+      type: "varchar(255)",
+      nullable: false,
+    },
+    {
+      column: "is_allowed",
+      type: "tinyint(1)",
+      nullable: true,
+      default: "1",
+    },
+    {
+      column: "created_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+    },
+    {
+      column: "updated_at",
+      type: "timestamp",
+      nullable: true,
+      default: "current_timestamp()",
+      extra: "on update current_timestamp()",
+    },
+    {
+      column: "sort_order",
+      type: "int(11)",
+      nullable: true,
+      default: "0",
+    },
+    {
+      column: "employee_id",
+      type: "varchar(100)",
+      nullable: true,
+      default: "''",
     },
   ],
 
@@ -2905,6 +3173,7 @@ const databaseSchema = {
       extra: "on update current_timestamp()",
     },
   ],
+
 };
 
 module.exports = databaseSchema;

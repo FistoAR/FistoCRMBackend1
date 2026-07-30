@@ -2294,7 +2294,10 @@ const MeetingsCard = ({ apiBaseUrl }) => {
         const res = await fetch(`${apiBaseUrl}/calendar/date/${dateStr}`);
         const data = await res.json();
         const onlyMeetings = Array.isArray(data)
-          ? data.filter((e) => e.event_type === "Meeting")
+          ? data.filter((e) => {
+              const type = (e.event_type || e.eventtype || e.eventType || "").toLowerCase();
+              return type === "meeting" || type === "technical presentation" || type === "technicalpresentation" || type === "technical_presentation";
+            })
           : [];
         setMeetings(onlyMeetings);
       } catch {
@@ -2591,6 +2594,161 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           </div>
         ) : (
           meetings.map((meeting) => {
+            const typeVal = (meeting.event_type || meeting.eventtype || meeting.eventType || "").toLowerCase();
+            const isTechPres = typeVal === "technical presentation" || typeVal === "technicalpresentation" || typeVal === "technical_presentation";
+
+            if (isTechPres) {
+              const techData = meeting.technical_presentation || meeting.technicalPresentation || {};
+              const presenter1 = techData.presenter1 || meeting.presenter1 || { name: meeting.title, topic: meeting.agenda };
+              const presenter2 = techData.presenter2 || meeting.presenter2 || null;
+              const quote = techData.motivationalQuote || meeting.motivationalQuote || "Learning never exhausts the mind; it empowers the future.";
+
+              // Day name and formatted date
+              const dayName = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return "";
+                  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                  return days[d.getDay()];
+                } catch {
+                  return "";
+                }
+              })();
+
+              const dateFormatted = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return meeting.date;
+                  const day = String(d.getDate()).padStart(2, "0");
+                  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  return `${day} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                } catch (e) {
+                  return meeting.date;
+                }
+              })();
+
+              const shortDate = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return meeting.date;
+                  const day = String(d.getDate()).padStart(2, "0");
+                  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  return `${day} ${monthNames[d.getMonth()]}`;
+                } catch (e) {
+                  return meeting.date;
+                }
+              })();
+
+              const timeDisplay = (() => {
+                const s = formatTime(meeting.start_time || meeting.startTime);
+                const e = formatTime(meeting.end_time || meeting.endTime);
+                if (s && e) return `${s} - ${e}`;
+                return s || e || "3:30 PM - 4:30 PM";
+              })();
+
+              const venueDisplay = meeting.link || "Conference Hall";
+
+              return (
+                <div
+                  key={meeting.id || meeting._id || Math.random()}
+                  className="mb-[0.8vw] bg-white border border-gray-200 rounded-xl p-[0.9vw] shadow-xs text-left text-gray-800 flex flex-col gap-[0.5vw]"
+                >
+                  {/* Card Header */}
+                  <div className="flex items-center gap-[0.4vw] pb-[0.4vw] border-b border-gray-200">
+                    <span className="text-[1vw]">📊</span>
+                    <h4 className="text-[0.88vw] font-bold text-gray-900">
+                      Technical Presentation
+                    </h4>
+                  </div>
+
+                  {/* Presenter 1 */}
+                  <div className="flex flex-col gap-[0.1vw]">
+                    <div className="text-[0.65vw] font-bold text-gray-500 uppercase tracking-wider">
+                      Presenter 1
+                    </div>
+                    <div className="text-[0.82vw] font-bold text-gray-900">
+                      {presenter1?.name || meeting.title || "John David"}
+                    </div>
+                    {presenter1?.topic && (
+                      <div className="text-[0.75vw] text-gray-700 mt-[0.1vw]">
+                        <span className="font-medium text-gray-500">Topic: </span>
+                        <span>{presenter1.topic}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presenter 2 (only if Presenter 2 Name exists) */}
+                  {presenter2 && presenter2.name && presenter2.name.trim() !== "" && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="flex flex-col gap-[0.1vw]">
+                        <div className="text-[0.65vw] font-bold text-gray-500 uppercase tracking-wider">
+                          Presenter 2
+                        </div>
+                        <div className="text-[0.82vw] font-bold text-gray-900">
+                          {presenter2.name}
+                        </div>
+                        {presenter2?.topic && (
+                          <div className="text-[0.75vw] text-gray-700 mt-[0.1vw]">
+                            <span className="font-medium text-gray-500">Topic: </span>
+                            <span>{presenter2.topic}</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Motivational Quote */}
+                  {quote && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="text-[0.75vw] italic text-gray-700 py-[0.1vw]">
+                        💡 "{quote}"
+                      </div>
+                    </>
+                  )}
+
+                  {/* Actual Meeting Duration / Status */}
+                  {(meeting.actual_duration || meeting.actualDuration || meeting.actual_start_time || meeting.actualStartTime) && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="flex items-center justify-between text-[0.72vw] bg-blue-50 border border-blue-100 rounded-lg p-[0.3vw] px-[0.5vw] text-blue-900">
+                        {meeting.actual_duration || meeting.actualDuration ? (
+                          <span className="font-semibold">
+                            ⏱️ Actual Duration: {meeting.actual_duration || meeting.actualDuration}
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-emerald-700 animate-pulse flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span> In Progress
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Event Information (Date, Time, Venue) */}
+                  <hr className="border-gray-200" />
+                  <div className="flex items-center justify-between text-[0.72vw] text-gray-600 pt-[0.1vw]">
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>📅</span>
+                      <span className="font-medium">{dateFormatted || shortDate}</span>
+                    </div>
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>🕒</span>
+                      <span className="font-medium">{timeDisplay}</span>
+                    </div>
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>📍</span>
+                      <span className="font-medium truncate max-w-[10vw]" title={venueDisplay}>{venueDisplay}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             const isHov = hoveredMeeting === meeting.id;
             const startFmt = formatTime(meeting.start_time);
             const endFmt = formatTime(meeting.end_time);
