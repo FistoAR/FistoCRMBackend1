@@ -10,38 +10,27 @@ function createPool() {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     waitForConnections: true,
-    // connectionLimit: 3,  
+    connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: 10000,
-    acquireTimeout: 10000,
-    timeout: 10000,
+    connectTimeout: 20000,
+    acquireTimeout: 20000,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0,
-    idleTimeout: 30000,
-    maxIdle: 1
+    keepAliveInitialDelay: 10000,
   });
 
   pool.on('acquire', (connection) => {
-    console.log('→ Connection %d acquired', connection.threadId);
+    // connection acquired
   });
 
   pool.on('release', (connection) => {
-    console.log('← Connection %d released', connection.threadId);
+    // connection released
   });
 
   pool.on('error', (err) => {
     console.error('Pool error:', err.code);
-    if (err.code === 'ER_TOO_MANY_USER_CONNECTIONS') {
-      console.error('❌ MAX CONNECTIONS! Restart server to clear.');
-    }
-  });
-
-  pool.getConnection((err, connection) => {
-    if (err) {
-      console.error('❌ Connection failed:', err.message);
-    } else {
-      console.log('✓ Database connected');
-      connection.release();
+    if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
+      console.warn('⚠️ Re-creating MySQL pool due to connection drop...');
+      try { createPool(); } catch(e) {}
     }
   });
 
@@ -50,7 +39,7 @@ function createPool() {
 
 createPool();
 
-function queryWithRetry(sql, params = [], retries = 1) {
+function queryWithRetry(sql, params = [], retries = 3) {
   return new Promise((resolve, reject) => {
     const attemptQuery = (attemptsLeft) => {
       pool.query(sql, params, (err, results) => {
@@ -60,9 +49,10 @@ function queryWithRetry(sql, params = [], retries = 1) {
             return;
           }
           
-          if ((err.code === 'ECONNRESET' || err.code === 'PROTOCOL_CONNECTION_LOST') 
+          if ((err.code === 'ECONNRESET' || err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR') 
               && attemptsLeft > 0) {
-            setTimeout(() => attemptQuery(attemptsLeft - 1), 500);
+            console.warn(`⚠️ MySQL connection lost (${err.code}). Retrying query (${attemptsLeft} retries left)...`);
+            setTimeout(() => attemptQuery(attemptsLeft - 1), 300);
           } else {
             reject(err);
           }

@@ -79,6 +79,12 @@ const ALL_SYSTEM_TABS = [
     desc: "Maintenance & Maid Attendance",
     path: "/maid",
   },
+  {
+    group: "Human Resource",
+    label: "Role Access",
+    desc: "Role & Permission Settings",
+    path: "/roleAccess",
+  },
 
   // ─── Project Management Section ───
   {
@@ -109,8 +115,14 @@ const ALL_SYSTEM_TABS = [
   // ─── Management Section ───
   {
     group: "Management",
-    label: "Followup's",
-    desc: "Client Followups & Reminders",
+    label: "Client's Data",
+    desc: "Client Master & First Level Followups",
+    path: "/clientsData",
+  },
+  {
+    group: "Management",
+    label: "Followups & Meetings",
+    desc: "Project-wise Followups & Meetings",
     path: "/followup",
   },
   {
@@ -150,12 +162,6 @@ const ALL_SYSTEM_TABS = [
     label: "Work Done",
     desc: "Completed Work Summaries",
     path: "/workdone",
-  },
-  {
-    group: "General",
-    label: "Role Access",
-    desc: "Role & Permission Settings",
-    path: "/roleAccess",
   },
   {
     group: "General",
@@ -331,6 +337,7 @@ export default function RoleAccessManagement() {
         "/interviewSchedules",
         "/quotes",
         "/maid",
+        "/roleAccess",
       ].forEach((p) => allowed.add(p));
     } else if (d === "Project Head" || d === "SBU") {
       [

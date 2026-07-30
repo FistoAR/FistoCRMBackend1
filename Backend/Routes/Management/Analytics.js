@@ -58,7 +58,8 @@ router.get("/overview", async (req, res) => {
     // Helper for date condition building
     const buildDateClause = (colName, fDate, tDate) => {
       if (fDate && !tDate) return `AND DATE(${colName}) = ?`;
-      if (fDate && tDate) return `AND DATE(${colName}) >= ? AND DATE(${colName}) <= ?`;
+      if (fDate && tDate)
+        return `AND DATE(${colName}) >= ? AND DATE(${colName}) <= ?`;
       if (!fDate && tDate) return `AND DATE(${colName}) <= ?`;
       return "";
     };
@@ -77,12 +78,15 @@ router.get("/overview", async (req, res) => {
       ${buildDateClause("created_at", from_date, to_date)}
       ${employee_id ? "AND employee_id = ?" : ""}
     `;
-    
+
     const totalParams = [];
     pushDateParams(totalParams, from_date, to_date);
     if (employee_id) totalParams.push(employee_id);
-    
-    const totalCustomersResult = await queryWithRetry(totalCustomersQuery, totalParams);
+
+    const totalCustomersResult = await queryWithRetry(
+      totalCustomersQuery,
+      totalParams,
+    );
     const totalCustomers = totalCustomersResult[0].total;
 
     // 2. Get latest status for each client created in the date range
@@ -103,12 +107,15 @@ router.get("/overview", async (req, res) => {
       ${buildDateClause("c.created_at", from_date, to_date)}
       ${employee_id ? "AND c.employee_id = ?" : ""}
     `;
-    
+
     const latestParams = [];
     pushDateParams(latestParams, from_date, to_date);
     if (employee_id) latestParams.push(employee_id);
-    
-    const latestStatuses = await queryWithRetry(latestStatusQuery, latestParams);
+
+    const latestStatuses = await queryWithRetry(
+      latestStatusQuery,
+      latestParams,
+    );
 
     // 3. Count clients with no followups
     const noFollowupQuery = `
@@ -120,12 +127,15 @@ router.get("/overview", async (req, res) => {
         ${buildDateClause("c.created_at", from_date, to_date)}
         ${employee_id ? "AND c.employee_id = ?" : ""}
     `;
-    
+
     const noFollowupParams = [];
     pushDateParams(noFollowupParams, from_date, to_date);
     if (employee_id) noFollowupParams.push(employee_id);
-    
-    const noFollowupResult = await queryWithRetry(noFollowupQuery, noFollowupParams);
+
+    const noFollowupResult = await queryWithRetry(
+      noFollowupQuery,
+      noFollowupParams,
+    );
     const noFollowupCount = noFollowupResult[0].count;
 
     // Initialize counters
@@ -147,52 +157,66 @@ router.get("/overview", async (req, res) => {
     today.setHours(0, 0, 0, 0);
 
     latestStatuses.forEach((row) => {
-      const isMissed = row.nextFollowupDate && new Date(row.nextFollowupDate) < today;
-      if (isMissed && !['lead', 'project_onboard', 'dropped', 'droped', 'cancelled'].includes(row.status)) {
+      const isMissed =
+        row.nextFollowupDate && new Date(row.nextFollowupDate) < today;
+      const st = row.status;
+
+      if (
+        isMissed &&
+        ![
+          "lead",
+          "Lead",
+          "project_onboard",
+          "projectOnboarded",
+          "dropped",
+          "Droped",
+          "droped",
+          "cancelled",
+        ].includes(st)
+      ) {
         totalMissedFollowups++;
       }
 
-      switch (row.status) {
-        case "not_picking":
-          notPickingCount++;
-          break;
-        case "inProgress":
-        case "first_followup":
-        case "second_followup":
-          inProgressCount++;
-          break;
-        case "meeting":
-          meetingCount++;
-          break;
-        case "proposed":
-          proposedCount++;
-          break;
-        case "billing":
-          billingCount++;
-          break;
-        case "lead":
-          leadInprogressCount++;
-          break;
-        case "project_onboard":
-          leadOnboardedCount++;
-          break;
-        case "not_interested":
-          notInterestedCount++;
-          break;
-        case "cancelled":
-          cancelledCount++;
-          break;
-        case "dropped":
-        case "droped":
-          dropCount++;
-          break;
-        default:
-          break;
+      if (
+        st === "not_picking" ||
+        st === "Not picking/busy/others" ||
+        st === "Not picking/ busy/ others"
+      ) {
+        notPickingCount++;
+      } else if (
+        st === "inProgress" ||
+        st === "inprogress" ||
+        st === "first_followup" ||
+        st === "second_followup" ||
+        st === "Followup Taken" ||
+        st === "followup_taken"
+      ) {
+        inProgressCount++;
+      } else if (st === "meeting" || st === "Meeting") {
+        meetingCount++;
+      } else if (st === "proposed" || st === "proposal" || st === "Proposal") {
+        proposedCount++;
+      } else if (st === "billing" || st === "Quotation" || st === "quotation") {
+        billingCount++;
+      } else if (st === "lead" || st === "Lead") {
+        leadInprogressCount++;
+      } else if (st === "project_onboard" || st === "projectOnboarded") {
+        leadOnboardedCount++;
+      } else if (st === "not_interested" || st === "Not Interested") {
+        notInterestedCount++;
+      } else if (st === "dropped" || st === "droped" || st === "Droped") {
+        dropCount++;
+      } else if (st === "cancelled" || st === "Cancelled") {
+        cancelledCount++;
+      } else {
+        inProgressCount++;
       }
     });
 
-    const activeFollowupsTotal = notPickingCount + inProgressCount + meetingCount + totalMissedFollowups;
-    const leadsTotal = proposedCount + billingCount + leadInprogressCount + leadOnboardedCount;
+    const activeFollowupsTotal =
+      notPickingCount + inProgressCount + meetingCount + totalMissedFollowups;
+    const leadsTotal =
+      proposedCount + billingCount + leadInprogressCount + leadOnboardedCount;
     const cancelledDroppedTotal = dropCount + cancelledCount;
 
     const response = {
@@ -230,8 +254,8 @@ router.get("/overview", async (req, res) => {
         ],
         dateRange: {
           from: from_date || null,
-          to: to_date || null
-        }
+          to: to_date || null,
+        },
       },
     };
 
@@ -310,23 +334,31 @@ router.get("/timeline", async (req, res) => {
           drop_count: 0,
         };
       }
-      if (['proposed', 'project_onboard', 'cancelled'].includes(r.status)) grouped[key].lead_count += 1;
-      if (['dropped', 'droped'].includes(r.status)) grouped[key].drop_count += 1;
+      if (["proposed", "project_onboard", "cancelled"].includes(r.status))
+        grouped[key].lead_count += 1;
+      if (["dropped", "droped"].includes(r.status))
+        grouped[key].drop_count += 1;
     });
 
     const allDays = [];
-    const [startYear, startMonth, startDay] = firstDayStr.split("-").map(Number);
+    const [startYear, startMonth, startDay] = firstDayStr
+      .split("-")
+      .map(Number);
     const [endYear, endMonth, endDay] = lastDayStr.split("-").map(Number);
-    
+
     const startDate = new Date(startYear, startMonth - 1, startDay);
     const endDate = new Date(endYear, endMonth - 1, endDay);
 
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    for (
+      let d = new Date(startDate);
+      d <= endDate;
+      d.setDate(d.getDate() + 1)
+    ) {
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, "0");
       const day = String(d.getDate()).padStart(2, "0");
       const dateKey = `${year}-${month}-${day}`;
-      
+
       const dateLabel = d.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
@@ -408,9 +440,10 @@ router.get("/report", async (req, res) => {
       let contactName = "-";
       if (row.contactPersons) {
         try {
-          const contacts = typeof row.contactPersons === "string"
-            ? JSON.parse(row.contactPersons)
-            : row.contactPersons;
+          const contacts =
+            typeof row.contactPersons === "string"
+              ? JSON.parse(row.contactPersons)
+              : row.contactPersons;
           if (Array.isArray(contacts) && contacts.length > 0) {
             phone = contacts[0].phone || contacts[0].contactNumber || "-";
             contactName = contacts[0].name || "-";
@@ -511,12 +544,12 @@ router.get("/meetings", async (req, res) => {
       params.push(status);
     }
     if (employee_id) {
-      filters += " AND c.employee_id = ?";
-      params.push(employee_id);
+      filters += " AND (c.employee_id = ? OR fu.employee_id = ?)";
+      params.push(employee_id, employee_id);
     }
 
     const sql = `
-      SELECT
+      SELECT DISTINCT
         m.id,
         m.followupID,
         m.title,
@@ -527,10 +560,15 @@ router.get("/meetings", async (req, res) => {
         m.link,
         m.location AS meeting_location,
         m.status,
+        m.attendees_client,
+        m.attendees_our_side,
+        m.outcomes,
+        m.mom_recorded_at,
         m.created_at,
         m.updated_at,
         fu.remarks,
         fu.contactPersonID,
+        fu.employee_id AS fu_employee_id,
         c.id AS clientID,
         c.company_name,
         c.customer_name,
@@ -540,22 +578,15 @@ router.get("/meetings", async (req, res) => {
         cp.name AS contact_person_name,
         cp.contactNumber AS contact_person_phone,
         cp.designation AS contact_person_designation,
-        e.employee_name,
-        mom.attendeesClient AS mom_attendees_client,
-        mom.attendeesOurSide AS mom_attendees_our_side,
-        mom.agenda AS mom_agenda,
-        mom.outcomes AS mom_outcomes,
-        mom.conductedDate AS mom_conducted_date,
-        mom.startTime AS mom_start_time,
-        mom.endTime AS mom_end_time,
-        mom.documentPath AS mom_document_path
+        COALESCE(
+          (SELECT ed.employee_name FROM employees_details ed WHERE ed.employee_id = fu.employee_id LIMIT 1),
+          (SELECT ed.employee_name FROM employees_details ed WHERE ed.employee_id = c.employee_id LIMIT 1)
+        ) AS employee_name
       FROM ManagementMeetings m
       JOIN ManagementFollowups fu ON m.followupID = fu.id
-      JOIN ClientsDataManagement c ON fu.clientID = c.id
+      LEFT JOIN ClientsDataManagement c ON fu.clientID = c.id
       LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
-      LEFT JOIN employees_details e ON c.employee_id = e.employee_id
-      LEFT JOIN ManagementMeetingMOM mom ON m.id = mom.meetingId
-      WHERE c.active = 1
+      WHERE 1=1
       ${filters}
       ORDER BY m.date DESC, m.time DESC
     `;
@@ -569,17 +600,24 @@ router.get("/meetings", async (req, res) => {
 
       if ((!contactName || contactName === "-") && row.client_contact_persons) {
         try {
-          const contacts = typeof row.client_contact_persons === "string"
-            ? JSON.parse(row.client_contact_persons)
-            : row.client_contact_persons;
+          const contacts =
+            typeof row.client_contact_persons === "string"
+              ? JSON.parse(row.client_contact_persons)
+              : row.client_contact_persons;
           if (Array.isArray(contacts) && contacts.length > 0) {
             // First try matching contactPersonID if present
             const matched = row.contactPersonID
-              ? contacts.find(c => String(c.id) === String(row.contactPersonID)) || contacts[0]
+              ? contacts.find(
+                  (c) => String(c.id) === String(row.contactPersonID),
+                ) || contacts[0]
               : contacts[0];
 
             contactName = matched.name || matched.contactName || contactName;
-            contactPhone = matched.phone || matched.contactNumber || matched.mobile || contactPhone;
+            contactPhone =
+              matched.phone ||
+              matched.contactNumber ||
+              matched.mobile ||
+              contactPhone;
             contactDesignation = matched.designation || contactDesignation;
           }
         } catch (e) {
@@ -605,6 +643,10 @@ router.get("/meetings", async (req, res) => {
         link: row.link || null,
         meeting_location: row.meeting_location || "-",
         status: row.status,
+        attendees_client: row.attendees_client || "-",
+        attendees_our_side: row.attendees_our_side || "-",
+        outcomes: row.outcomes || "-",
+        mom_recorded_at: row.mom_recorded_at || null,
         created_at: row.created_at,
         updated_at: row.updated_at,
         clientID: row.clientID,
@@ -616,22 +658,78 @@ router.get("/meetings", async (req, res) => {
         contact_person_designation: contactDesignation || "-",
         employee_name: row.employee_name || "-",
         remarks: row.remarks || "-",
-        mom_attendees_client: row.mom_attendees_client || null,
-        mom_attendees_our_side: row.mom_attendees_our_side || null,
-        mom_agenda: row.mom_agenda || null,
-        mom_outcomes: row.mom_outcomes || null,
-        mom_conducted_date: row.mom_conducted_date || null,
-        mom_start_time: row.mom_start_time || null,
-        mom_end_time: row.mom_end_time || null,
-        mom_document_path: row.mom_document_path || null,
       };
     });
-
 
     res.status(200).json({ success: true, data });
   } catch (err) {
     console.error("Meetings fetch error:", err);
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ Get client followups history for Management Analytics modal
+router.get("/client-history/:clientId", async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    const results = await queryWithRetry(
+      `SELECT f.*,
+              cp.name AS contact_person_name,
+              cp.contactNumber AS contact_person_phone,
+              cp.email AS contact_person_email,
+              cp.designation AS contact_person_designation,
+              c.contactPersons AS client_contact_persons
+       FROM ManagementFollowups f
+       LEFT JOIN ContactPersons cp ON f.contactPersonID = cp.id
+       LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
+       WHERE f.clientID = ?
+       ORDER BY f.created_at DESC`,
+      [clientId],
+    );
+
+    const processed = (results || []).map((row) => {
+      let contactName = row.contact_person_name || null;
+      let contactPhone = row.contact_person_phone || null;
+      let contactEmail = row.contact_person_email || null;
+      let contactDesignation = row.contact_person_designation || null;
+
+      if (!contactName && row.client_contact_persons) {
+        try {
+          const parsed =
+            typeof row.client_contact_persons === "string"
+              ? JSON.parse(row.client_contact_persons)
+              : row.client_contact_persons;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            contactName = parsed[0].name || parsed[0].contactPerson || null;
+            contactPhone = parsed[0].phone || parsed[0].contactNumber || null;
+            contactEmail = parsed[0].email || null;
+            contactDesignation = parsed[0].designation || null;
+          }
+        } catch (e) {
+          console.error("Error parsing client_contact_persons:", e);
+        }
+      }
+
+      return {
+        ...row,
+        contact_person_name: contactName,
+        contact_person_phone: contactPhone,
+        contact_person_email: contactEmail,
+        contact_person_designation: contactDesignation,
+      };
+    });
+
+    res.status(200).json({ success: true, data: processed });
+  } catch (err) {
+    console.error("❌ Error fetching client followups:", err);
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: "Failed to fetch followups",
+        message: err.message,
+      });
   }
 });
 

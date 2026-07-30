@@ -45,11 +45,11 @@ router.post("/projects", (req, res) => {
   }
 
   const sql = `
-    INSERT INTO ManagementOnboardedProjects (client_id, company_name, customer_name, project_name, category, start_date, end_date, budget_status)
-    VALUES (0, ?, ?, ?, ?, CURDATE(), CURDATE(), 'pending')
+    INSERT INTO projects (client_id, project_name, project_category, start_date, end_date, budget_status, onboard_status)
+    VALUES (0, ?, ?, CURDATE(), CURDATE(), 'pending', 'In progress')
   `;
 
-  db.pool.query(sql, [companyName, customerName, projectName, projectCategory], (err, result) => {
+  db.pool.query(sql, [projectName, projectCategory], (err, result) => {
     if (err) {
       console.error("Error creating project:", err);
       return res.status(500).json({
@@ -62,12 +62,12 @@ router.post("/projects", (req, res) => {
     const fetchNewProject = `
       SELECT 
         id,
-        company_name AS companyName,
-        customer_name AS customerName,
+        project_name AS companyName,
+        project_name AS customerName,
         project_name AS projectName,
-        category AS projectCategory,
+        project_category AS projectCategory,
         created_at AS createdAt
-      FROM ManagementOnboardedProjects 
+      FROM projects 
       WHERE id = ?
     `;
 
@@ -89,16 +89,16 @@ router.post("/projects", (req, res) => {
   });
 });
 
-// GET all projects from ManagementOnboardedProjects table — single JOIN query (O(1))
+// GET all projects from projects table — single JOIN query (O(1))
 router.get("/projects", (req, res) => {
   const sql = `
     SELECT
       p.id,
       p.client_id        AS clientId,
-      p.company_name     AS companyName,
-      p.customer_name    AS customerName,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      COALESCE(c.customer_name, p.project_name) AS customerName,
       p.project_name     AS projectName,
-      p.category         AS projectCategory,
+      p.project_category AS projectCategory,
       p.start_date       AS startDate,
       p.end_date         AS endDate,
       p.budget_status    AS budget_status,
@@ -107,7 +107,8 @@ router.get("/projects", (req, res) => {
       pb.total_budget     AS totalBudget,
       pb.starting_date    AS budgetStartingDate,
       pb.completion_date  AS budgetComplicationDate
-    FROM ManagementOnboardedProjects p
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
     LEFT JOIN project_budgets pb ON pb.project_id = p.id
     ORDER BY p.created_at DESC
   `;
@@ -150,17 +151,18 @@ router.get("/projects/:id", (req, res) => {
 
   const projectQuery = `
     SELECT 
-      id,
-      client_id AS clientId,
-      company_name AS companyName,
-      customer_name AS customerName,    
-      project_name AS projectName,
-      category AS projectCategory,
-      start_date AS startDate,
-      end_date AS endDate,
-      created_at AS createdAt
-    FROM ManagementOnboardedProjects
-    WHERE id = ?
+      p.id,
+      p.client_id AS clientId,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      COALESCE(c.customer_name, p.project_name) AS customerName,    
+      p.project_name AS projectName,
+      p.project_category AS projectCategory,
+      p.start_date AS startDate,
+      p.end_date AS endDate,
+      p.created_at AS createdAt
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
+    WHERE p.id = ?
   `;
 
   db.pool.query(projectQuery, [id], (err, projects) => {
@@ -540,7 +542,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
             }
 
             db.pool.query(
-              `UPDATE ManagementOnboardedProjects SET budget_status = 'completed' WHERE id = ?`,
+              `UPDATE projects SET budget_status = 'completed' WHERE id = ?`,
               [projectId],
               (statusErr, statusResult) => {
                 if (statusErr) {
@@ -586,7 +588,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
             }
 
             db.pool.query(
-              `UPDATE ManagementOnboardedProjects SET budget_status = 'completed' WHERE id = ?`,
+              `UPDATE projects SET budget_status = 'completed' WHERE id = ?`,
               [projectId],
               (statusErr, statusResult) => {
                 if (statusErr) {

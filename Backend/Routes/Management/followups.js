@@ -7,69 +7,27 @@ const {
   queryWithRetry,
   getConnectionWithRetry,
 } = require("../../dataBase/connection");
+const { uploadManagementResourceToDrive } = require("../../utils/driveService");
 
-const createDirectories = () => {
-  const basePath = path.join(__dirname, "..", "..", "Images", "Management");
-  const folders = ["Quotation", "PO", "Invoice"];
-
-  folders.forEach((folder) => {
-    const folderPath = path.join(basePath, folder);
-    if (!fs.existsSync(folderPath)) {
-      fs.mkdirSync(folderPath, { recursive: true });
-    }
-  });
-};
-
-createDirectories();
-
-// Auto-run DB migration to add status enum values including project_onboard and cancelled
-(async () => {
-  try {
-    console.log("Running migration: Altering status column in ManagementFollowups...");
-    await queryWithRetry(`
-      ALTER TABLE ManagementFollowups 
-      MODIFY COLUMN status enum('inprogress','meeting','proposed','billing','lead','droped','not_picking','not_interested','project_onboard','cancelled') NOT NULL
-    `);
-    console.log("Migration successful: status column altered.");
-  } catch (err) {
-    console.error("Migration error (altering status column):", err);
-  }
-})();
-
+// Use memory/temp storage for Google Drive uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    let folder = "";
-
-    if (file.fieldname === "quotation") {
-      folder = "Quotation";
-    } else if (file.fieldname === "purchaseOrder") {
-      folder = "PO";
-    } else if (file.fieldname === "invoice") {
-      folder = "Invoice";
+    const tempDir = path.join(__dirname, "..", "..", "temp_uploads");
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
     }
-
-    const uploadPath = path.join(
-      __dirname,
-      "..",
-      "..",
-      "Images",
-      "Management",
-      folder
-    );
-    cb(null, uploadPath);
+    cb(null, tempDir);
   },
   filename: function (req, file, cb) {
-    const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const filename = `${timestamp}${ext}`;
-    cb(null, filename);
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|webp|pdf|doc|docx/;
   const extname = allowedTypes.test(
-    path.extname(file.originalname).toLowerCase()
+    path.extname(file.originalname).toLowerCase(),
   );
   const mimetype = allowedTypes.test(file.mimetype);
 
@@ -83,54 +41,10 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-const uploadFields = upload.fields([
-  { name: "quotation", maxCount: 10 },
-  { name: "purchaseOrder", maxCount: 10 },
-  { name: "invoice", maxCount: 10 },
-]);
-
-const processUploadedFiles = (files) => {
-  const fileData = {
-    quotation: [],
-    purchaseOrder: [],
-    invoice: [],
-  };
-
-  if (files.quotation) {
-    fileData.quotation = files.quotation.map((file) => ({
-      originalName: file.originalname,
-      convertedName: file.filename,
-      path: `Images/Management/Quotation/${file.filename}`,
-      size: file.size,
-      mimetype: file.mimetype,
-    }));
-  }
-
-  if (files.purchaseOrder) {
-    fileData.purchaseOrder = files.purchaseOrder.map((file) => ({
-      originalName: file.originalname,
-      convertedName: file.filename,
-      path: `Images/Management/PO/${file.filename}`,
-      size: file.size,
-      mimetype: file.mimetype,
-    }));
-  }
-
-  if (files.invoice) {
-    fileData.invoice = files.invoice.map((file) => ({
-      originalName: file.originalname,
-      convertedName: file.filename,
-      path: `Images/Management/Invoice/${file.filename}`,
-      size: file.size,
-      mimetype: file.mimetype,
-    }));
-  }
-
-  return fileData;
-};
+const uploadFields = upload.fields([{ name: "quotation", maxCount: 10 }]);
 
 router.post(
   "/",
@@ -150,15 +64,18 @@ router.post(
     const {
       employee_id,
       clientID,
+      projectId,
       contactPersonId,
       status,
       remarks,
       nextFollowup,
       meetingData,
       isMarketing,
+      project_name,
+      project_category,
     } = req.body;
 
-    const dbStatus = status === "inProgress" ? "inprogress" : status;
+    const dbStatus = status;
 
     if (!clientID || !status) {
       return res.status(400).json({
@@ -186,7 +103,7 @@ router.post(
             remarks || null,
             nextFollowup || null,
             1,
-          ]
+          ],
         );
 
         return res.status(200).json({
@@ -196,7 +113,41 @@ router.post(
         });
       }
 
-      const fileData = processUploadedFiles(req.files || {});
+      // Process uploaded Quotation files to Google Drive (Folder: Management Resource -> Quotation)
+      const quotationFilesData = [];
+      if (req.files && req.files.quotation) {
+        for (const file of req.files.quotation) {
+          const driveResult = await uploadManagementResourceToDrive({
+            filePath: file.path,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            subfolderName: "Quotation",
+          });
+
+          if (driveResult.success) {
+            quotationFilesData.push({
+              originalName: file.originalname,
+              convertedName: driveResult.fileId,
+              path: driveResult.previewUrl,
+              driveId: driveResult.fileId,
+              size: file.size,
+              mimetype: file.mimetype,
+            });
+          } else {
+            console.error(
+              "⚠️ Drive upload failed for quotation file, saving fallback path:",
+              driveResult.error,
+            );
+            quotationFilesData.push({
+              originalName: file.originalname,
+              convertedName: file.filename,
+              path: `Images/Management/Quotation/${file.filename}`,
+              size: file.size,
+              mimetype: file.mimetype,
+            });
+          }
+        }
+      }
 
       let parsedMeetingData = {};
       if (meetingData) {
@@ -210,65 +161,105 @@ router.post(
         }
       }
 
-      let managementClientId = null;
-      let marketingClientId = null;
-
-      const isMarketingBool =
-        isMarketing === true ||
-        isMarketing === "true" ||
-        isMarketing === 1 ||
-        isMarketing === "1";
-
-      if (isMarketingBool) {
-        marketingClientId = clientID;
-      } else {
-        managementClientId = clientID;
+      let targetProjectId = projectId || null;
+      if (dbStatus === "Followup Taken" || dbStatus === "followup_taken") {
+        if (!targetProjectId && project_name && project_name.trim()) {
+          const projResult = await queryWithRetry(
+            `INSERT INTO projects
+              (client_id, project_name, project_category, employee_id, budget_status, onboard_status, remarks)
+             VALUES (?, ?, ?, ?, 'pending', 'In progress', ?)`,
+            [
+              clientID,
+              project_name.trim(),
+              project_category || null,
+              employee_id,
+              remarks || null,
+            ],
+          );
+          targetProjectId = projResult.insertId;
+        }
+      } else if (dbStatus === "ProjectOnboard" || dbStatus === "project_onboard") {
+        if (targetProjectId) {
+          await queryWithRetry(
+            `UPDATE projects SET onboard_status = 'onboarded', updated_at = NOW() WHERE id = ?`,
+            [targetProjectId]
+          );
+        } else {
+          // Check if client has existing project
+          const existingProjects = await queryWithRetry(
+            `SELECT id FROM projects WHERE client_id = ? ORDER BY id DESC LIMIT 1`,
+            [clientID]
+          );
+          if (existingProjects.length > 0) {
+            targetProjectId = existingProjects[0].id;
+            await queryWithRetry(
+              `UPDATE projects SET onboard_status = 'onboarded', updated_at = NOW() WHERE id = ?`,
+              [targetProjectId]
+            );
+          } else {
+            const pName = (project_name && project_name.trim()) ? project_name.trim() : "Default Project";
+            const projResult = await queryWithRetry(
+              `INSERT INTO projects
+                (client_id, project_name, project_category, employee_id, budget_status, onboard_status, remarks)
+               VALUES (?, ?, ?, ?, 'pending', 'onboarded', ?)`,
+              [
+                clientID,
+                pName,
+                project_category || null,
+                employee_id,
+                remarks || null,
+              ],
+            );
+            targetProjectId = projResult.insertId;
+          }
+        }
       }
 
       const followupResult = await queryWithRetry(
         `INSERT INTO ManagementFollowups 
-          (employee_id, clientID, marketing_client_id,
-            contactPersonID, status, remarks, nextFollowupDate,
-            quotation, purchaseOrder, invoice, isMarketing)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (employee_id, clientID, projectId,
+            contactPersonID, status, remarks, nextFollowupDate, quotation_path)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           employee_id,
-          managementClientId,
-          marketingClientId,
+          clientID,
+          targetProjectId,
           contactPersonId || null,
           dbStatus,
           remarks || null,
           nextFollowup || null,
-          JSON.stringify(fileData.quotation),
-          JSON.stringify(fileData.purchaseOrder),
-          JSON.stringify(fileData.invoice),
-          isMarketingBool,
-        ]
+          quotationFilesData.length > 0
+            ? JSON.stringify(quotationFilesData)
+            : null,
+        ],
       );
 
       const followupId = followupResult.insertId;
 
       const hasMeetingData =
-        parsedMeetingData.title?.trim() &&
-        parsedMeetingData.date &&
-        parsedMeetingData.type;
+        (parsedMeetingData.title?.trim() || parsedMeetingData.agenda?.trim() || remarks?.trim()) &&
+        (parsedMeetingData.date || nextFollowup) &&
+        (dbStatus === "Lead" || dbStatus === "meeting" || parsedMeetingData.type || parsedMeetingData.title);
 
       if (hasMeetingData) {
+        const meetingDate = parsedMeetingData.date || nextFollowup || new Date().toISOString().split("T")[0];
+        const meetingTitle = parsedMeetingData.title?.trim() || (dbStatus === "Lead" ? "Lead Meeting" : "Followup Meeting");
+
         await queryWithRetry(
           `INSERT INTO ManagementMeetings 
           ( followupID, title, date, time, type, agenda, link, location, status)
           VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             followupId,
-            parsedMeetingData.title,
-            parsedMeetingData.date,
-            parsedMeetingData.time,
-            parsedMeetingData.type || null,
-            parsedMeetingData.agenda || null,
+            meetingTitle,
+            meetingDate,
+            parsedMeetingData.time || null,
+            parsedMeetingData.type || "Meeting",
+            parsedMeetingData.agenda || remarks || null,
             parsedMeetingData.link || null,
             parsedMeetingData.location || null,
             parsedMeetingData.status || "inprogress",
-          ]
+          ],
         );
       }
 
@@ -277,9 +268,7 @@ router.post(
         message: "Followup added successfully",
         followupId: followupId,
         filesUploaded: {
-          quotation: fileData.quotation.length,
-          purchaseOrder: fileData.purchaseOrder.length,
-          invoice: fileData.invoice.length,
+          quotation: quotationFilesData.length,
         },
       });
     } catch (err) {
@@ -290,9 +279,9 @@ router.post(
           .flat()
           .forEach((file) => {
             try {
-              fs.unlinkSync(file.path);
+              if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
             } catch (unlinkErr) {
-              console.error("Error deleting file:", unlinkErr);
+              console.error("Error deleting temp file:", unlinkErr);
             }
           });
       }
@@ -302,7 +291,7 @@ router.post(
         details: err.message,
       });
     }
-  }
+  },
 );
 
 router.get("/marketingLeeds", async (req, res) => {
@@ -363,7 +352,7 @@ router.get("/marketingLeeds", async (req, res) => {
     `;
     const contactPersons = await queryWithRetry(
       contactQuery,
-      marketingClientIDs
+      marketingClientIDs,
     );
 
     const contactsGrouped = {};
@@ -389,7 +378,7 @@ router.get("/marketingLeeds", async (req, res) => {
       `;
       const marketingHistory = await queryWithRetry(
         marketingHistoryQuery,
-        marketingClientIDs
+        marketingClientIDs,
       );
 
       const historyGrouped = {};
@@ -460,7 +449,7 @@ router.get("/marketingLeeds", async (req, res) => {
 
     const latestManagementFollowups = await queryWithRetry(
       latestManagementFollowupQuery,
-      [employee_id, ...marketingClientIDs]
+      [employee_id, ...marketingClientIDs],
     );
 
     const latestManagementFollowupMap = {};
@@ -474,20 +463,48 @@ router.get("/marketingLeeds", async (req, res) => {
         const mgmtFollowup = latestManagementFollowupMap[lead.clientID];
         return (
           !mgmtFollowup ||
-          ["inprogress", "meeting", "proposed", "billing"].includes(
-            mgmtFollowup.status
-          )
+          [
+            "Followup Taken",
+            "followup_taken",
+            "Not picking/busy/others",
+            "Not picking/ busy/ others",
+            "proposal",
+            "quotation",
+            "In progress",
+            "inprogress",
+          ].includes(mgmtFollowup?.status)
         );
       });
-    } else if (status === "droped") {
+    } else if (status === "droped" || status === "Droped") {
       filteredLeads = marketingLeads.filter((lead) => {
         const mgmtFollowup = latestManagementFollowupMap[lead.clientID];
-        return mgmtFollowup && mgmtFollowup.status === "droped";
+        return (
+          mgmtFollowup &&
+          (mgmtFollowup.status === "droped" || mgmtFollowup.status === "Droped")
+        );
       });
-    } else if (status === "lead") {
+    } else if (
+      status === "lead" ||
+      status === "leads" ||
+      status === "meeting"
+    ) {
       filteredLeads = marketingLeads.filter((lead) => {
         const mgmtFollowup = latestManagementFollowupMap[lead.clientID];
-        return mgmtFollowup && mgmtFollowup.status === "lead";
+        return (
+          mgmtFollowup &&
+          (mgmtFollowup.status === "lead" ||
+            mgmtFollowup.status === "leads" ||
+            mgmtFollowup.status === "meeting")
+        );
+      });
+    } else if (status === "project_onboard" || status === "projectOnboarded") {
+      filteredLeads = marketingLeads.filter((lead) => {
+        const mgmtFollowup = latestManagementFollowupMap[lead.clientID];
+        return (
+          mgmtFollowup &&
+          (mgmtFollowup.status === "project_onboard" ||
+            mgmtFollowup.status === "projectOnboarded")
+        );
       });
     }
 
@@ -518,7 +535,7 @@ router.get("/marketingLeeds", async (req, res) => {
     `;
     const marketingHistory = await queryWithRetry(
       marketingHistoryQuery,
-      filteredClientIDs
+      filteredClientIDs,
     );
 
     const managementHistoryQuery = `
@@ -537,20 +554,20 @@ router.get("/marketingLeeds", async (req, res) => {
     `;
     const managementHistory = await queryWithRetry(
       managementHistoryQuery,
-      filteredClientIDs
+      filteredClientIDs,
     );
 
     const combinedHistory = {};
     filteredClientIDs.forEach((clientID) => {
       const mktHistory = marketingHistory.filter(
-        (h) => h.clientID === clientID
+        (h) => h.clientID === clientID,
       );
       const mgmtHistory = managementHistory.filter(
-        (h) => h.marketing_client_id === clientID
+        (h) => h.marketing_client_id === clientID,
       );
 
       combinedHistory[clientID] = [...mgmtHistory, ...mktHistory].sort(
-        (a, b) => new Date(b.created_at) - new Date(a.created_at)
+        (a, b) => new Date(b.created_at) - new Date(a.created_at),
       );
     });
 
@@ -642,82 +659,67 @@ router.get("/counts", async (req, res) => {
     const followupCountsQuery = `
       SELECT 
         f.status,
-        COUNT(DISTINCT f.clientID) as count
+        COUNT(*) as count
       FROM ManagementFollowups f
       JOIN (
-        SELECT clientID, MAX(created_at) AS last_date
+        SELECT MAX(id) AS max_id
         FROM ManagementFollowups
-        WHERE employee_id = ?
-        GROUP BY clientID
-      ) lf ON f.clientID = lf.clientID AND f.created_at = lf.last_date
-      JOIN ClientsDataManagement c ON f.clientID = c.id
-      WHERE c.active = 1 AND f.employee_id = ?
+        ${employee_id ? "WHERE employee_id = ?" : ""}
+        GROUP BY clientID, projectId
+      ) latest ON f.id = latest.max_id
+      LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
       GROUP BY f.status
     `;
 
-    const followupCounts = await queryWithRetry(followupCountsQuery, [
-      employee_id,
-      employee_id,
-    ]);
+    const params = employee_id ? [employee_id] : [];
+    const followupCounts = await queryWithRetry(followupCountsQuery, params);
 
-    const noFollowupQuery = `
+    const meetingsCountQuery = `
       SELECT COUNT(*) as count
-      FROM ClientsDataManagement c
-      LEFT JOIN ManagementFollowups f ON c.id = f.clientID
-      WHERE f.clientID IS NULL AND c.active = 1 AND c.employee_id = ?
+      FROM ManagementMeetings m
+      JOIN ManagementFollowups fu ON m.followupID = fu.id
+      ${employee_id ? "WHERE fu.employee_id = ?" : ""}
     `;
-    const noFollowupResult = await queryWithRetry(noFollowupQuery, [
-      employee_id,
-    ]);
-    const noFollowupCount = noFollowupResult[0]?.count || 0;
-
-    const currentClientsQuery = `
-      SELECT COUNT(*) as count FROM ClientsDataManagement WHERE active = 1 AND employee_id = ?
-    `;
-    const currentClientsResult = await queryWithRetry(currentClientsQuery, [
-      employee_id,
-    ]);
-
-    const deletedClientsQuery = `
-      SELECT COUNT(*) as count FROM ClientsDataManagement WHERE active = 0 AND employee_id = ?
-    `;
-    const deletedClientsResult = await queryWithRetry(deletedClientsQuery, [
-      employee_id,
-    ]);
+    const meetingsResult = await queryWithRetry(meetingsCountQuery, params);
+    const meetingsCount = meetingsResult[0]?.count || 0;
 
     const counts = {
-      first_followup: noFollowupCount,
-      inprogress: 0,
-      billing: 0,
-      lead: 0,
-      lead_pending: 0,
-      lead_onboarded: 0,
-      lead_cancelled: 0,
-      not_interested: 0,
+      followup: 0,
+      quotation: 0,
+      projectOnboard: 0,
       droped: 0,
-      current: currentClientsResult[0]?.count || 0,
-      deleted: deletedClientsResult[0]?.count || 0,
+      meetings: meetingsCount,
     };
 
     followupCounts.forEach((row) => {
-      if (["inprogress", "meeting", "proposed", "not_picking"].includes(row.status)) {
-        counts.inprogress += row.count;
-      } else if (row.status === "billing") {
-        counts.billing = row.count;
-      } else if (row.status === "lead") {
-        counts.lead_pending = row.count;
-      } else if (row.status === "project_onboard") {
-        counts.lead_onboarded = row.count;
-      } else if (row.status === "cancelled") {
-        counts.lead_cancelled = row.count;
-      } else if (row.status === "not_interested") {
-        counts.not_interested = row.count;
-      } else if (row.status === "droped") {
-        counts.droped = row.count;
+      const st = row.status;
+      if (
+        st === "Followup Taken" ||
+        st === "followup_taken" ||
+        st === "Not picking/busy/others" ||
+        st === "Not picking/ busy/ others" ||
+        st === "Lead" ||
+        st === "lead"
+      ) {
+        counts.followup += row.count;
+      } else if (
+        st === "Quotation" ||
+        st === "quotation" ||
+        st === "proposal" ||
+        st === "proposed" ||
+        st === "Proposal"
+      ) {
+        counts.quotation += row.count;
+      } else if (
+        st === "project_onboard" ||
+        st === "projectOnboarded" ||
+        st === "ProjectOnboard"
+      ) {
+        counts.projectOnboard += row.count;
+      } else if (st === "droped" || st === "Droped") {
+        counts.droped += row.count;
       }
     });
-
-    counts.lead = counts.lead_pending + counts.lead_onboarded + counts.lead_cancelled;
 
     res.status(200).json({
       success: true,
@@ -783,7 +785,7 @@ router.get("/marketingLeedsCount", async (req, res) => {
 
     const latestManagementFollowups = await queryWithRetry(
       latestManagementFollowupQuery,
-      [employee_id, ...marketingClientIDs, employee_id]
+      [employee_id, ...marketingClientIDs, employee_id],
     );
 
     const statusMap = {};
@@ -804,12 +806,25 @@ router.get("/marketingLeedsCount", async (req, res) => {
       if (!status) {
         marketingCounts.followup++;
       } else if (
-        ["inprogress", "meeting", "proposed", "billing"].includes(status)
+        [
+          "Followup Taken",
+          "followup_taken",
+          "Not picking/busy/others",
+          "Not picking/ busy/ others",
+          "In progress",
+          "inprogress",
+          "proposal",
+          "quotation",
+        ].includes(status)
       ) {
         marketingCounts.followup++;
-      } else if (status === "lead") {
+      } else if (
+        status === "lead" ||
+        status === "leads" ||
+        status === "meeting"
+      ) {
         marketingCounts.leads++;
-      } else if (status === "droped") {
+      } else if (status === "droped" || status === "Droped") {
         marketingCounts.droped++;
       }
     });
@@ -824,73 +839,13 @@ router.get("/marketingLeedsCount", async (req, res) => {
   }
 });
 
-// POST - Save onboard details to ManagementOnboardedProjects
-router.post("/onboard", async (req, res) => {
-  const { clientId, companyName, customerName, projectName, category, startDate, endDate, reviewDate, remarks, onboardedBy } = req.body;
-  try {
-    if (!clientId || !companyName || !projectName || !category || !startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "clientId, companyName, projectName, category, startDate, and endDate are required",
-      });
-    }
-
-    await queryWithRetry(
-      `INSERT INTO ManagementOnboardedProjects
-        (client_id, company_name, customer_name, project_name, category, start_date, end_date, review_date, remarks, budget_status, onboarded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [clientId, companyName, customerName || "", projectName, category, startDate, endDate, reviewDate || null, remarks || "", onboardedBy || ""]
-    );
-
-    res.status(201).json({
-      success: true,
-      message: "Onboard details saved successfully",
-    });
-  } catch (err) {
-    console.error("Error saving onboard details:", err);
-    res.status(500).json({ success: false, message: "Failed to save onboard details" });
-  }
-});
-
-// GET - List all onboarded projects
-router.get("/onboarded-projects", async (req, res) => {
-  console.log("GET /api/ManagementFollowups/onboarded-projects called");
-  try {
-    const rows = await queryWithRetry(
-      `SELECT * FROM ManagementOnboardedProjects ORDER BY created_at DESC`
-    );
-    console.log("Found onboarded projects count:", rows.length);
-    res.status(200).json({ success: true, data: rows });
-  } catch (err) {
-    console.error("Error fetching onboarded projects:", err);
-    res.status(500).json({ success: false, message: "Failed to fetch onboarded projects" });
-  }
-});
-
-// PATCH - Update budget_status to 'completed' (or value passed in body)
-router.patch("/onboard/:id/budget-status", async (req, res) => {
-  const { id } = req.params;
-  const newStatus = req.body?.status || "completed";
-  console.log(`PATCH /api/ManagementFollowups/onboard/${id}/budget-status called with status: ${newStatus}`);
-  try {
-    await queryWithRetry(
-      `UPDATE ManagementOnboardedProjects SET budget_status = ? WHERE id = ?`,
-      [newStatus, id]
-    );
-    res.status(200).json({ success: true, message: "Budget status updated" });
-  } catch (err) {
-    console.error("Error updating budget status:", err);
-    res.status(500).json({ success: false, message: "Failed to update budget status" });
-  }
-});
-
 router.get("/:followupId", async (req, res) => {
   const { followupId } = req.params;
 
   try {
     const followup = await queryWithRetry(
       `SELECT * FROM ManagementFollowups WHERE id = ?`,
-      [followupId]
+      [followupId],
     );
 
     if (followup.length === 0) {
@@ -899,7 +854,7 @@ router.get("/:followupId", async (req, res) => {
 
     const followupData = {
       ...followup[0],
-      quotation: JSON.parse(followup[0].quotation || "[]"),
+      quotation: JSON.parse(followup[0].quotation_path || "[]"),
       purchaseOrder: JSON.parse(followup[0].purchaseOrder || "[]"),
       invoice: JSON.parse(followup[0].invoice || "[]"),
     };
@@ -911,140 +866,33 @@ router.get("/:followupId", async (req, res) => {
   }
 });
 
-router.get("/client/:clientId", async (req, res) => {
-  try {
-    const { clientId } = req.params;
-
-    const results = await queryWithRetry(
-      `SELECT f.*,
-              cp.name AS contact_person_name,
-              cp.contactNumber AS contact_person_phone,
-              cp.email AS contact_person_email,
-              cp.designation AS contact_person_designation,
-              c.contactPersons AS client_contact_persons
-       FROM ManagementFollowups f
-       LEFT JOIN ContactPersons cp ON f.contactPersonID = cp.id
-       LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
-       WHERE f.clientID = ?
-       ORDER BY f.created_at DESC`,
-      [clientId]
-    );
-
-    const processed = (results || []).map((row) => {
-      let contactName = row.contact_person_name || null;
-      let contactPhone = row.contact_person_phone || null;
-      let contactEmail = row.contact_person_email || null;
-      let contactDesignation = row.contact_person_designation || null;
-
-      if (!contactName && row.client_contact_persons) {
-        try {
-          const parsed = typeof row.client_contact_persons === "string"
-            ? JSON.parse(row.client_contact_persons)
-            : row.client_contact_persons;
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            contactName = parsed[0].name || parsed[0].contactPerson || null;
-            contactPhone = parsed[0].phone || parsed[0].contactNumber || null;
-            contactEmail = parsed[0].email || null;
-            contactDesignation = parsed[0].designation || null;
-          }
-        } catch (e) {
-          console.error("Error parsing client_contact_persons:", e);
-        }
-      }
-
-      return {
-        ...row,
-        contact_person_name: contactName,
-        contact_person_phone: contactPhone,
-        contact_person_email: contactEmail,
-        contact_person_designation: contactDesignation,
-      };
-    });
-
-    res.status(200).json({ success: true, data: processed });
-  } catch (err) {
-    console.error("❌ Error fetching client followups:", err);
-    res.status(500).json({ success: false, error: "Failed to fetch followups", message: err.message });
-  }
-});
-
 router.get("/", async (req, res) => {
   try {
     const { status, employee_id } = req.query;
 
-    const validStatuses = [
-      "followup", "lead", "droped", "all",
-      "inprogress", "meeting", "proposed", "billing", "first_followup",
-      "not_picking", "not_interested", "project_onboard", "cancelled"
-    ];
+    const validStatuses = ["followup", "quotation", "projectOnboard", "droped"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: "Invalid status parameter" });
     }
 
-    if (status === "first_followup") {
-      const firstFollowupQuery = `
-        SELECT 
-          c.id AS clientID,
-          c.company_name,
-          c.customer_name,
-          c.industry_type,
-          c.website,
-          c.address,
-          c.city,
-          c.state,
-          c.reference,
-          c.requirements,
-          c.contactPersons,
-          c.created_at AS client_created_at,
-          c.updated_at AS client_updated_at
-        FROM ClientsDataManagement c
-        LEFT JOIN ManagementFollowups f ON c.id = f.clientID
-        WHERE c.active = 1 AND f.clientID IS NULL
-        ${employee_id ? "AND c.employee_id = ?" : ""}
-        ORDER BY c.created_at DESC
-      `;
-      const params = employee_id ? [employee_id] : [];
-      const rows = await queryWithRetry(firstFollowupQuery, params);
-      
-      const data = rows.map(r => ({
-        client_details: {
-          id: r.clientID,
-          company_name: r.company_name,
-          customer_name: r.customer_name,
-          industry_type: r.industry_type,
-          website: r.website,
-          address: r.address,
-          city: r.city,
-          state: r.state,
-          reference: r.reference,
-          requirements: r.requirements,
-          contactPersons: typeof r.contactPersons === "string" ? JSON.parse(r.contactPersons) : r.contactPersons,
-          created_at: r.client_created_at,
-          updated_at: r.client_updated_at
-        },
-        latest_status: null
-      }));
-
-      return res.status(200).json({ success: true, data });
-    }
-
     let dbStatuses = [];
-    if (status === "followup" || status === "inprogress") {
-      dbStatuses = ["inprogress", "meeting", "proposed", "not_picking"];
-    } else if (status === "lead") {
-      dbStatuses = ["lead"];
-    } else if (status === "droped") {
-      dbStatuses = ["droped"];
+    if (status === "followup") {
+      dbStatuses = ["Followup Taken", "Not picking/busy/others", "Lead"];
+    } else if (status === "quotation") {
+      dbStatuses = ["Quotation", "quotation", "proposal", "proposed"];
+    } else if (status === "projectOnboard") {
+      dbStatuses = ["project_onboard", "projectOnboarded", "ProjectOnboard"];
+    } else if (status === "droped" || status === "Droped") {
+      dbStatuses = ["Droped", "droped"];
     } else if (status === "all") {
       dbStatuses = [
-        "inprogress",
-        "meeting",
-        "proposed",
-        "billing",
-        "lead",
-        "droped",
-        "not_picking",
-        "not_interested",
+        "Followup Taken",
+        "Not picking/busy/others",
+        "Lead",
+        "Quotation",
+        "Proposal",
+        "ProjectOnboard",
+        "Droped",
       ];
     } else {
       dbStatuses = [status];
@@ -1067,72 +915,27 @@ router.get("/", async (req, res) => {
         c.requirements,
         c.contactPersons,
         c.created_at AS client_created_at,
-        c.updated_at AS client_updated_at
+        c.updated_at AS client_updated_at,
+        p.project_name,
+        p.project_category,
+        COALESCE(ed.employee_name, f.employee_id) AS employee_name
       FROM ManagementFollowups f
       JOIN (
-        SELECT clientID, MAX(created_at) AS last_date
+        SELECT MAX(id) AS max_id
         FROM ManagementFollowups
-        ${employee_id ? "WHERE employee_id = ?" : ""}
-        GROUP BY clientID
-      ) lf ON f.clientID = lf.clientID AND f.created_at = lf.last_date
-      JOIN ClientsDataManagement c ON f.clientID = c.id
-      WHERE f.status IN (${statusPlaceholders}) AND c.active = 1
-      ${employee_id ? "AND f.employee_id = ?" : ""}
+        GROUP BY clientID, projectId
+      ) latest ON f.id = latest.max_id
+      LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
+      LEFT JOIN projects p ON f.projectId = p.id
+      LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
+      WHERE (f.status IN (${statusPlaceholders}) OR f.status = '' OR f.status IS NULL)
       ORDER BY f.created_at DESC
     `;
 
-    let params = [];
-
-    if (employee_id) {
-      params.push(employee_id);
-    }
-
-    params.push(...dbStatuses);
-
-    if (employee_id) {
-      params.push(employee_id);
-    }
-
+    let params = [...dbStatuses];
     const latestRows = await queryWithRetry(latestStatusQuery, params);
 
-    const matchedClientIDs = latestRows.map((r) => r.clientID);
-
-    let noFollowupClients = [];
-
-    if (status === "followup" || status === "all") {
-      const noFollowupQuery = `
-        SELECT 
-          c.id AS clientID,
-          c.company_name,
-          c.customer_name,
-          c.industry_type,
-          c.website,
-          c.address,
-          c.city,
-          c.state,
-          c.reference,
-          c.requirements,
-          c.contactPersons,
-          c.created_at AS client_created_at,
-          c.updated_at AS client_updated_at
-        FROM ClientsDataManagement c
-        LEFT JOIN ManagementFollowups f ON c.id = f.clientID
-        WHERE f.clientID IS NULL AND c.active = 1
-        ${employee_id ? "AND c.employee_id = ?" : ""}
-        ORDER BY c.created_at DESC
-      `;
-
-      noFollowupClients = employee_id
-        ? await queryWithRetry(noFollowupQuery, [employee_id])
-        : await queryWithRetry(noFollowupQuery);
-    }
-
-    const clientIDs = [
-      ...matchedClientIDs,
-      ...noFollowupClients.map((n) => n.clientID),
-    ];
-
-    if (clientIDs.length === 0) {
+    if (latestRows.length === 0) {
       return res.status(200).json({
         success: true,
         data: [],
@@ -1140,37 +943,38 @@ router.get("/", async (req, res) => {
       });
     }
 
-    const placeholders = clientIDs.map(() => "?").join(",");
+    const clientIDs = [...new Set(latestRows.map((r) => r.clientID))].filter(
+      Boolean,
+    );
+    let history = [];
+    let meetings = [];
 
-    const historyQuery = `
-      SELECT 
-        f.*
-      FROM ManagementFollowups f
-      WHERE f.clientID IN (${placeholders})
-      ORDER BY f.clientID, f.created_at DESC
-    `;
-    const history = await queryWithRetry(historyQuery, clientIDs);
+    if (clientIDs.length > 0) {
+      const placeholders = clientIDs.map(() => "?").join(",");
 
-    const meetingQuery = `
+      const historyQuery = `
         SELECT 
-          m.*,
-          f.clientID,
-          f.status AS followup_status,
-          mom.attendeesClient,
-          mom.attendeesOurSide,
-          mom.agenda AS mom_agenda,
-          mom.outcomes AS mom_outcomes,
-          mom.conductedDate AS mom_conductedDate,
-          mom.startTime AS mom_startTime,
-          mom.endTime AS mom_endTime,
-          mom.documentPath AS mom_documentPath
-        FROM ManagementMeetings m
-        LEFT JOIN ManagementFollowups f ON m.followupID = f.id
-        LEFT JOIN ManagementMeetingMOM mom ON m.id = mom.meetingId
+          f.*,
+          COALESCE(ed.employee_name, f.employee_id) AS employee_name
+        FROM ManagementFollowups f
+        LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
         WHERE f.clientID IN (${placeholders})
-        ORDER BY m.date DESC, m.time DESC
+        ORDER BY f.clientID, f.created_at DESC
       `;
-    const meetings = await queryWithRetry(meetingQuery, clientIDs);
+      history = await queryWithRetry(historyQuery, clientIDs);
+
+      const meetingQuery = `
+          SELECT 
+            m.*,
+            f.clientID,
+            f.status AS followup_status
+          FROM ManagementMeetings m
+          LEFT JOIN ManagementFollowups f ON m.followupID = f.id
+          WHERE f.clientID IN (${placeholders})
+          ORDER BY m.date DESC, m.time DESC
+        `;
+      meetings = await queryWithRetry(meetingQuery, clientIDs);
+    }
 
     // Grouping remains the same - it will now work correctly
     const meetingsGrouped = {};
@@ -1179,58 +983,71 @@ router.get("/", async (req, res) => {
       meetingsGrouped[m.clientID].push(m);
     });
 
-    const response = clientIDs.map((id) => {
-      const latestFollow = latestRows.find((l) => l.clientID === id);
-      const noFollow = noFollowupClients.find((n) => n.clientID === id);
-      const clientData = latestFollow || noFollow;
-
-      let contactPersons = [];
-      if (clientData.contactPersons) {
-        try {
-          contactPersons =
-            typeof clientData.contactPersons === "string"
-              ? JSON.parse(clientData.contactPersons)
-              : clientData.contactPersons;
-        } catch (err) {
-          console.error("Error parsing contactPersons:", err);
-          contactPersons = [];
+    const response = latestRows
+      .map((row) => {
+        let contactPersons = [];
+        if (row.contactPersons) {
+          try {
+            contactPersons =
+              typeof row.contactPersons === "string"
+                ? JSON.parse(row.contactPersons)
+                : row.contactPersons;
+          } catch (err) {
+            console.error("Error parsing contactPersons:", err);
+            contactPersons = [];
+          }
         }
-      }
 
-      return {
-        clientID: id,
-        client_details: {
-          id,
-          company_name: clientData.company_name,
-          customer_name: clientData.customer_name,
-          industry_type: clientData.industry_type,
-          website: clientData.website,
-          address: clientData.address,
-          city: clientData.city,
-          state: clientData.state,
-          reference: clientData.reference,
-          requirements: clientData.requirements,
-          created_at: latestFollow?.created_at || clientData.client_created_at,
-          updated_at: clientData.client_updated_at,
-          contactPersons: contactPersons,
-          nextFollowupDate: latestFollow ? latestFollow.nextFollowupDate : "",
-          status: latestFollow ? latestFollow.status : "none",
-          // belongs: latestFollow.belongs || 1,
-        },
-        latest_status: latestFollow
-          ? {
-              id: latestFollow.id,
-              status: latestFollow.status,
-              remarks: latestFollow.remarks,
-              created_at: latestFollow.created_at,
-              nextFollowupDate: latestFollow.nextFollowupDate,
-              contactPersonID: latestFollow.contactPersonID,
-            }
-          : null,
-        history: history.filter((h) => h.clientID === id),
-        meetings: meetingsGrouped[id] || [],
-      };
-    });
+        return {
+          id: row.id,
+          clientID: row.clientID,
+          projectId: row.projectId,
+          employee_name: row.employee_name || row.employee_id,
+          client_details: {
+            id: row.clientID,
+            projectId: row.projectId,
+            employee_id: row.employee_id,
+            employee_name: row.employee_name || row.employee_id,
+            company_name: row.company_name,
+            customer_name: row.customer_name,
+            industry_type: row.industry_type,
+            website: row.website,
+            address: row.address,
+            city: row.city,
+            state: row.state,
+            reference: row.reference,
+            requirements: row.requirements,
+            project_name: row.project_name || null,
+            project_category: row.project_category || null,
+            created_at: row.created_at || row.client_created_at,
+            updated_at: row.client_updated_at,
+            contactPersons,
+            nextFollowupDate: row.nextFollowupDate || "",
+            status: row.status || "Followup Taken",
+          },
+          latest_status: {
+            id: row.id,
+            status: row.status || "Followup Taken",
+            remarks: row.remarks,
+            created_at: row.created_at,
+            nextFollowupDate: row.nextFollowupDate || "",
+            contactPersonID: row.contactPersonID,
+          },
+          history: history.filter(
+            (h) =>
+              String(h.clientID) === String(row.clientID) &&
+              (h.projectId == row.projectId ||
+                (!h.projectId && !row.projectId) ||
+                (Number(h.projectId) === 0 && Number(row.projectId) === 0) ||
+                (h.projectId == null && row.projectId == 0) ||
+                (h.projectId == 0 && row.projectId == null) ||
+                row.projectId == null ||
+                row.projectId == 0)
+          ),
+          meetings: meetingsGrouped[row.clientID] || [],
+        };
+      })
+      .filter(Boolean);
 
     res.status(200).json({ success: true, data: response });
   } catch (error) {
@@ -1239,36 +1056,119 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /history/:client_id - Get history from ManagementFollowups for Followup.jsx
+router.get("/history/:client_id", async (req, res) => {
+  try {
+    const { client_id } = req.params;
+    const { projectId } = req.query;
+
+    let query = `
+      SELECT 
+        f.*, 
+        f.nextFollowupDate AS next_followup_date, 
+        c.customer_name, 
+        c.company_name, 
+        c.contactPersons, 
+        COALESCE(ed.employee_name, f.employee_id) as employee_name
+      FROM ManagementFollowups f
+      LEFT JOIN ClientsDataManagement c ON f.clientID = c.id
+      LEFT JOIN employees_details ed ON f.employee_id = ed.employee_id
+      WHERE f.clientID = ?
+    `;
+    let queryParams = [client_id];
+
+    if (projectId) {
+      query += ` AND (f.projectId = ? OR f.projectId IS NULL OR f.projectId = 0)`;
+      queryParams.push(projectId);
+    }
+
+    query += ` ORDER BY f.created_at DESC`;
+
+    const followups = await queryWithRetry(query, queryParams);
+
+    // Fetch associated meetings
+    const followupIds = followups.map((f) => f.id);
+    let meetings = [];
+    if (followupIds.length > 0) {
+      meetings = await queryWithRetry(
+        `SELECT * FROM ManagementMeetings WHERE followupID IN (?) ORDER BY date DESC, time DESC`,
+        [followupIds],
+      );
+    }
+
+    const formattedHistory = followups.map((f) => {
+      let contactPersonName = "-";
+      let contactPersonPhone = "-";
+      if (f.contactPersons) {
+        try {
+          const contacts =
+            typeof f.contactPersons === "string"
+              ? JSON.parse(f.contactPersons)
+              : f.contactPersons;
+          if (Array.isArray(contacts) && contacts.length > 0) {
+            const personId = f.contactPersonID || f.contact_person_id;
+            const matched = personId
+              ? contacts.find(
+                  (c) => String(c.id) === String(personId),
+                )
+              : contacts[0];
+            const target = matched || contacts[0];
+            contactPersonName = target.name || "-";
+            contactPersonPhone = target.contactNumber || target.phone || "-";
+          }
+        } catch (e) {}
+      }
+
+      return {
+        id: f.id,
+        status: f.status,
+        remarks: f.remarks || "-",
+        nextFollowupDate: f.nextFollowupDate || f.next_followup_date || "-",
+        created_at: f.created_at,
+        employee_id: f.employee_id,
+        employee_name: f.employee_name || f.employee_id || "-",
+        contact_person_name: contactPersonName,
+        contactNumber: contactPersonPhone,
+        contactDetails: [
+          {
+            name: contactPersonName,
+            contactNumber: contactPersonPhone,
+          },
+        ],
+        quotation: f.quotation_path || f.quotation || null,
+        invoice: f.invoice_path || f.invoice || null,
+        purchaseOrder: f.purchase_order_path || f.purchaseOrder || null,
+      };
+    });
+
+    res.status(200).json({ success: true, data: formattedHistory, meetings });
+  } catch (err) {
+    console.error("Error fetching ManagementFollowups history:", err);
+    res.status(500).json({ error: "Failed to fetch ManagementFollowups history" });
+  }
+});
+
 router.delete("/:followupId", async (req, res) => {
   const { followupId } = req.params;
 
   try {
     const followup = await queryWithRetry(
-      `SELECT quotation, purchaseOrder, invoice FROM ManagementFollowups WHERE id = ?`,
-      [followupId]
+      `SELECT quotation_path FROM ManagementFollowups WHERE id = ?`,
+      [followupId],
     );
+
+    let quotationFiles = [];
+    if (followup.length > 0 && followup[0].quotation_path) {
+      try {
+        quotationFiles = JSON.parse(followup[0].quotation_path);
+      } catch (e) {
+        console.error("Error parsing quotation_path:", e);
+      }
+    }
 
     if (followup.length === 0) {
       return res.status(404).json({ error: "Followup not found" });
     }
-
-    const deleteFiles = (filesJson) => {
-      try {
-        const files = JSON.parse(filesJson || "[]");
-        files.forEach((file) => {
-          const filePath = path.join(__dirname, "..", "..", file.path);
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        });
-      } catch (err) {
-        console.error("Error deleting files:", err);
-      }
-    };
-
-    deleteFiles(followup[0].quotation);
-    deleteFiles(followup[0].purchaseOrder);
-    deleteFiles(followup[0].invoice);
 
     await queryWithRetry(`DELETE FROM ManagementFollowups WHERE id = ?`, [
       followupId,
@@ -1289,15 +1189,15 @@ router.patch("/meetings/:meetingId/status", async (req, res) => {
   const { status } = req.body;
 
   if (!status || !["inprogress", "completed", "cancelled"].includes(status)) {
-    return res.status(400).json({ 
-      error: "Invalid status. Must be 'inprogress', 'completed' or 'cancelled'" 
+    return res.status(400).json({
+      error: "Invalid status. Must be 'inprogress', 'completed' or 'cancelled'",
     });
   }
 
   try {
     await queryWithRetry(
       `UPDATE ManagementMeetings SET status = ? WHERE id = ?`,
-      [status, meetingId]
+      [status, meetingId],
     );
 
     res.status(200).json({
@@ -1314,7 +1214,14 @@ router.patch("/meetings/:meetingId/status", async (req, res) => {
 const multerMOM = multer({
   storage: multer.diskStorage({
     destination: function (req, file, cb) {
-      const momPath = path.join(__dirname, "..", "..", "Images", "Management", "MOM");
+      const momPath = path.join(
+        __dirname,
+        "..",
+        "..",
+        "Images",
+        "Management",
+        "MOM",
+      );
       if (!fs.existsSync(momPath)) fs.mkdirSync(momPath, { recursive: true });
       cb(null, momPath);
     },
@@ -1326,121 +1233,51 @@ const multerMOM = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-router.post("/meetings/:meetingId/mom", multerMOM.single("document"), async (req, res) => {
-  const { meetingId } = req.params;
-  const {
-    attendeesClient,
-    attendeesOurSide,
-    agenda,
-    outcomes,
-    conductedDate,
-    startTime,
-    endTime,
-  } = req.body;
+router.post(
+  "/meetings/:meetingId/mom",
+  multerMOM.single("document"),
+  async (req, res) => {
+    const { meetingId } = req.params;
+    const {
+      attendeesClient,
+      attendeesOurSide,
+      agenda,
+      outcomes,
+      conductedDate,
+      startTime,
+      endTime,
+    } = req.body;
 
-  const documentPath = req.file ? req.file.path : null;
+    const documentPath = req.file ? req.file.path : null;
 
-  try {
-    // Check if mom_records table columns exist (auto-migrate)
-    await queryWithRetry(`
-      CREATE TABLE IF NOT EXISTS ManagementMeetingMOM (
-        id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        meetingId INT(11) NOT NULL,
-        attendeesClient TEXT DEFAULT NULL,
-        attendeesOurSide TEXT DEFAULT NULL,
-        agenda TEXT DEFAULT NULL,
-        outcomes TEXT DEFAULT NULL,
-        conductedDate VARCHAR(50) DEFAULT NULL,
-        startTime VARCHAR(50) DEFAULT NULL,
-        endTime VARCHAR(50) DEFAULT NULL,
-        documentPath TEXT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (meetingId) REFERENCES ManagementMeetings(id) ON DELETE CASCADE
-      )
-    `);
+    try {
+      await queryWithRetry(
+        `UPDATE ManagementMeetings 
+         SET status = 'completed',
+             attendees_client = ?,
+             attendees_our_side = ?,
+             agenda = COALESCE(?, agenda),
+             outcomes = ?,
+             mom_recorded_at = NOW()
+         WHERE id = ?`,
+        [
+          attendeesClient || null,
+          attendeesOurSide || null,
+          agenda || null,
+          outcomes || null,
+          meetingId,
+        ],
+      );
 
-    await queryWithRetry(
-      `INSERT INTO ManagementMeetingMOM 
-        (meetingId, attendeesClient, attendeesOurSide, agenda, outcomes, conductedDate, startTime, endTime, documentPath)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        meetingId,
-        attendeesClient || null,
-        attendeesOurSide || null,
-        agenda || null,
-        outcomes || null,
-        conductedDate || null,
-        startTime || null,
-        endTime || null,
-        documentPath,
-      ]
-    );
+      res.status(200).json({
+        success: true,
+        message: "Meeting marked as completed successfully",
+      });
+    } catch (err) {
+      console.error("Error recording MOM:", err);
+      res.status(500).json({ error: "Failed to record MOM" });
+    }
+  },
+);
 
-    // Mark meeting as completed
-    await queryWithRetry(
-      `UPDATE ManagementMeetings SET status = 'completed' WHERE id = ?`,
-      [meetingId]
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Minutes of Meeting recorded successfully",
-    });
-  } catch (err) {
-    console.error("Error recording MOM:", err);
-    res.status(500).json({ error: "Failed to record MOM" });
-  }
-});
-
-// Migrate ManagementMeetings status to include 'cancelled'
-(async () => {
-  try {
-    await queryWithRetry(`
-      ALTER TABLE ManagementMeetings 
-      MODIFY COLUMN status enum('inprogress','completed','cancelled') NOT NULL DEFAULT 'inprogress'
-    `);
-    console.log("Migration: ManagementMeetings status column updated.");
-  } catch (err) {
-    console.error("Migration error (ManagementMeetings status):", err.message);
-  }
-})();
-
-// Create ManagementOnboardedProjects table if not exists
-(async () => {
-  try {
-    await queryWithRetry(`
-      CREATE TABLE IF NOT EXISTS ManagementOnboardedProjects (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        client_id INT NOT NULL,
-        company_name VARCHAR(255) NOT NULL,
-        customer_name VARCHAR(255),
-        project_name VARCHAR(255) NOT NULL,
-        category VARCHAR(255) NOT NULL,
-        start_date DATE NOT NULL,
-        end_date DATE NOT NULL,
-        review_date DATE NULL,
-        remarks TEXT,
-        budget_status ENUM('pending','entered') NOT NULL DEFAULT 'pending',
-        onboarded_by VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      )
-    `);
-    console.log("Migration: ManagementOnboardedProjects table ready.");
-    
-    // Alter existing table column if it was NOT NULL previously
-    await queryWithRetry(`
-      ALTER TABLE ManagementOnboardedProjects MODIFY COLUMN review_date DATE NULL
-    `);
-    await queryWithRetry(`
-      ALTER TABLE ManagementOnboardedProjects MODIFY COLUMN budget_status VARCHAR(50) NOT NULL DEFAULT 'pending'
-    `);
-    console.log("Migration: review_date and budget_status columns updated.");
-  } catch (err) {
-    console.error("Migration error (ManagementOnboardedProjects):", err.message);
-  }
-})();
-
-// POST - Save onboard project details
 module.exports = router;

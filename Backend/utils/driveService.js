@@ -626,9 +626,88 @@ async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docC
   }
 }
 
+/**
+ * Uploads a Management resource document (e.g. Quotation) to Google Drive
+ * under 'Management Resource' -> [subfolderName] (e.g. 'Quotation').
+ * Returns preview path containing Google Drive file ID (/api/drive/preview/${fileId}).
+ */
+async function uploadManagementResourceToDrive({ filePath, originalname, mimetype, subfolderName = "Quotation" }) {
+  const hasTokens = loadTokens();
+  if (!hasTokens) {
+    console.warn("⚠️ Drive Service: No Drive tokens loaded, falling back.");
+    return { success: false, error: "No Drive tokens loaded" };
+  }
+
+  try {
+    // 1. Get or create master parent folder "Management Resource" under ROOT_FOLDER_ID
+    let mainFolderId = await getOrCreateSubfolder("Management Resource", ROOT_FOLDER_ID);
+
+    // 2. Get or create subfolder (e.g., 'Quotation') inside "Management Resource"
+    let targetFolderId = await getOrCreateSubfolder(subfolderName, mainFolderId);
+
+    // 3. Upload file to Drive under target folder
+    let fileRes;
+    try {
+      fileRes = await drive.files.create({
+        resource: {
+          name: originalname,
+          parents: [targetFolderId],
+        },
+        media: {
+          mimeType: mimetype,
+          body: fs.createReadStream(filePath),
+        },
+        fields: "id, name, mimeType, webViewLink",
+        supportsAllDrives: true,
+      });
+    } catch (createErr) {
+      console.warn("⚠️ Drive upload target folder failed, re-creating missing folder structure...", createErr.message);
+      delete folderCache[`${ROOT_FOLDER_ID}_Management Resource`];
+      delete folderCache[`${mainFolderId}_${subfolderName}`];
+
+      mainFolderId = await getOrCreateSubfolder("Management Resource", ROOT_FOLDER_ID);
+      targetFolderId = await getOrCreateSubfolder(subfolderName, mainFolderId);
+
+      fileRes = await drive.files.create({
+        resource: {
+          name: originalname,
+          parents: [targetFolderId],
+        },
+        media: {
+          mimeType: mimetype,
+          body: fs.createReadStream(filePath),
+        },
+        fields: "id, name, mimeType, webViewLink",
+        supportsAllDrives: true,
+      });
+    }
+
+    const fileId = fileRes.data.id;
+    const previewUrl = `/api/drive/preview/${fileId}`;
+
+    // Clean up local temp file after upload
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {}
+    }
+
+    return {
+      success: true,
+      fileId,
+      previewUrl,
+      webViewLink: fileRes.data.webViewLink,
+    };
+  } catch (error) {
+    console.error("❌ Drive Service Upload Error for Management Resource:", error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   uploadToDrive,
   uploadEmployeeDocToDrive,
+  uploadManagementResourceToDrive,
   deleteFromDrive,
   getOrCreateSubfolder,
   organizeDriveFolders,

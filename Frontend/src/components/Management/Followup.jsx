@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   Trash2,
@@ -14,29 +13,28 @@ import {
   Download,
   UserCheck,
   History,
+  Eye,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import ClientAddModal from "./ClientAdd";
-import ClientUploadModal from "./ClientUpload";
 import FollowupModal from "./FollowupModal";
+import ClientAddModal from "./ClientAdd";
 import Notification from "../ToastProp";
-import uploadLogo from "../../assets/Marketing/upload.webp";
 import searchIcon from "../../assets/Marketing/search.webp";
 import filter from "../../assets/ProjectPages/filter.webp";
 import { useConfirm } from "../ConfirmContext";
 
-const RECORDS_PER_PAGE = 8;
+const RECORDS_PER_PAGE = 10;
 
 const Followup = () => {
   const confirm = useConfirm();
   const [mainTab, setMainTab] = useState("followups");
-  const [subTab, setSubTab] = useState("first_followup");
+  const [subTab, setSubTab] = useState("followup");
   const [clients, setClients] = useState([]);
-  const [leadSubTab, setLeadSubTab] = useState("pending");
   const [clientsHistory, setClientsHistory] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [meetingSubTab, setMeetingSubTab] = useState("scheduled");
+  const [onboardSubTab, setOnboardSubTab] = useState("pending");
   const [momModal, setMomModal] = useState({ open: false, meeting: null });
   const [momForm, setMomForm] = useState({
     attendeesClient: "",
@@ -57,79 +55,19 @@ const Followup = () => {
   const [nextFollowupDate, setnextFollowupDate] = useState("");
   const [showMissedFollowups, setShowMissedFollowups] = useState(false);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isFollowupModalOpen, setIsFollowupModalOpen] = useState(false);
   const [initialShowHistory, setInitialShowHistory] = useState(false);
   const [followupClient, setFollowupClient] = useState(null);
-  const [editingClient, setEditingClient] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const tableBodyRef = useRef(null);
   const fetchTimeoutRef = useRef(null);
   const filterRef = useRef(null);
   const [employeeId, setEmployeeId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  
-  const [hoveredRemark, setHoveredRemark] = useState(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [copiedRemark, setCopiedRemark] = useState(false);
-
-  const handleCopyRemark = (text) => {
-    if (!text || text === "-") return;
-    navigator.clipboard.writeText(text);
-    setCopiedRemark(true);
-    setTimeout(() => {
-      setCopiedRemark(false);
-    }, 1500);
-  };
-
-  const renderRemarksTooltip = () => {
-    if (!hoveredRemark || hoveredRemark === "-") return null;
-    const GAP = 12;
-    const tooltipW = 240;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = mousePos.x + GAP;
-    let top = mousePos.y + GAP;
-
-    if (left + tooltipW > vw - 12) left = mousePos.x - tooltipW - GAP;
-    if (left < 12) left = 12;
-
-    const estH = 80;
-    if (top + estH > vh - 12) top = mousePos.y - estH - GAP;
-    if (top < 12) top = 12;
-
-    return createPortal(
-      <div
-        style={{
-          position: "fixed",
-          top,
-          left,
-          backgroundColor: "#1F2937",
-          color: "white",
-          padding: "0.6vw 0.8vw",
-          borderRadius: "0.4vw",
-          fontSize: "0.75vw",
-          zIndex: 99999,
-          boxShadow: "0 0.4vw 1.2vw rgba(0,0,0,0.2)",
-          maxWidth: `${tooltipW}px`,
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          pointerEvents: "none",
-          lineHeight: "1.4",
-        }}
-      >
-        <div className="font-semibold text-[0.7vw] text-gray-400 border-b border-gray-700 pb-[0.2vw] mb-[0.4vw] flex justify-between items-center">
-          <span>Remarks</span>
-          <span className="text-[0.6vw] text-blue-400 font-normal">
-            {copiedRemark ? "Copied!" : "Click cell to copy"}
-          </span>
-        </div>
-        <p className="text-white text-[0.75vw]">{hoveredRemark}</p>
-      </div>,
-      document.body
-    );
-  };
+  const [followupToggle, setFollowupToggle] = useState("all");
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
+  const [isViewOnlyMode, setIsViewOnlyMode] = useState(false);
 
   const getPageNumbers = () => {
     const maxButtons = 5;
@@ -149,19 +87,17 @@ const Followup = () => {
   };
 
   const getLatestRemarks = (client) => {
-    const history = clientsHistory.find((h) => h.client_details?.id === client.id);
+    const history = clientsHistory.find(
+      (h) => h.client_details?.id === client.id,
+    );
     return history?.latest_status?.remarks || "-";
   };
 
   const [tabCounts, setTabCounts] = useState({
-    first_followup: 0,
-    inprogress: 0,
-    billing: 0,
-    lead: 0,
-    not_interested: 0,
+    followup: 0,
+    quotation: 0,
+    projectOnboard: 0,
     droped: 0,
-    current: 0,
-    deleted: 0,
   });
 
   const navigate = useNavigate();
@@ -173,10 +109,13 @@ const Followup = () => {
     startDate: "",
     endDate: "",
     reviewDate: "",
-    status: "project_onboard",
+    status: "projectOnboard",
     remarks: "",
   });
-  const [budgetConfirm, setBudgetConfirm] = useState({ open: false, projectData: null });
+  const [budgetConfirm, setBudgetConfirm] = useState({
+    open: false,
+    projectData: null,
+  });
 
   const handleOnboardClick = (client) => {
     setOnboardClient(client);
@@ -186,15 +125,20 @@ const Followup = () => {
       startDate: "",
       endDate: "",
       reviewDate: "",
-      status: "project_onboard",
+      status: "projectOnboard",
       remarks: "",
     });
     setIsOnboardModalOpen(true);
   };
 
   const handleOnboardSubmit = async () => {
-    if (onboardFormData.status === "project_onboard") {
-      if (!onboardFormData.projectName || !onboardFormData.category || !onboardFormData.startDate || !onboardFormData.endDate) {
+    if (onboardFormData.status === "projectOnboard" || onboardFormData.status === "ProjectOnboard") {
+      if (
+        !onboardFormData.projectName ||
+        !onboardFormData.category ||
+        !onboardFormData.startDate ||
+        !onboardFormData.endDate
+      ) {
         showToast("Warning", "Please fill in all required fields!");
         return;
       }
@@ -206,62 +150,36 @@ const Followup = () => {
     }
 
     try {
-      if (onboardFormData.status === "project_onboard") {
-        // Save onboard details to ManagementOnboardedProjects
-        const onboardRes = await fetch(`${API_URL}/ManagementFollowups/onboard`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId: onboardClient.id,
-            companyName: onboardClient.company_name,
-            customerName: onboardClient.customer_name || "",
-            projectName: onboardFormData.projectName,
-            category: onboardFormData.category,
-            startDate: onboardFormData.startDate,
-            endDate: onboardFormData.endDate,
-            reviewDate: onboardFormData.reviewDate,
-            remarks: onboardFormData.remarks || "Onboarded from Management Leads",
-            onboardedBy: employeeId,
-          }),
-        });
-        const onboardData = await onboardRes.json();
-        if (!onboardRes.ok) {
-          showToast("Error", onboardData.message || "Failed to save onboard details.");
-          return;
-        }
-
-        // Also create a project request
-        await fetch(`${API_URL}/projectDetails/request`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            companyName: onboardClient.company_name,
-            projectName: onboardFormData.projectName,
-            category: onboardFormData.category,
-            department: ["Development"],
-            startDate: onboardFormData.startDate,
-            endDate: onboardFormData.endDate,
-            reviewDate: onboardFormData.reviewDate,
-            employeeID: employeeId,
-            description: "Onboarded from Management Leads"
-          }),
-        }).catch(() => {}); // non-blocking
-      }
-
-      // Update ManagementFollowups status
       const formData = new FormData();
       formData.append("employee_id", employeeId);
       formData.append("clientID", onboardClient.id);
+      if (onboardClient.projectId) {
+        formData.append("projectId", onboardClient.projectId);
+      }
       let contactPersonId = "";
       try {
-        const contacts = typeof onboardClient.contactPersons === "string"
-          ? JSON.parse(onboardClient.contactPersons)
-          : onboardClient.contactPersons;
+        const contacts =
+          typeof onboardClient.contactPersons === "string"
+            ? JSON.parse(onboardClient.contactPersons)
+            : onboardClient.contactPersons;
         if (contacts && contacts[0]) contactPersonId = contacts[0].id || "";
       } catch (e) {}
       formData.append("contactPersonId", contactPersonId);
-      formData.append("status", onboardFormData.status);
-      formData.append("remarks", onboardFormData.remarks || (onboardFormData.status === "project_onboard" ? "Onboarded from Management Leads" : "Cancelled from Management Leads"));
+      
+      const targetStatus = onboardFormData.status === "projectOnboard" ? "ProjectOnboard" : "Droped";
+      formData.append("status", targetStatus);
+      formData.append("project_name", onboardFormData.projectName);
+      formData.append("project_category", onboardFormData.category);
+      formData.append("start_date", onboardFormData.startDate);
+      formData.append("end_date", onboardFormData.endDate);
+      formData.append("review_date", onboardFormData.reviewDate);
+      formData.append(
+        "remarks",
+        onboardFormData.remarks ||
+          (targetStatus === "ProjectOnboard"
+            ? "Onboarded from Project Onboard Leads"
+            : "Cancelled from Project Onboard Leads"),
+      );
 
       const followupRes = await fetch(`${API_URL}/ManagementFollowups`, {
         method: "POST",
@@ -273,9 +191,8 @@ const Followup = () => {
         fetchClients();
         fetchCounts();
 
-        if (onboardFormData.status === "project_onboard") {
+        if (targetStatus === "ProjectOnboard") {
           showToast("Success", "Project onboarded successfully! 🎉");
-          // Show budget confirmation dialog
           setBudgetConfirm({
             open: true,
             projectData: {
@@ -286,14 +203,14 @@ const Followup = () => {
             },
           });
         } else {
-          showToast("Success", "Lead cancelled successfully!");
+          showToast("Success", "Project onboard cancelled successfully!");
         }
       } else {
         showToast("Error", "Failed to update status.");
       }
     } catch (error) {
       console.error("Error onboarding project:", error);
-      showToast("Error", "Failed to onboard project.");
+      showToast("Error", "Something went wrong.");
     }
   };
 
@@ -343,11 +260,8 @@ const Followup = () => {
   }, []);
 
   useEffect(() => {
-    if (employeeId) {
-      fetchCounts();
-      fetchMeetings();
-    }
-  }, [employeeId]);
+    fetchCounts();
+  }, []);
 
   useEffect(() => {
     setClients([]);
@@ -369,14 +283,13 @@ const Followup = () => {
         clearTimeout(fetchTimeoutRef.current);
       }
     };
-  }, [mainTab, subTab, leadSubTab, employeeId]);
+  }, [mainTab, subTab]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [
     mainTab,
     subTab,
-    leadSubTab,
     searchTerm,
     startDate,
     endDate,
@@ -385,23 +298,15 @@ const Followup = () => {
     statusFilter,
   ]);
 
-  useEffect(() => {
-    clearAllFilters();
-    setLeadSubTab("pending");
-  }, [mainTab, subTab]);
-
   const fetchCounts = async () => {
-    if (!employeeId) return;
-
     setCountsLoading(true);
     try {
       const response = await fetch(
-        `${API_URL}/ManagementFollowups/counts?employee_id=${employeeId}`
+        `${API_URL}/ManagementFollowups/counts`,
       );
       const data = await response.json();
 
       if (data.success) {
-        console.log(data.data);
         setTabCounts(data.data);
       }
     } catch (error) {
@@ -412,13 +317,8 @@ const Followup = () => {
   };
 
   const fetchMeetings = async () => {
-    if (!employeeId) {
-      console.log("No employee ID yet, skipping fetch");
-      return;
-    }
-
     try {
-      const url = `${API_URL}/management/analytics/meetings?employee_id=${employeeId}`;
+      const url = `${API_URL}/management/analytics/meetings`;
       const response = await fetch(url);
       const data = await response.json();
 
@@ -433,9 +333,10 @@ const Followup = () => {
             });
           } else if (m.client_contact_persons) {
             try {
-              const contacts = typeof m.client_contact_persons === "string"
-                ? JSON.parse(m.client_contact_persons)
-                : m.client_contact_persons;
+              const contacts =
+                typeof m.client_contact_persons === "string"
+                  ? JSON.parse(m.client_contact_persons)
+                  : m.client_contact_persons;
               if (Array.isArray(contacts)) cpList.push(...contacts);
             } catch (e) {}
           }
@@ -463,47 +364,33 @@ const Followup = () => {
   };
 
   const fetchClients = async () => {
-    if (!employeeId) {
-      console.log("No employee ID yet, skipping fetch");
-      return;
-    }
-
     try {
       let url = `${API_URL}`;
-
-      if (mainTab === "clientsData") {
-        if (subTab === "deleted") {
-          url = `${API_URL}/clientAddManagement?active=false&employee_id=${employeeId}`;
-        } else if (subTab === "current") {
-          url = `${API_URL}/clientAddManagement?employee_id=${employeeId}`;
-        }
-      } else if (mainTab === "followups") {
-        let statusParam = subTab;
-        if (subTab === "lead") {
-          if (leadSubTab === "pending") statusParam = "lead";
-          else if (leadSubTab === "onboarded") statusParam = "project_onboard";
-          else if (leadSubTab === "cancelled") statusParam = "cancelled";
-        }
-        url = `${API_URL}/ManagementFollowups?status=${statusParam}&employee_id=${employeeId}`;
-      }
-
-      console.log("Fetching clients from URL:", url);
+      let statusParam = subTab;
+      url = `${API_URL}/ManagementFollowups?status=${statusParam}`;
 
       const response = await fetch(url);
       const data = await response.json();
 
-      console.log(data);
+      const finalRecords = (data.data || []).map((records) => {
+        return {
+          ...records.client_details,
+          id: `${records.client_details?.id}_${records.projectId || 0}`,
+          clientID: records.client_details?.id,
+          projectId: records.projectId,
+          employee_name: records.employee_name || records.client_details?.employee_name || records.client_details?.employee_id || "",
+          status:
+            records.latest_status?.status ||
+            records.client_details?.status ||
+            "",
+          latest_followup_date:
+            records.latest_status?.created_at ||
+            records.client_details?.created_at,
+        };
+      });
 
-      if (mainTab === "clientsData") {
-        setClients(data.data || []);
-      } else {
-        const finalRecords = data.data.map((records) => {
-          return records.client_details;
-        });
-
-        setClientsHistory(data.data);
-        setClients(finalRecords || []);
-      }
+      setClientsHistory(data.data || []);
+      setClients(finalRecords || []);
     } catch (error) {
       console.error("Error fetching clients:", error);
     } finally {
@@ -513,22 +400,24 @@ const Followup = () => {
 
   const statusOptions = [
     { value: "", label: "All Statuses" },
-    { value: "not_picking", label: "Not Picking / Busy / Others" },
-    { value: "inProgress", label: "In Progress" },
-    { value: "meeting", label: "Meetings" },
-    { value: "proposed", label: "Shared Proposal" },
+    { value: "Followup", label: "Followup" },
+    { value: "Not picking/busy/others", label: "Not Picking / Busy / Others" },
+    { value: "proposal", label: "Proposal" },
+    { value: "lead", label: "Lead" },
+    { value: "Quotation", label: "Quotation" },
+    { value: "Droped", label: "Drop" },
   ];
 
   const handleOpenMOM = (meeting) => {
     setMomModal({ open: true, meeting });
     setMomForm({
-      attendeesClient: '',
-      attendeesOurSide: '',
-      agenda: meeting.agenda || '',
-      outcomes: '',
-      conductedDate: new Date().toISOString().split('T')[0],
-      startTime: '',
-      endTime: '',
+      attendeesClient: "",
+      attendeesOurSide: "",
+      agenda: meeting.agenda || "",
+      outcomes: "",
+      conductedDate: new Date().toISOString().split("T")[0],
+      startTime: "",
+      endTime: "",
       document: null,
     });
   };
@@ -541,7 +430,10 @@ const Followup = () => {
   const handleMOMSubmit = async () => {
     const { meeting } = momModal;
     if (!momForm.conductedDate || !momForm.startTime || !momForm.endTime) {
-      showToast("Warning", "Please fill in conducted date, start time and end time.");
+      showToast(
+        "Warning",
+        "Please fill in conducted date, start time and end time.",
+      );
       return;
     }
     setMomSubmitting(true);
@@ -555,10 +447,13 @@ const Followup = () => {
       formData.append("startTime", momForm.startTime);
       formData.append("endTime", momForm.endTime);
       if (momForm.document) formData.append("document", momForm.document);
-      const response = await fetch(`${API_URL}/ManagementFollowups/meetings/${meeting.id}/mom`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(
+        `${API_URL}/ManagementFollowups/meetings/${meeting.id}/mom`,
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
       const data = await response.json();
       if (response.ok) {
         showToast("Success", "Minutes of Meeting recorded successfully!");
@@ -578,7 +473,7 @@ const Followup = () => {
   const exportMOMToPDF = (meeting) => {
     try {
       const doc = new jsPDF();
-      
+
       // Page styling / colors
       doc.setFillColor(226, 235, 255); // light blue matching header
       doc.rect(0, 0, 210, 40, "F");
@@ -605,7 +500,12 @@ const Followup = () => {
 
       const companyName = meeting.client_details?.company_name || "-";
       const meetingTitle = meeting.title || "-";
-      const scheduledDate = meeting.date ? new Date(meeting.date).toLocaleDateString("en-GB").split("/").join("-") : "-";
+      const scheduledDate = meeting.date
+        ? new Date(meeting.date)
+            .toLocaleDateString("en-GB")
+            .split("/")
+            .join("-")
+        : "-";
       const scheduledTime = meeting.time || "-";
       const meetingType = meeting.type || "-";
 
@@ -632,20 +532,29 @@ const Followup = () => {
       doc.setFontSize(11);
       doc.text("Minutes of Meeting Details", 14, currentY);
 
+      const conductedDate = meeting.mom_recorded_at
+        ? formatDateToIST(meeting.mom_recorded_at).split(",")[0]
+        : scheduledDate;
+
       autoTable(doc, {
         startY: currentY + 5,
         body: [
-          ["Conducted Date", meeting.mom_conductedDate || scheduledDate],
-          ["Meeting Timing", `${meeting.mom_startTime || "-"} to ${meeting.mom_endTime || "-"}`],
-          ["Attendees (Client Side)", meeting.attendeesClient || "-"],
-          ["Attendees (Our Side)", meeting.attendeesOurSide || "-"],
-          ["Agenda Discussed", meeting.mom_agenda || meeting.agenda || "-"],
-          ["Outcomes & Decisions", meeting.mom_outcomes || "-"],
+          ["Conducted Date", conductedDate],
+          ["Meeting Timing", formatTimeToIST(meeting.time)],
+          ["Attendees (Client Side)", meeting.attendees_client || meeting.attendeesClient || "-"],
+          ["Attendees (Our Side)", meeting.attendees_our_side || meeting.attendeesOurSide || "-"],
+          ["Agenda Discussed", meeting.agenda && meeting.agenda !== "-" ? meeting.agenda : (meeting.remarks || "-")],
+          ["Outcomes & Decisions", meeting.outcomes && meeting.outcomes !== "-" ? meeting.outcomes : (meeting.mom_outcomes || meeting.remarks || "-")],
         ],
         theme: "grid",
         styles: { fontSize: 10, cellPadding: 4, overflow: "linebreak" },
         columnStyles: {
-          0: { fontStyle: "bold", textColor: [50, 50, 50], fillColor: [245, 247, 250], width: 50 },
+          0: {
+            fontStyle: "bold",
+            textColor: [50, 50, 50],
+            fillColor: [245, 247, 250],
+            width: 50,
+          },
           1: { width: 140 },
         },
       });
@@ -711,7 +620,7 @@ const Followup = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ status: newStatus }),
-        }
+        },
       );
 
       const data = await response.json();
@@ -727,61 +636,40 @@ const Followup = () => {
   };
 
   const getMeetingSubTabCount = (key) => {
-    if (key === "scheduled") return meetings.filter((m) => m.status !== "completed" && m.status !== "cancelled").length;
-    if (key === "completed") return meetings.filter((m) => m.status === "completed").length;
-    if (key === "cancelled") return meetings.filter((m) => m.status === "cancelled").length;
+    if (key === "scheduled")
+      return meetings.filter(
+        (m) => m.status !== "completed" && m.status !== "cancelled",
+      ).length;
+    if (key === "completed")
+      return meetings.filter((m) => m.status === "completed").length;
+    if (key === "cancelled")
+      return meetings.filter((m) => m.status === "cancelled").length;
     return 0;
   };
 
   const getSubTabs = () => {
-    switch (mainTab) {
-      case "followups":
-        return [
-          {
-            key: "first_followup",
-            label: "First Followup",
-            countKey: "first_followup",
-          },
-          {
-            key: "inprogress",
-            label: "Followup List",
-            countKey: "inprogress",
-          },
-          {
-            key: "billing",
-            label: "Payment Proposal",
-            countKey: "billing",
-          },
-          {
-            key: "lead",
-            label: "Lead",
-            countKey: "lead",
-          },
-          {
-            key: "not_interested",
-            label: "Not Interested",
-            countKey: "not_interested",
-          },
-          {
-            key: "droped",
-            label: "Dropped",
-            countKey: "droped",
-          },
-        ];
-      case "meetings":
-        return [
-          { key: "scheduled", label: "Scheduled", countKey: "__meeting_scheduled" },
-          { key: "completed", label: "Completed", countKey: "__meeting_completed" },
-          { key: "cancelled", label: "Cancelled", countKey: "__meeting_cancelled" },
-        ];
-      case "clientsData":
-        return [
-          { key: "current", label: "Current", countKey: "current" },
-          { key: "deleted", label: "Deleted", countKey: "deleted" },
-        ];
-      default:
-        return [];
-    }
+    return [
+      {
+        key: "followup",
+        label: "Followups",
+        countKey: "followup",
+      },
+      {
+        key: "quotation",
+        label: "Quotation",
+        countKey: "quotation",
+      },
+      {
+        key: "projectOnboard",
+        label: "Project Onboard",
+        countKey: "projectOnboard",
+      },
+      {
+        key: "droped",
+        label: "Drop",
+        countKey: "droped",
+      },
+    ];
   };
 
   const filterByDate = (client) => {
@@ -814,10 +702,26 @@ const Followup = () => {
 
   const filterByNextFollowupDate = (client) => {
     if (!nextFollowupDate) return true;
-
     if (!client.nextFollowupDate) return false;
 
-    return nextFollowupDate === client.nextFollowupDate;
+    // Convert nextFollowupDate (YYYY-MM-DD) and client.nextFollowupDate to comparable YYYY-MM-DD
+    let clientDateStr = "";
+    try {
+      const raw = String(client.nextFollowupDate).trim().replace(" ", "T");
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        clientDateStr = `${year}-${month}-${day}`;
+      } else {
+        clientDateStr = raw.split("T")[0].split(" ")[0];
+      }
+    } catch (e) {
+      clientDateStr = client.nextFollowupDate;
+    }
+
+    return nextFollowupDate === clientDateStr;
   };
 
   const filterByMissedFollowup = (client) => {
@@ -835,13 +739,46 @@ const Followup = () => {
   };
 
   const filterByStatus = (client) => {
-    if (!statusFilter) return true;
-    const clientStatus = client.status || "none";
-    return clientStatus === statusFilter;
+    if (!statusFilter || statusFilter === "") return true;
+    const st = (client.status || "").trim();
+    if (
+      statusFilter === "Followup" ||
+      statusFilter === "Followup Taken" ||
+      statusFilter === "followup_taken"
+    ) {
+      return (
+        st === "Followup Taken" || st === "followup_taken" || st === "Followup"
+      );
+    }
+    if (
+      statusFilter === "Not picking/busy/others" ||
+      statusFilter === "Not picking/ busy/ others" ||
+      statusFilter === "not_picking"
+    ) {
+      return (
+        st === "Not picking/busy/others" ||
+        st === "Not picking/ busy/ others" ||
+        st === "not_picking"
+      );
+    }
+    if (statusFilter === "Lead" || statusFilter === "lead") {
+      return st === "Lead" || st === "lead" || st === "meeting";
+    }
+    return st === statusFilter;
   };
 
   const getFilteredClients = () => {
     let filtered = clients;
+
+    if (subTab === "projectOnboard") {
+      filtered = filtered.filter((client) => {
+        const projStatus = client.onboard_status || client.project_onboard_status || "In progress";
+        if (onboardSubTab === "pending") return projStatus === "In progress" || projStatus === "pending";
+        if (onboardSubTab === "completed") return projStatus === "onboarded" || projStatus === "completed";
+        if (onboardSubTab === "cancelled") return projStatus === "cancelled";
+        return true;
+      });
+    }
 
     if (searchTerm) {
       filtered = filtered.filter(
@@ -852,8 +789,13 @@ const Followup = () => {
           client.customer_name
             ?.toLowerCase()
             .includes(searchTerm.toLowerCase()) ||
+          client.employee_name
+            ?.toLowerCase()
+            .includes(searchTerm.toLowerCase()) ||
           client.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          client.industry_type?.toLowerCase().includes(searchTerm.toLowerCase())
+          client.industry_type
+            ?.toLowerCase()
+            .includes(searchTerm.toLowerCase()),
       );
     }
 
@@ -881,32 +823,24 @@ const Followup = () => {
   };
 
   const handleEdit = (client) => {
-    setEditingClient(client);
-    setIsModalOpen(true);
+    const rawClient = { ...client, id: client.clientID || client.id };
+    setEditingClient(rawClient);
+    setIsViewOnlyMode(false);
+    setIsAddModalOpen(true);
+  };
+
+  const handleView = (client) => {
+    const rawClient = { ...client, id: client.clientID || client.id };
+    setEditingClient(rawClient);
+    setIsViewOnlyMode(true);
+    setIsAddModalOpen(true);
   };
 
   const handleFollowup = (client, openHistoryOnly = false) => {
-    setFollowupClient(client);
+    const rawClient = { ...client, id: client.clientID || client.id };
+    setFollowupClient(rawClient);
     setInitialShowHistory(openHistoryOnly);
     setIsFollowupModalOpen(true);
-  };
-
-  const handleAddNew = () => {
-    setEditingClient(null);
-    setIsModalOpen(true);
-  };
-
-  const handleUploadClick = () => {
-    setIsUploadModalOpen(true);
-  };
-
-  const handleModalClose = () => {
-    setIsModalOpen(false);
-    setEditingClient(null);
-  };
-
-  const handleUploadModalClose = () => {
-    setIsUploadModalOpen(false);
   };
 
   const handleSuccess = () => {
@@ -945,7 +879,7 @@ const Followup = () => {
 
     const normalized = String(dateString).trim().replace(" ", "T");
     const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized);
-    
+
     let date;
     if (hasTimezone) {
       date = new Date(normalized);
@@ -968,6 +902,25 @@ const Followup = () => {
       minute: "2-digit",
       hour12: true,
     });
+  }
+
+  function formatTimeToIST(timeStr) {
+    if (!timeStr || timeStr === "-") return "-";
+    try {
+      const [h, m, s] = String(timeStr).split(":");
+      if (h === undefined || m === undefined) return timeStr;
+      const date = new Date();
+      date.setHours(parseInt(h, 10), parseInt(m, 10), parseInt(s || "0", 10));
+      const formatted = date.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: s !== undefined ? "2-digit" : undefined,
+        hour12: true,
+      });
+      return `${formatted} IST`;
+    } catch {
+      return `${timeStr} IST`;
+    }
   }
 
   const formatCount = (count) => {
@@ -1012,15 +965,12 @@ const Followup = () => {
   const getStatusLabel = (status) => {
     if (!status || status === "") return "None";
     const mapping = {
-      inprogress: "In Progress",
-      inProgress: "In Progress",
-      meeting: "Meetings",
-      proposed: "Shared Proposal",
-      billing: "Payment Proposal",
-      lead: "Lead",
-      droped: "Dropped",
-      not_picking: "Not Picking / Busy / Others",
-      not_interested: "Not Interested",
+      "Followup Taken": "Followup",
+      Proposal: "Proposed",
+      Lead: "Lead",
+      Droped: "Drop",
+      "Not picking/busy/others": "Not Picking / Busy / Others",
+      Quotation: "Quotation",
     };
     return mapping[status] || status.charAt(0).toUpperCase() + status.slice(1);
   };
@@ -1028,189 +978,217 @@ const Followup = () => {
   return (
     <div className="text-black min-h-[92%] max-h-[100%] w-[100%] max-w-[100%] overflow-hidden">
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
-        <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[6%] flex-shrink-0">
-          <div className="flex border-b border-gray-200 h-full w-full">
-            <button
-              onClick={() => {
-                setMainTab("clientsData");
-                setSubTab("current");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors flex items-center gap-[0.4vw] ${
-                mainTab === "clientsData"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              Client's Data
-              <span
-                className={`text-[0.7vw] px-[0.4vw] py-[0.1vw] rounded-full ${
-                  mainTab === "clientsData"
-                    ? "bg-black text-white"
-                    : "bg-gray-200 text-gray-600"
-                }`}
-              >
-                {countsLoading ? (
-                  <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  formatCount(tabCounts.current + tabCounts.deleted)
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                setMainTab("followups");
-                setSubTab("first_followup");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors flex items-center gap-[0.4vw] ${
-                mainTab === "followups"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              Followup's
-              <span
-                className={`text-[0.7vw] px-[0.4vw] py-[0.1vw] rounded-full ${
-                  mainTab === "followups"
-                    ? "bg-black text-white"
-                    : "bg-gray-200 text-gray-600"
-                }`}
-              >
-                {countsLoading ? (
-                  <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  formatCount(
-                    tabCounts.first_followup +
-                      tabCounts.inprogress +
-                      tabCounts.billing +
-                      tabCounts.lead +
-                      tabCounts.not_interested +
-                      tabCounts.droped
-                  )
-                )}
-              </span>
-            </button>
-            <button   onClick={() => {
-                setMainTab("meetings");
-                setSubTab("meeting");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors flex items-center gap-[0.4vw] ${
-                mainTab === "meetings"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}> 
-              Meetings
-              <span
-                className={`text-[0.7vw] px-[0.4vw] py-[0.1vw] rounded-full ${
-                  mainTab === "meetings"
-                    ? "bg-black text-white"
-                    : "bg-gray-200 text-gray-600"
-                }`}
-              >
-                {formatCount(meetings.length)}
-              </span>
-            </button>
-          </div>
-
-          <div className="w-full h-full flex items-center justify-end pr-[0.3vw] gap-[0.4vw]">
-            <button
-              onClick={handleUploadClick}
-              className="px-[0.8vw] py-[0.4vw] flex gap-[0.4vw] bg-black text-white rounded-full hover:bg-gray-800 text-[0.78vw] items-center justify-center cursor-pointer"
-            >
-              <img src={uploadLogo} alt="" className="w-[1.1vw] h-[1.1vw]" />
-              <span>Upload Client</span>
-            </button>
-            <button
-              onClick={handleAddNew}
-              className="px-[0.8vw] py-[0.4vw] bg-black text-white rounded-full hover:bg-gray-800 text-[0.78vw] flex items-center justify-center cursor-pointer"
-            >
-              <Plus size={"0.8vw"} className="mr-[0.3vw]" />
-              Add Client
-            </button>
+        <div className="bg-white rounded-xl overflow-hidden shadow-sm h-[6%] flex-shrink-0">
+          <div className="flex border-b border-gray-200 overflow-x-auto h-full">
+            {[
+              ...getSubTabs(),
+              {
+                key: "meetings",
+                label: "Meetings",
+                isMeeting: true,
+              },
+            ].map((tab) => {
+              const isMeeting = tab.isMeeting;
+              const isActive = isMeeting
+                ? mainTab === "meetings"
+                : mainTab === "followups" && subTab === tab.key;
+              const count = isMeeting
+                ? (tabCounts.meetings !== undefined ? tabCounts.meetings : meetings.length)
+                : tabCounts[tab.countKey] || 0;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => {
+                    if (isMeeting) {
+                      setMainTab("meetings");
+                      setMeetingSubTab("scheduled");
+                    } else {
+                      setMainTab("followups");
+                      setSubTab(tab.key);
+                    }
+                  }}
+                  className={`px-[1.2vw] cursor-pointer font-medium text-[0.88vw] whitespace-nowrap transition-colors flex items-center gap-[0.4vw] ${
+                    isActive
+                      ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  {tab.label}
+                  <span
+                    className={`text-[0.65vw] px-[0.35vw] py-[0.2vw] rounded-full min-w-[1.5vw] text-center ${
+                      isActive
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    {countsLoading ? (
+                      <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
+                    ) : (
+                      formatCount(count)
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {getSubTabs().length > 0 && (
-          <div className="bg-white rounded-xl overflow-hidden shadow-sm h-[6%] flex-shrink-0">
-            <div className="flex border-b border-gray-200 overflow-x-auto h-full">
-              {getSubTabs().map((tab) => {
-                const isMeetingTab = mainTab === "meetings";
-                const isActive = isMeetingTab ? meetingSubTab === tab.key : subTab === tab.key;
-                const count = isMeetingTab
-                  ? getMeetingSubTabCount(tab.key)
-                  : (tabCounts[tab.countKey] || 0);
-                return (
-                  <button
-                    key={tab.key}
-                    onClick={() => {
-                      if (isMeetingTab) setMeetingSubTab(tab.key);
-                      else setSubTab(tab.key);
-                    }}
-                    className={`px-[1.2vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors flex items-center gap-[0.4vw] ${
-                      isActive
-                        ? "border-b-2 border-blue-600 text-blue-600"
-                        : "text-gray-600 hover:text-gray-900"
-                    }`}
-                  >
-                    {tab.label}
-                    <span
-                      className={`text-[0.65vw] px-[0.35vw] py-[0.2vw] rounded-full min-w-[1.5vw] text-center ${
-                        isActive
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-200 text-gray-600"
-                      }`}
-                    >
-                      {countsLoading && !isMeetingTab ? (
-                        <span className="inline-block w-[0.6vw] h-[0.6vw] border border-current border-t-transparent rounded-full animate-spin"></span>
-                      ) : (
-                        formatCount(count)
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className={`bg-white rounded-xl shadow-sm ${getSubTabs().length > 0 ? "h-[86%]" : "h-[92%]"} flex flex-col`}>
+        <div className="bg-white rounded-xl shadow-sm h-[92%] flex flex-col">
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
             <div className="flex items-center gap-[0.5vw]">
-              <span className="font-medium text-[0.95vw] text-gray-800">
-                {mainTab === "meetings" ? "All Meetings" : "All Clients"}
-              </span>
-              <span className="text-[0.85vw] text-gray-500">
-                ({mainTab === "meetings" ? meetings.length : filteredClients.length})
-              </span>
-              {mainTab === "followups" && subTab === "lead" && (
-                <div className="flex gap-[0.5vw] ml-[1vw] items-center">
+              {mainTab === "meetings" ? (
+                <div className="flex items-center gap-[0.4vw]">
                   {[
-                    { key: "pending", label: "Pending", countKey: "lead_pending" },
-                    { key: "onboarded", label: "Onboarded", countKey: "lead_onboarded" },
-                    { key: "cancelled", label: "Cancelled", countKey: "lead_cancelled" }
-                  ].map((nest) => {
-                    const isActive = leadSubTab === nest.key;
-                    const count = tabCounts[nest.countKey] || 0;
+                    { key: "scheduled", label: "Scheduled" },
+                    { key: "completed", label: "Completed" },
+                    { key: "cancelled", label: "Cancelled" },
+                  ].map((tab) => {
+                    const count = getMeetingSubTabCount(tab.key);
+                    const isActive = meetingSubTab === tab.key;
                     return (
                       <button
-                        key={nest.key}
-                        onClick={() => setLeadSubTab(nest.key)}
-                        className={`px-[0.6vw] py-[0.2vw] rounded-full text-[0.75vw] font-semibold transition-colors cursor-pointer flex items-center gap-[0.3vw] ${
+                        key={tab.key}
+                        onClick={() => setMeetingSubTab(tab.key)}
+                        className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.78vw] font-medium transition-all cursor-pointer flex items-center gap-[0.3vw] ${
                           isActive
-                            ? "bg-blue-600 text-white"
+                            ? "bg-blue-600 text-white shadow-sm"
                             : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                         }`}
                       >
-                        {nest.label}
+                        <span>{tab.label}</span>
                         <span
-                          className={`text-[0.58vw] px-[0.25vw] py-[0.05vw] rounded-full ${
-                            isActive ? "bg-white text-blue-600 font-bold" : "bg-gray-200 text-gray-700 font-bold"
+                          className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-semibold ${
+                            isActive
+                              ? "bg-white text-blue-600"
+                              : "bg-gray-200 text-gray-700"
                           }`}
                         >
-                          {formatCount(count)}
+                          {count}
                         </span>
                       </button>
                     );
                   })}
+                </div>
+              ) : subTab === "projectOnboard" ? (
+                <div className="flex items-center gap-[0.4vw]">
+                  {[
+                    { key: "pending", label: "Onboard Pending" },
+                    { key: "completed", label: "Onboard Completed" },
+                    { key: "cancelled", label: "Onboard Cancelled" },
+                  ].map((tab) => {
+                    const count = clients.filter((c) => {
+                      const projStatus = c.onboard_status || c.project_onboard_status || "In progress";
+                      if (tab.key === "pending") return projStatus === "In progress" || projStatus === "pending";
+                      if (tab.key === "completed") return projStatus === "onboarded" || projStatus === "completed";
+                      if (tab.key === "cancelled") return projStatus === "cancelled";
+                      return true;
+                    }).length;
+                    const isActive = onboardSubTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        onClick={() => setOnboardSubTab(tab.key)}
+                        className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.78vw] font-medium transition-all cursor-pointer flex items-center gap-[0.3vw] ${
+                          isActive
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        }`}
+                      >
+                        <span>{tab.label}</span>
+                        <span
+                          className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-semibold ${
+                            isActive
+                              ? "bg-white text-blue-600"
+                              : "bg-gray-200 text-gray-700"
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <>
+                  <span className="font-medium text-[0.95vw] text-gray-800">
+                    All Clients
+                  </span>
+                  <span className="text-[0.85vw] text-gray-500">
+                    ({filteredClients.length})
+                  </span>
+                </>
+              )}
+
+              {hasActiveFilters && mainTab !== "meetings" && (
+                <div className="flex items-center gap-[0.4vw] ml-[0.8vw] flex-wrap">
+                  {(startDate || endDate) && (
+                    <div className="flex items-center gap-[0.3vw] bg-blue-50 text-blue-700 border border-blue-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
+                      <Calendar size={"0.75vw"} />
+                      <span>
+                        {startDate && endDate
+                          ? `${startDate.split("-").reverse().join("/")} - ${endDate.split("-").reverse().join("/")}`
+                          : startDate
+                            ? `From ${startDate.split("-").reverse().join("/")}`
+                            : `Until ${endDate.split("-").reverse().join("/")}`}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setStartDate("");
+                          setEndDate("");
+                        }}
+                        className="hover:bg-blue-100 rounded-full p-[0.1vw]"
+                      >
+                        <X size={"0.7vw"} />
+                      </button>
+                    </div>
+                  )}
+
+                  {nextFollowupDate && (
+                    <div className="flex items-center gap-[0.3vw] bg-green-50 text-green-700 border border-green-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
+                      <Calendar size={"0.75vw"} />
+                      <span>
+                        Next Followup:{" "}
+                        {nextFollowupDate.split("-").reverse().join("/")}
+                      </span>
+                      <button
+                        onClick={() => setnextFollowupDate("")}
+                        className="hover:bg-green-100 rounded-full p-[0.1vw]"
+                      >
+                        <X size={"0.7vw"} />
+                      </button>
+                    </div>
+                  )}
+
+                  {statusFilter && (
+                    <div className="flex items-center gap-[0.3vw] bg-purple-50 text-purple-700 border border-purple-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
+                      <span>
+                        Status:{" "}
+                        {statusOptions.find((opt) => opt.value === statusFilter)
+                          ?.label || statusFilter}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setStatusFilter("");
+                          setFollowupToggle("all");
+                        }}
+                        className="hover:bg-purple-100 rounded-full p-[0.1vw]"
+                      >
+                        <X size={"0.7vw"} />
+                      </button>
+                    </div>
+                  )}
+
+                  {showMissedFollowups && (
+                    <div className="flex items-center gap-[0.3vw] bg-red-50 text-red-700 border border-red-200 px-[0.5vw] py-[0.15vw] rounded-full text-[0.72vw]">
+                      <span>Missed Followups</span>
+                      <button
+                        onClick={() => setShowMissedFollowups(false)}
+                        className="hover:bg-red-100 rounded-full p-[0.1vw]"
+                      >
+                        <X size={"0.7vw"} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1238,8 +1216,7 @@ const Followup = () => {
                 )}
               </div>
 
-              {(mainTab === "followups" || mainTab === "meetings" || mainTab === "clientsData") && (
-                <div className="relative" ref={filterRef}>
+              <div className="relative" ref={filterRef}>
                   <button
                     onClick={() => setShowFilterDropdown(!showFilterDropdown)}
                     className={`rounded-full hover:bg-gray-100 flex items-center gap-2 text-[0.8vw] px-[0.6vw] py-[0.3vw] text-gray-700 cursor-pointer ${
@@ -1304,7 +1281,11 @@ const Followup = () => {
                           </div>
                         </div>
 
-                        {showFollowupFilters && (
+
+                        {/* Next Followup Date — only for Followup & Quotation tabs */}
+                        {(mainTab === "followups" ||
+                          mainTab === "followup" ||
+                          mainTab === "quotation") && (
                           <div className="mb-[1vw]">
                             <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
                               Next Followup Date
@@ -1320,40 +1301,107 @@ const Followup = () => {
                           </div>
                         )}
 
-                        {showStatusFilter && (
+                        {/* Scheduled Date — only for Meetings Scheduled sub-tab */}
+                        {mainTab === "meetings" && meetingSubTab === "scheduled" && (
                           <div className="mb-[1vw]">
                             <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
-                              Status
+                              Scheduled Date
+                            </label>
+                            <input
+                              type="date"
+                              value={nextFollowupDate}
+                              onChange={(e) =>
+                                setnextFollowupDate(e.target.value)
+                              }
+                              className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                        )}
+
+
+                        {/* Status Filter — only for Followup & Quotation tabs */}
+                        {(mainTab === "followups" ||
+                          mainTab === "followup" ||
+                          mainTab === "quotation") && (
+                          <div className="mb-[1vw]">
+                            <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                              Status Filter
                             </label>
                             <select
                               value={statusFilter}
-                              onChange={(e) => setStatusFilter(e.target.value)}
+                              onChange={(e) => {
+                                setStatusFilter(e.target.value);
+                                if (
+                                  e.target.value === "Followup" ||
+                                  e.target.value === "Followup Taken"
+                                )
+                                  setFollowupToggle("followup_taken");
+                                else if (
+                                  e.target.value === "Not picking/busy/others"
+                                )
+                                  setFollowupToggle("not_picking");
+                                else if (
+                                  e.target.value === "lead" ||
+                                  e.target.value === "Lead"
+                                )
+                                  setFollowupToggle("lead");
+                                else setFollowupToggle("all");
+                              }}
                               className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                             >
-                              {statusOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
+                              <option value="">All Statuses</option>
+                              {subTab === "quotation" ? (
+                                <>
+                                  <option value="Quotation">Quotation</option>
+                                  <option value="Proposal">Proposal</option>
+                                </>
+                              ) : (
+                                <>
+                                  <option value="Followup">Followup</option>
+                                  <option value="Not picking/busy/others">
+                                    Not picking/busy/others
+                                  </option>
+                                  <option value="Lead">Lead</option>
+                                </>
+                              )}
                             </select>
                           </div>
                         )}
 
-                        {(mainTab === "followups" && subTab !== "first_followup") && (
-                          <div className="mb-[0.5vw] pt-[0.2vw]">
-                            <label className="flex items-center gap-[0.5vw] cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={showMissedFollowups}
-                                onChange={(e) =>
-                                  setShowMissedFollowups(e.target.checked)
-                                }
-                                className="w-[1vw] h-[1vw] cursor-pointer accent-blue-600"
-                              />
-                              <span className="text-[0.75vw] font-medium text-gray-700">
-                                Show Missed Followups Only
+                        {/* Missed Toggle — Followups or Meetings Scheduled */}
+                        {(mainTab !== "meetings" || meetingSubTab === "scheduled") && (
+                          <div className="mb-[1vw] pt-[0.4vw] border-t border-gray-100 flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-[0.78vw] font-semibold text-red-600">
+                                {mainTab === "meetings"
+                                  ? "Missed Meetings"
+                                  : "Missed Followups"}
                               </span>
-                            </label>
+                              <span className="text-[0.65vw] text-gray-500">
+                                {mainTab === "meetings"
+                                  ? "Past scheduled date, not completed"
+                                  : "Past next-followup dates"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowMissedFollowups(!showMissedFollowups)
+                              }
+                              className={`relative inline-flex h-[1.3vw] w-[2.6vw] items-center rounded-full transition-colors cursor-pointer ${
+                                showMissedFollowups
+                                  ? "bg-red-600"
+                                  : "bg-gray-300"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-[0.9vw] w-[0.9vw] transform rounded-full bg-white transition-transform ${
+                                  showMissedFollowups
+                                    ? "translate-x-[1.4vw]"
+                                    : "translate-x-[0.2vw]"
+                                }`}
+                              />
+                            </button>
                           </div>
                         )}
 
@@ -1370,82 +1418,8 @@ const Followup = () => {
                     </div>
                   )}
                 </div>
-              )}
             </div>
           </div>
-
-          {hasActiveFilters && mainTab !== "meetings" && (
-            <div className="flex items-center gap-[0.5vw] px-[0.8vw] pb-[0.5vw] flex-wrap">
-              <span className="text-[0.75vw] text-gray-500">
-                Active filters:
-              </span>
-
-              {(startDate || endDate) && (
-                <div className="flex items-center gap-[0.3vw] bg-blue-50 text-blue-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
-                  <Calendar size={"0.8vw"} />
-                  <span>
-                    {startDate && endDate
-                      ? `${startDate} - ${endDate}`
-                      : startDate
-                      ? `From ${startDate}`
-                      : `Until ${endDate}`}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setStartDate("");
-                      setEndDate("");
-                    }}
-                    className="hover:bg-blue-100 rounded-full p-[0.1vw]"
-                  >
-                    <X size={"0.7vw"} />
-                  </button>
-                </div>
-              )}
-
-              {nextFollowupDate && (
-                <div className="flex items-center gap-[0.3vw] bg-green-50 text-green-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
-                  <Calendar size={"0.8vw"} />
-                  <span>Next Followup: {nextFollowupDate}</span>
-                  <button
-                    onClick={() => setnextFollowupDate("")}
-                    className="hover:bg-green-100 rounded-full p-[0.1vw]"
-                  >
-                    <X size={"0.7vw"} />
-                  </button>
-                </div>
-              )}
-
-              {statusFilter && (
-                <div className="flex items-center gap-[0.3vw] bg-purple-50 text-purple-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
-                  <span>
-                    Status:{" "}
-                    {
-                      statusOptions.find((opt) => opt.value === statusFilter)
-                        ?.label
-                    }
-                  </span>
-                  <button
-                    onClick={() => setStatusFilter("")}
-                    className="hover:bg-purple-100 rounded-full p-[0.1vw]"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              {showMissedFollowups && (
-                <div className="flex items-center gap-[0.3vw] bg-red-50 text-red-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
-                  <span>Missed Followups</span>
-                  <button
-                    onClick={() => setShowMissedFollowups(false)}
-                    className="hover:bg-red-100 rounded-full p-[0.1vw]"
-                  >
-                    <X size={"0.7vw"} />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="flex-1 min-h-0">
             {loading ? (
@@ -1454,9 +1428,20 @@ const Followup = () => {
               </div>
             ) : mainTab === "meetings" ? (
               (() => {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
                 const filteredMeetings = meetings.filter((m) => {
                   if (meetingSubTab === "scheduled") {
-                    if (m.status === "completed" || m.status === "cancelled") return false;
+                    if (m.status === "completed" || m.status === "cancelled")
+                      return false;
+                    // Missed meetings filter: only keep overdue when toggle is ON
+                    if (showMissedFollowups) {
+                      if (!m.date) return false;
+                      const mDate = new Date(m.date);
+                      mDate.setHours(0, 0, 0, 0);
+                      if (mDate >= today) return false; // not yet missed
+                    }
                   } else if (meetingSubTab === "completed") {
                     if (m.status !== "completed") return false;
                   } else if (meetingSubTab === "cancelled") {
@@ -1464,8 +1449,10 @@ const Followup = () => {
                   }
 
                   if (startDate || endDate) {
-                    if (!m.date) return false;
-                    const meetingDate = new Date(m.date);
+                    // For meetings, filter by created_at (Created Date column)
+                    const rawDate = m.created_at;
+                    if (!rawDate) return false;
+                    const meetingDate = new Date(rawDate);
                     meetingDate.setHours(0, 0, 0, 0);
 
                     const start = startDate ? new Date(startDate) : null;
@@ -1475,22 +1462,47 @@ const Followup = () => {
                     if (end) end.setHours(23, 59, 59, 999);
 
                     if (start && end) {
-                      if (meetingDate < start || meetingDate > end) return false;
+                      if (meetingDate < start || meetingDate > end)
+                        return false;
                     } else if (start) {
                       const dayEnd = new Date(start);
                       dayEnd.setHours(23, 59, 59, 999);
-                      if (meetingDate < start || meetingDate > dayEnd) return false;
+                      if (meetingDate < start || meetingDate > dayEnd)
+                        return false;
                     } else if (end) {
                       if (meetingDate > end) return false;
                     }
                   }
 
+                  // Filter by scheduled date field (nextFollowupDate filter repurposed)
+                  if (nextFollowupDate && meetingSubTab === "scheduled") {
+                    if (!m.date) return false;
+                    const mDate = new Date(m.date);
+                    const filterDate = new Date(nextFollowupDate);
+                    if (
+                      mDate.toDateString() !== filterDate.toDateString()
+                    )
+                      return false;
+                  }
+
                   if (searchTerm && searchTerm.trim() !== "") {
                     const term = searchTerm.toLowerCase().trim();
-                    const company = (m.client_details?.company_name || m.company_name || "").toLowerCase();
-                    const customer = (m.client_details?.customer_name || m.customer_name || "").toLowerCase();
+                    const company = (
+                      m.client_details?.company_name ||
+                      m.company_name ||
+                      ""
+                    ).toLowerCase();
+                    const customer = (
+                      m.client_details?.customer_name ||
+                      m.customer_name ||
+                      ""
+                    ).toLowerCase();
                     const title = (m.title || "").toLowerCase();
-                    if (!company.includes(term) && !customer.includes(term) && !title.includes(term)) {
+                    if (
+                      !company.includes(term) &&
+                      !customer.includes(term) &&
+                      !title.includes(term)
+                    ) {
                       return false;
                     }
                   }
@@ -1503,26 +1515,52 @@ const Followup = () => {
                     {filteredMeetings.length === 0 ? (
                       <div className="flex flex-col items-center justify-center flex-1 text-gray-500">
                         <Calendar className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300" />
-                        <p className="text-[1.1vw] font-medium mb-[0.5vw]">No meetings found</p>
-                        <p className="text-[1vw] text-gray-400">No {meetingSubTab} meetings</p>
+                        <p className="text-[1.1vw] font-medium mb-[0.5vw]">
+                          No meetings found
+                        </p>
+                        <p className="text-[1vw] text-gray-400">
+                          No {meetingSubTab} meetings
+                        </p>
                       </div>
                     ) : (
                       <div className="mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] mt-[0.5vw] border border-gray-300 rounded-xl overflow-auto flex-1">
                         <table className="w-full border-collapse border border-gray-300">
                           <thead className="bg-[#E2EBFF] sticky top-0">
                             <tr>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">S.NO</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Created Date</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Company</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Contact Person</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Phone</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Title</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Scheduled Date</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Time</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Type</th>
-                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Agenda</th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                S.NO
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Created Date
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Company
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Contact Person
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Phone
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Title
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Scheduled Date
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Time
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Type
+                              </th>
+                              <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                Agenda
+                              </th>
                               {meetingSubTab !== "cancelled" && (
-                                <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Actions</th>
+                                <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
+                                  Actions
+                                </th>
                               )}
                             </tr>
                           </thead>
@@ -1530,28 +1568,85 @@ const Followup = () => {
                             {filteredMeetings.map((meeting, index) => {
                               const contacts = (() => {
                                 try {
-                                  const cp = meeting.client_details?.contactPersons;
-                                  return Array.isArray(cp) ? cp : (typeof cp === "string" ? JSON.parse(cp) : []);
-                                } catch { return []; }
+                                  const cp =
+                                    meeting.client_details?.contactPersons;
+                                  return Array.isArray(cp)
+                                    ? cp
+                                    : typeof cp === "string"
+                                      ? JSON.parse(cp)
+                                      : [];
+                                } catch {
+                                  return [];
+                                }
                               })();
                               const primaryContact = contacts[0] || {};
                               return (
-                                <tr key={meeting.id} className="hover:bg-gray-50 transition-colors">
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">{index + 1}</td>
+                                <tr
+                                  key={meeting.id}
+                                  className="hover:bg-gray-50 transition-colors"
+                                >
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">
-                                    {meeting.created_at ? formatDateToIST(meeting.created_at).split(",")[0] : "-"}
+                                    {index + 1}
                                   </td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 font-medium">{meeting.client_details?.company_name || "-"}</td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{primaryContact.name || "-"}</td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{primaryContact.contactNumber || "-"}</td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{meeting.title || "-"}</td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">
-                                    {meeting.date ? new Date(meeting.date).toLocaleDateString("en-GB").split("/").join("-") : "-"}
+                                    {meeting.created_at
+                                      ? formatDateToIST(
+                                          meeting.created_at,
+                                        ).split(",")[0]
+                                      : "-"}
                                   </td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">{meeting.time || "-"}</td>
-                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">{meeting.type || "-"}</td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 font-medium">
+                                    {meeting.client_details?.company_name ||
+                                      "-"}
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">
+                                    {primaryContact.name || "-"}
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">
+                                    {primaryContact.contactNumber || "-"}
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">
+                                    {meeting.title || "-"}
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center">
+                                    <div className="flex flex-col items-center gap-[0.2vw]">
+                                      <span>
+                                        {meeting.date
+                                          ? new Date(meeting.date)
+                                              .toLocaleDateString("en-GB")
+                                              .split("/")
+                                              .join("-")
+                                          : "-"}
+                                      </span>
+                                      {(() => {
+                                        if (meeting.status !== "inprogress") return null;
+                                        if (!meeting.date) return null;
+                                        const d = new Date(meeting.date);
+                                        d.setHours(0, 0, 0, 0);
+                                        const todayCheck = new Date();
+                                        todayCheck.setHours(0, 0, 0, 0);
+                                        if (d >= todayCheck) return null;
+                                        return (
+                                          <span className="inline-flex items-center px-[0.35vw] py-[0.1vw] rounded text-[0.6vw] font-semibold bg-red-100 text-red-700 border border-red-200 whitespace-nowrap">
+                                            Missed
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300 text-center font-medium">
+                                    {formatTimeToIST(meeting.time)}
+                                  </td>
+                                  <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-900 border border-gray-300">
+                                    {meeting.type || "-"}
+                                  </td>
                                   <td className="px-[0.7vw] py-[0.56vw] text-[0.82vw] text-gray-600 border border-gray-300 max-w-[12vw]">
-                                    <div className="line-clamp-2" title={meeting.agenda}>{meeting.agenda || "-"}</div>
+                                    <div
+                                      className="line-clamp-2"
+                                      title={meeting.agenda}
+                                    >
+                                      {meeting.agenda || "-"}
+                                    </div>
                                   </td>
                                   {meetingSubTab !== "cancelled" && (
                                     <td className="px-[0.7vw] py-[0.52vw] border border-gray-300">
@@ -1559,13 +1654,20 @@ const Followup = () => {
                                         {meetingSubTab === "scheduled" && (
                                           <>
                                             <button
-                                              onClick={() => handleOpenMOM(meeting)}
+                                              onClick={() =>
+                                                handleOpenMOM(meeting)
+                                              }
                                               className="px-[0.6vw] py-[0.3vw] bg-blue-600 text-white rounded-full text-[0.75vw] hover:bg-blue-700 cursor-pointer font-medium"
                                             >
                                               Record
                                             </button>
                                             <button
-                                              onClick={() => handleUpdateMeetingStatus(meeting.id, "cancelled")}
+                                              onClick={() =>
+                                                handleUpdateMeetingStatus(
+                                                  meeting.id,
+                                                  "cancelled",
+                                                )
+                                              }
                                               className="px-[0.6vw] py-[0.3vw] bg-red-50 text-red-600 border border-red-200 rounded-full text-[0.75vw] hover:bg-red-100 cursor-pointer font-medium"
                                             >
                                               Cancel
@@ -1574,7 +1676,9 @@ const Followup = () => {
                                         )}
                                         {meetingSubTab === "completed" && (
                                           <button
-                                            onClick={() => exportMOMToPDF(meeting)}
+                                            onClick={() =>
+                                              exportMOMToPDF(meeting)
+                                            }
                                             className="px-[0.6vw] py-[0.3vw] bg-green-600 text-white rounded-full text-[0.75vw] hover:bg-green-700 cursor-pointer font-medium flex items-center gap-[0.2vw]"
                                           >
                                             <Download size={"0.75vw"} />
@@ -1635,42 +1739,26 @@ const Followup = () => {
                         Date
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Company
+                        Company Name
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Contact Person
+                        Customer Name
                       </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        Contact Number
+                        Employee Name
                       </th>
-                      {(mainTab === "clientsData" || subTab === "first_followup") && (
-                        <>
-                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                            Email ID
-                          </th>
-                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                            Requirement
-                          </th>
-                        </>
-                      )}
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                        City
+                        Project Name
                       </th>
-                      {(mainTab === "followups" && subTab !== "first_followup") && (
-                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                          Status
-                        </th>
-                      )}
-                      {mainTab === "followups" && subTab !== "first_followup" && (
-                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                          Latest Remarks
-                        </th>
-                      )}
-                      {(mainTab === "followups" && !["droped", "billing", "first_followup", "lead", "not_interested"].includes(subTab)) && (
-                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
-                          Next followup date
-                        </th>
-                      )}
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                        Category
+                      </th>
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                        Status
+                      </th>
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                        Next Followup Date
+                      </th>
                       <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Actions
                       </th>
@@ -1685,9 +1773,10 @@ const Followup = () => {
 
                       let contacts = [];
                       try {
-                        contacts = typeof client.contactPersons === "string"
-                          ? JSON.parse(client.contactPersons)
-                          : client.contactPersons;
+                        contacts =
+                          typeof client.contactPersons === "string"
+                            ? JSON.parse(client.contactPersons)
+                            : client.contactPersons;
                       } catch (e) {}
                       if (!Array.isArray(contacts)) contacts = [];
                       const mainContact = contacts[0] || {};
@@ -1700,149 +1789,137 @@ const Followup = () => {
                           <td className="w-[3.5vw] px-[0.2vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
                             {startIndex + index + 1}
                           </td>
-                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                            <div className="flex justify-center">
-                              {formatDateToIST(client.created_at)}
-                            </div>
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
+                            {formatDateToIST(
+                              client.latest_followup_date ||
+                                client.followup_created_at ||
+                                client.created_at,
+                            )}
                           </td>
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium">
-                            {client.company_name}
+                            {client.company_name || "-"}
                           </td>
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                            {client.customer_name}
+                            {client.customer_name || "-"}
+                          </td>
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium text-gray-700">
+                            {client.employee_name || client.employee_id || "-"}
+                          </td>
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium text-blue-600">
+                            {client.project_name || "-"}
                           </td>
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                            {mainContact.contactNumber || mainContact.phone || "-"}
+                            {client.project_category || "-"}
                           </td>
-                          {(mainTab === "clientsData" || subTab === "first_followup") && (
-                            <>
-                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
-                                {mainContact.email || "-"}
-                              </td>
-                              <td
-                                className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200 cursor-pointer hover:bg-blue-50/50 transition-colors"
-                                onMouseEnter={() => setHoveredRemark(client.requirements || "-")}
-                                onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-                                onMouseLeave={() => { setHoveredRemark(null); setCopiedRemark(false); }}
-                                onClick={() => handleCopyRemark(client.requirements)}
-                              >
-                                <div className="max-w-[12vw] truncate block">
-                                  {client.requirements || "-"}
-                                </div>
-                              </td>
-                            </>
-                          )}
-
                           <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
-                            {client.city}
+                            {getStatusLabel(client.status)}
                           </td>
-
-                          {(mainTab === "followups" && subTab !== "first_followup") && (
-                            <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
-                              {getStatusLabel(client.status)}
-                            </td>
-                          )}
-                          {mainTab === "followups" && subTab !== "first_followup" && (
-                            <td 
-                              className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-700 border border-gray-200 cursor-pointer hover:bg-blue-50/50 transition-colors"
-                              onMouseEnter={() => setHoveredRemark(getLatestRemarks(client))}
-                              onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-                              onMouseLeave={() => { setHoveredRemark(null); setCopiedRemark(false); }}
-                              onClick={() => handleCopyRemark(getLatestRemarks(client))}
-                            >
-                              <div className="max-w-[15vw] truncate block font-medium">
-                                {getLatestRemarks(client)}
-                              </div>
-                            </td>
-                          )}
-                          {(mainTab === "followups" && !["droped", "billing", "first_followup", "lead", "not_interested"].includes(subTab)) && (
-                            <td
-                              className="px-[0.4vw] py-[0.56vw] text-[0.8vw] border border-gray-200"
-                            >
-                              <div className="flex justify-center items-center gap-[0.3vw]">
-                                {client?.nextFollowupDate
-                                  ? client.nextFollowupDate
-                                      .split("-")
-                                      .reverse()
-                                      .join("-")
-                                  : "-"}
-                                {isMissed && (
-                                  <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] ml-[1vw] rounded">
-                                    Missed
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                          )}
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] border border-gray-200 text-center">
+                            <div className="flex justify-center items-center gap-[0.3vw]">
+                              {client?.nextFollowupDate
+                                ? formatDateToIST(
+                                    client.nextFollowupDate,
+                                  ).split(",")[0]
+                                : "-"}
+                              {isMissed && (
+                                <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] ml-[0.4vw] rounded">
+                                  Missed
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-[0.4vw] py-[0.52vw] border border-gray-200">
                             {mainTab === "clientsData" ? (
-                              <div className="flex justify-center items-center gap-[0.3vw]">
-                                {subTab === "deleted" ? (
-                                  <button
-                                    onClick={() => handleRestore(client.id)}
-                                    className="px-[0.6vw] py-[0.3vw] my-[0.3vw] flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 cursor-pointer"
-                                    title="Restore"
-                                  >
-                                    <RefreshCw
-                                      size={"1.02vw"}
-                                      className="mr-[0.2vw]"
-                                    />
-                                    <span className="-mt-[0.2vw]">
-                                      Restore
-                                    </span>
-                                  </button>
-                                ) : (
-                                  <>
-                                    <button
-                                      className="p-[0.6vw] text-gray-600 hover:bg-gray-50 rounded-full transition-colors cursor-pointer"
-                                      title="Edit"
-                                      onClick={() => handleEdit(client)}
-                                    >
-                                      <Edit size={"1.02vw"} />
-                                    </button>
-                                    <button
-                                      onClick={() => handleDelete(client.id)}
-                                      className="p-[0.6vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={"1.02vw"} />
-                                    </button>
-                                  </>
-                                )}
+                              <div className="flex justify-center items-center gap-[0.4vw]">
+                                <button
+                                  onClick={() => handleFollowup(client)}
+                                  className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+                                  title="Add Followup"
+                                >
+                                  <PhoneCall size={"0.8vw"} />
+                                  <span>Followup</span>
+                                </button>
+                                <button
+                                  className="p-[0.5vw] text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+                                  title="Edit"
+                                  onClick={() => handleEdit(client)}
+                                >
+                                  <Edit size={"1.02vw"} />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(client.id)}
+                                  className="p-[0.5vw] text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={"1.02vw"} />
+                                </button>
                               </div>
                             ) : (
-                              <div className="flex justify-center items-center gap-[0.5vw]">
-                                {subTab !== "lead" && (
-                                  <button
-                                    onClick={() => handleFollowup(client)}
-                                    className="p-[0.5vw] rounded-lg flex gap-[0.8vw] text-[0.8vw] items-center font-semibold text-blue-500 hover:bg-blue-55/50 transition-colors cursor-pointer"
-                                    title="Add Followup"
-                                  >
-                                    <PhoneCall size={"0.8vw"} />{" "}
-                                    <span>Followup</span>
-                                  </button>
-                                )}
-                                {subTab === "lead" && (
+                              <div className="flex justify-center items-center gap-[0.4vw]">
+                                <button
+                                  onClick={() => handleView(client)}
+                                  className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-gray-700 hover:bg-gray-100 border border-gray-300 transition-colors cursor-pointer"
+                                  title="View Details"
+                                >
+                                  <Eye size={"0.8vw"} />
+                                  <span>View</span>
+                                </button>
+                                {subTab === "projectOnboard" ? (
                                   <>
-                                    <button
-                                      onClick={() => handleFollowup(client, true)}
-                                      className="px-[0.5vw] py-[0.3vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
-                                      title="Followup History"
-                                    >
-                                      <History size={"0.8vw"} />{" "}
-                                      <span>History</span>
-                                    </button>
-                                    {(leadSubTab === "pending" || leadSubTab === "cancelled") && (
-                                      <button
-                                        onClick={() => handleOnboardClick(client)}
-                                        className="px-[0.5vw] py-[0.3vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-green-600 hover:bg-green-50 border border-green-200 transition-colors cursor-pointer"
-                                        title="Onboard Project"
-                                      >
-                                        <UserCheck size={"0.8vw"} />{" "}
-                                        <span>Onboard</span>
-                                      </button>
+                                    {onboardSubTab === "pending" && (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            setOnboardClient(client);
+                                            setOnboardFormData({
+                                              projectName: client.project_name || "",
+                                              category: client.project_category || "",
+                                              startDate: "",
+                                              endDate: "",
+                                              reviewDate: "",
+                                              status: "projectOnboard",
+                                              remarks: "",
+                                            });
+                                            setIsOnboardModalOpen(true);
+                                          }}
+                                          className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-green-700 hover:bg-green-50 border border-green-300 transition-colors cursor-pointer"
+                                          title="Onboard Project"
+                                        >
+                                          <UserCheck size={"0.8vw"} />
+                                          <span>Onboard</span>
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setOnboardClient(client);
+                                            setOnboardFormData({
+                                              projectName: client.project_name || "",
+                                              category: client.project_category || "",
+                                              startDate: "",
+                                              endDate: "",
+                                              reviewDate: "",
+                                              status: "cancelled",
+                                              remarks: "",
+                                            });
+                                            setIsOnboardModalOpen(true);
+                                          }}
+                                          className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer"
+                                          title="Cancel Onboard"
+                                        >
+                                          <XCircle size={"0.8vw"} />
+                                          <span>Cancel</span>
+                                        </button>
+                                      </>
                                     )}
                                   </>
+                                ) : (
+                                  <button
+                                    onClick={() => handleFollowup(client)}
+                                    className="px-[0.5vw] py-[0.25vw] rounded-lg flex gap-[0.3vw] text-[0.78vw] items-center font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+                                    title="Add Followup"
+                                  >
+                                    <PhoneCall size={"0.8vw"} />
+                                    <span>Followup</span>
+                                  </button>
                                 )}
                               </div>
                             )}
@@ -1856,65 +1933,63 @@ const Followup = () => {
             )}
           </div>
 
-          {!loading && ((mainTab === "meetings" && meetings.length > 0) || (mainTab !== "meetings" && filteredClients.length > 0)) && (
-            <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] h-[10%] border-t border-gray-200">
-              <div className="text-[0.85vw] text-gray-600">
-                Showing {startIndex + 1} to{" "}
-                {Math.min(endIndex, mainTab === "meetings" ? meetings.length : filteredClients.length)} of{" "}
-                {mainTab === "meetings" ? meetings.length : filteredClients.length} entries
-              </div>
-              <div className="flex items-center gap-[0.5vw]">
-                <button
-                  onClick={handlePrevious}
-                  disabled={currentPage === 1}
-                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-                >
-                  <ChevronLeft size={"1vw"} />
-                  Previous
-                </button>
-                
-                <div className="flex items-center gap-[0.3vw]">
-                  {getPageNumbers().map((pageNum) => (
-                    <button
-                      key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
-                      className={`px-[0.6vw] py-[0.35vw] min-w-[2vw] text-center border rounded-lg text-[0.8vw] font-semibold transition-all cursor-pointer ${
-                        currentPage === pageNum
-                          ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                          : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  ))}
+          {!loading &&
+            ((mainTab === "meetings" && meetings.length > 0) ||
+              (mainTab !== "meetings" && filteredClients.length > 0)) && (
+              <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] h-[10%] border-t border-gray-200">
+                <div className="text-[0.85vw] text-gray-600">
+                  Showing {startIndex + 1} to{" "}
+                  {Math.min(
+                    endIndex,
+                    mainTab === "meetings"
+                      ? meetings.length
+                      : filteredClients.length,
+                  )}{" "}
+                  of{" "}
+                  {mainTab === "meetings"
+                    ? meetings.length
+                    : filteredClients.length}{" "}
+                  entries
                 </div>
+                <div className="flex items-center gap-[0.5vw]">
+                  <button
+                    onClick={handlePrevious}
+                    disabled={currentPage === 1}
+                    className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                  >
+                    <ChevronLeft size={"1vw"} />
+                    Previous
+                  </button>
 
-                <button
-                  onClick={handleNext}
-                  disabled={currentPage === totalPages}
-                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-                >
-                  Next
-                  <ChevronRight size={"1vw"} />
-                </button>
+                  <div className="flex items-center gap-[0.3vw]">
+                    {getPageNumbers().map((pageNum) => (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`px-[0.6vw] py-[0.35vw] min-w-[2vw] text-center border rounded-lg text-[0.8vw] font-semibold transition-all cursor-pointer ${
+                          currentPage === pageNum
+                            ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleNext}
+                    disabled={currentPage === totalPages}
+                    className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                  >
+                    Next
+                    <ChevronRight size={"1vw"} />
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
       </div>
-
-      <ClientAddModal
-        isOpen={isModalOpen}
-        onClose={handleModalClose}
-        onSuccess={handleSuccess}
-        editData={editingClient}
-      />
-
-      <ClientUploadModal
-        isOpen={isUploadModalOpen}
-        onClose={handleUploadModalClose}
-        onSuccess={handleSuccess}
-      />
 
       <FollowupModal
         isOpen={isFollowupModalOpen}
@@ -1928,8 +2003,8 @@ const Followup = () => {
         subTab={subTab}
         initialShowHistory={initialShowHistory}
         refreshData={handleSuccess}
+        isClientDataMode={false}
       />
-      {renderRemarksTooltip()}
 
       {/* Onboard Project Modal */}
       {isOnboardModalOpen && onboardClient && (
@@ -1954,16 +2029,21 @@ const Followup = () => {
                 </label>
                 <select
                   value={onboardFormData.status}
-                  onChange={(e) => setOnboardFormData({ ...onboardFormData, status: e.target.value })}
+                  onChange={(e) =>
+                    setOnboardFormData({
+                      ...onboardFormData,
+                      status: e.target.value,
+                    })
+                  }
                   className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] cursor-pointer focus:ring-2 focus:ring-blue-500"
                   required
                 >
-                  <option value="project_onboard">Onboard</option>
+                  <option value="projectOnboard">Onboard</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
               </div>
 
-              {onboardFormData.status === "project_onboard" ? (
+              {onboardFormData.status === "projectOnboard" ? (
                 <>
                   <div>
                     <label className="block text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
@@ -1972,7 +2052,12 @@ const Followup = () => {
                     <input
                       type="text"
                       value={onboardFormData.projectName}
-                      onChange={(e) => setOnboardFormData({ ...onboardFormData, projectName: e.target.value })}
+                      onChange={(e) =>
+                        setOnboardFormData({
+                          ...onboardFormData,
+                          projectName: e.target.value,
+                        })
+                      }
                       className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                       required
                     />
@@ -1985,7 +2070,12 @@ const Followup = () => {
                     <input
                       type="text"
                       value={onboardFormData.category}
-                      onChange={(e) => setOnboardFormData({ ...onboardFormData, category: e.target.value })}
+                      onChange={(e) =>
+                        setOnboardFormData({
+                          ...onboardFormData,
+                          category: e.target.value,
+                        })
+                      }
                       className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                       required
                     />
@@ -1999,7 +2089,12 @@ const Followup = () => {
                       <input
                         type="date"
                         value={onboardFormData.startDate}
-                        onChange={(e) => setOnboardFormData({ ...onboardFormData, startDate: e.target.value })}
+                        onChange={(e) =>
+                          setOnboardFormData({
+                            ...onboardFormData,
+                            startDate: e.target.value,
+                          })
+                        }
                         className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                         required
                       />
@@ -2012,7 +2107,12 @@ const Followup = () => {
                       <input
                         type="date"
                         value={onboardFormData.endDate}
-                        onChange={(e) => setOnboardFormData({ ...onboardFormData, endDate: e.target.value })}
+                        onChange={(e) =>
+                          setOnboardFormData({
+                            ...onboardFormData,
+                            endDate: e.target.value,
+                          })
+                        }
                         className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                         required
                       />
@@ -2026,7 +2126,12 @@ const Followup = () => {
                     <input
                       type="date"
                       value={onboardFormData.reviewDate}
-                      onChange={(e) => setOnboardFormData({ ...onboardFormData, reviewDate: e.target.value })}
+                      onChange={(e) =>
+                        setOnboardFormData({
+                          ...onboardFormData,
+                          reviewDate: e.target.value,
+                        })
+                      }
                       className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -2038,7 +2143,12 @@ const Followup = () => {
                   </label>
                   <textarea
                     value={onboardFormData.remarks}
-                    onChange={(e) => setOnboardFormData({ ...onboardFormData, remarks: e.target.value })}
+                    onChange={(e) =>
+                      setOnboardFormData({
+                        ...onboardFormData,
+                        remarks: e.target.value,
+                      })
+                    }
                     rows={4}
                     className="w-full px-[1vw] py-[0.6vw] border border-gray-300 rounded-lg text-[0.9vw] focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter reason for cancellation..."
@@ -2059,7 +2169,9 @@ const Followup = () => {
                 onClick={handleOnboardSubmit}
                 className="px-[1.2vw] py-[0.6vw] bg-[#2563EB] text-white rounded-lg hover:bg-blue-700 text-[0.85vw] transition font-semibold cursor-pointer"
               >
-                {onboardFormData.status === "project_onboard" ? "Onboard Project" : "Submit"}
+                {onboardFormData.status === "projectOnboard"
+                  ? "Onboard Project"
+                  : "Submit"}
               </button>
             </div>
           </div>
@@ -2073,20 +2185,45 @@ const Followup = () => {
             {/* Header with meeting details */}
             <div className="bg-[#E2EBFF] px-[1.5vw] py-[1vw] flex items-start justify-between flex-shrink-0">
               <div>
-                <h2 className="text-[1.1vw] font-semibold text-gray-900">Record Minutes of Meeting</h2>
+                <h2 className="text-[1.1vw] font-semibold text-gray-900">
+                  Record Minutes of Meeting
+                </h2>
                 <div className="flex gap-[1.5vw] mt-[0.4vw] text-[0.85vw] text-gray-600">
-                  <span><span className="font-medium">Company:</span> {momModal.meeting.client_details?.company_name || "-"}</span>
-                  <span><span className="font-medium">Title:</span> {momModal.meeting.title || "-"}</span>
-                  <span><span className="font-medium">Date:</span> {momModal.meeting.date ? new Date(momModal.meeting.date).toLocaleDateString("en-GB").split("/").join("-") : "-"}</span>
-                  <span><span className="font-medium">Type:</span> {momModal.meeting.type || "-"}</span>
+                  <span>
+                    <span className="font-medium">Company:</span>{" "}
+                    {momModal.meeting.client_details?.company_name || "-"}
+                  </span>
+                  <span>
+                    <span className="font-medium">Title:</span>{" "}
+                    {momModal.meeting.title || "-"}
+                  </span>
+                  <span>
+                    <span className="font-medium">Date:</span>{" "}
+                    {momModal.meeting.date
+                      ? new Date(momModal.meeting.date)
+                          .toLocaleDateString("en-GB")
+                          .split("/")
+                          .join("-")
+                      : "-"}
+                  </span>
+                  <span>
+                    <span className="font-medium">Type:</span>{" "}
+                    {momModal.meeting.type || "-"}
+                  </span>
                 </div>
                 {momModal.meeting.agenda && (
                   <div className="mt-[0.3vw] text-[0.82vw] text-gray-500">
-                    <span className="font-medium">Agenda:</span> {momModal.meeting.agenda}
+                    <span className="font-medium">Agenda:</span>{" "}
+                    {momModal.meeting.agenda}
                   </div>
                 )}
               </div>
-              <button onClick={() => setMomModal({ open: false, meeting: null })} className="text-gray-400 hover:text-gray-600 text-[1.4vw] cursor-pointer mt-[-0.2vw]">×</button>
+              <button
+                onClick={() => setMomModal({ open: false, meeting: null })}
+                className="text-gray-400 hover:text-gray-600 text-[1.4vw] cursor-pointer mt-[-0.2vw]"
+              >
+                ×
+              </button>
             </div>
 
             {/* Form */}
@@ -2094,29 +2231,41 @@ const Followup = () => {
               {/* Dates and Times Row */}
               <div className="grid grid-cols-3 gap-[1vw]">
                 <div>
-                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Conducted Date *</label>
+                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                    Conducted Date *
+                  </label>
                   <input
                     type="date"
                     value={momForm.conductedDate}
-                    onChange={(e) => setMomForm({ ...momForm, conductedDate: e.target.value })}
+                    onChange={(e) =>
+                      setMomForm({ ...momForm, conductedDate: e.target.value })
+                    }
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Start Time *</label>
+                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                    Start Time *
+                  </label>
                   <input
                     type="time"
                     value={momForm.startTime}
-                    onChange={(e) => setMomForm({ ...momForm, startTime: e.target.value })}
+                    onChange={(e) =>
+                      setMomForm({ ...momForm, startTime: e.target.value })
+                    }
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">End Time *</label>
+                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                    End Time *
+                  </label>
                   <input
                     type="time"
                     value={momForm.endTime}
-                    onChange={(e) => setMomForm({ ...momForm, endTime: e.target.value })}
+                    onChange={(e) =>
+                      setMomForm({ ...momForm, endTime: e.target.value })
+                    }
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -2125,22 +2274,36 @@ const Followup = () => {
               {/* Attendees Row */}
               <div className="grid grid-cols-2 gap-[1vw]">
                 <div>
-                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Attendees – Client Side</label>
+                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                    Attendees – Client Side
+                  </label>
                   <textarea
                     rows={3}
                     placeholder="Names of attendees from client side..."
                     value={momForm.attendeesClient}
-                    onChange={(e) => setMomForm({ ...momForm, attendeesClient: e.target.value })}
+                    onChange={(e) =>
+                      setMomForm({
+                        ...momForm,
+                        attendeesClient: e.target.value,
+                      })
+                    }
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] resize-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Attendees – Our Side</label>
+                  <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                    Attendees – Our Side
+                  </label>
                   <textarea
                     rows={3}
                     placeholder="Names of attendees from our side..."
                     value={momForm.attendeesOurSide}
-                    onChange={(e) => setMomForm({ ...momForm, attendeesOurSide: e.target.value })}
+                    onChange={(e) =>
+                      setMomForm({
+                        ...momForm,
+                        attendeesOurSide: e.target.value,
+                      })
+                    }
                     className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] resize-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -2148,36 +2311,33 @@ const Followup = () => {
 
               {/* Agenda */}
               <div>
-                <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Agenda Discussed</label>
+                <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                  Agenda Discussed
+                </label>
                 <textarea
                   rows={3}
                   placeholder="Topics / agenda discussed in the meeting..."
                   value={momForm.agenda}
-                  onChange={(e) => setMomForm({ ...momForm, agenda: e.target.value })}
+                  onChange={(e) =>
+                    setMomForm({ ...momForm, agenda: e.target.value })
+                  }
                   className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] resize-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               {/* Outcomes */}
               <div>
-                <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Outcomes / Action Points</label>
+                <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
+                  Outcomes / Action Points
+                </label>
                 <textarea
                   rows={3}
                   placeholder="Key outcomes, decisions and action items..."
                   value={momForm.outcomes}
-                  onChange={(e) => setMomForm({ ...momForm, outcomes: e.target.value })}
+                  onChange={(e) =>
+                    setMomForm({ ...momForm, outcomes: e.target.value })
+                  }
                   className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.88vw] resize-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Document Upload */}
-              <div>
-                <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">Upload Document (optional)</label>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx,.jpg,.png"
-                  onChange={(e) => setMomForm({ ...momForm, document: e.target.files[0] || null })}
-                  className="w-full text-[0.85vw] text-gray-600 border border-gray-300 rounded-lg px-[0.8vw] py-[0.4vw] cursor-pointer file:mr-[0.5vw] file:py-[0.2vw] file:px-[0.6vw] file:rounded-full file:border-0 file:text-[0.8vw] file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
               </div>
             </div>
@@ -2213,8 +2373,12 @@ const Followup = () => {
                   <UserCheck size={"1.1vw"} className="text-white" />
                 </div>
                 <div>
-                  <h2 className="text-[1.05vw] font-bold text-white">Project Onboarded Successfully! 🎉</h2>
-                  <p className="text-[0.78vw] text-blue-100 mt-[0.1vw]">The lead has been moved to Onboarded status</p>
+                  <h2 className="text-[1.05vw] font-bold text-white">
+                    Project Onboarded Successfully! 🎉
+                  </h2>
+                  <p className="text-[0.78vw] text-blue-100 mt-[0.1vw]">
+                    The lead has been moved to Onboarded status
+                  </p>
                 </div>
               </div>
             </div>
@@ -2223,23 +2387,37 @@ const Followup = () => {
             <div className="px-[1.8vw] py-[1.5vw]">
               {/* Project Details Summary */}
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-[1vw] mb-[1.2vw]">
-                <p className="text-[0.78vw] font-semibold text-blue-700 mb-[0.6vw] uppercase tracking-wide">Project Details</p>
+                <p className="text-[0.78vw] font-semibold text-blue-700 mb-[0.6vw] uppercase tracking-wide">
+                  Project Details
+                </p>
                 <div className="grid grid-cols-2 gap-[0.5vw]">
                   <div>
                     <span className="text-[0.75vw] text-gray-500">Company</span>
-                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.companyName}</p>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">
+                      {budgetConfirm.projectData.companyName}
+                    </p>
                   </div>
                   <div>
-                    <span className="text-[0.75vw] text-gray-500">Customer</span>
-                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.customerName || "-"}</p>
+                    <span className="text-[0.75vw] text-gray-500">
+                      Customer
+                    </span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">
+                      {budgetConfirm.projectData.customerName || "-"}
+                    </p>
                   </div>
                   <div>
                     <span className="text-[0.75vw] text-gray-500">Project</span>
-                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.projectName}</p>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">
+                      {budgetConfirm.projectData.projectName}
+                    </p>
                   </div>
                   <div>
-                    <span className="text-[0.75vw] text-gray-500">Category</span>
-                    <p className="text-[0.88vw] font-semibold text-gray-800">{budgetConfirm.projectData.projectCategory}</p>
+                    <span className="text-[0.75vw] text-gray-500">
+                      Category
+                    </span>
+                    <p className="text-[0.88vw] font-semibold text-gray-800">
+                      {budgetConfirm.projectData.projectCategory}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2248,14 +2426,19 @@ const Followup = () => {
                 Would you like to enter the budget details for this project now?
               </p>
               <p className="text-[0.8vw] text-gray-500">
-                Clicking <strong className="text-blue-600">Yes, Enter Budget</strong> will take you to Project Budget and open the Add Project form with details pre-filled.
+                Clicking{" "}
+                <strong className="text-blue-600">Yes, Enter Budget</strong>{" "}
+                will take you to Project Budget and open the Add Project form
+                with details pre-filled.
               </p>
             </div>
 
             {/* Footer */}
             <div className="flex justify-end gap-[0.8vw] px-[1.8vw] pb-[1.5vw]">
               <button
-                onClick={() => setBudgetConfirm({ open: false, projectData: null })}
+                onClick={() =>
+                  setBudgetConfirm({ open: false, projectData: null })
+                }
                 className="px-[1.4vw] py-[0.6vw] border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-[0.85vw] font-medium transition cursor-pointer"
               >
                 Later
@@ -2270,6 +2453,27 @@ const Followup = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {isAddModalOpen && (
+        <ClientAddModal
+          isOpen={isAddModalOpen}
+          onClose={() => {
+            setIsAddModalOpen(false);
+            setEditingClient(null);
+            setIsViewOnlyMode(false);
+          }}
+          editData={editingClient}
+          isViewOnly={isViewOnlyMode}
+          onSuccess={() => {
+            fetchClients();
+            fetchCounts();
+          }}
+          fetchClients={() => {
+            fetchClients();
+            fetchCounts();
+          }}
+        />
       )}
 
       {toast && (

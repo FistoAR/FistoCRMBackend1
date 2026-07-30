@@ -48,6 +48,7 @@ import PHworkdone from "./components/ProjectHead/Workdone";
 import MarketingAnalytic from "./components/Management/MarketingAnalytics";
 import AdminManagement from "./components/Management/Management";
 import AdminFollowup from "./components/Management/Followup";
+import ClientMaster from "./components/Management/ClientMaster";
 import MarketingLeeds from "./components/Management/MarketingLeeds";
 import ManagementAnalytics from "./components/Management/ManagementAnalytics";
 import AdminReport from "./components/Management/Report";
@@ -175,6 +176,7 @@ function AppContent() {
                 <Route path="unscheduledTask" element={<UnscheduledTask />} />
                 <Route path="taskCalendar" element={<EmployeeCalendar />} />
                 <Route path="budgets" element={<AdminManagement />} />
+                <Route path="clientsData" element={<ClientMaster />} />
                 <Route path="followup" element={<AdminFollowup />} />
                 <Route path="marketingLeeds" element={<MarketingLeeds />} />
                 <Route path="roleAccess" element={<RoleAccessManagement />} />

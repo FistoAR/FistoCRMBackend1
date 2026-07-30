@@ -11,7 +11,26 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { Users, Phone, PhoneCall, Download, Clock, History, X, ChevronLeft, ChevronRight, UserX, Ban, Filter, User, Mail, Briefcase, Calendar, Copy, Check } from "lucide-react";
+import {
+  Users,
+  Phone,
+  PhoneCall,
+  Download,
+  Clock,
+  History,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  UserX,
+  Ban,
+  Filter,
+  User,
+  Mail,
+  Briefcase,
+  Calendar,
+  Copy,
+  Check,
+} from "lucide-react";
 import ExportToCSV from "../Analytics/ExportToCSV";
 import ExportToPDF from "../Analytics/ExportToPDF";
 import ExportMOM from "../Analytics/ExportMOM";
@@ -173,7 +192,12 @@ const CopyTooltip = ({ text }) => {
       <span className="truncate block cursor-pointer">{text}</span>
       <div className="absolute left-1/2 -translate-x-1/2 bottom-full pb-[0.3vw] hidden group-hover/tooltip:flex flex-col items-center z-[9999] pointer-events-auto filter drop-shadow-lg">
         <div className="bg-slate-900 text-white text-[0.72vw] rounded-lg py-[0.4vw] px-[0.7vw] border border-slate-700/80 flex items-center gap-[0.5vw] whitespace-nowrap max-w-[22vw]">
-          <span className="truncate max-w-[16vw] font-medium text-slate-200" title={text}>{text}</span>
+          <span
+            className="truncate max-w-[16vw] font-medium text-slate-200"
+            title={text}
+          >
+            {text}
+          </span>
           <button
             onClick={handleCopy}
             className="p-[0.2vw] px-[0.4vw] hover:bg-slate-800 rounded transition text-blue-400 hover:text-blue-300 flex items-center gap-[0.2vw] text-[0.7vw] font-semibold cursor-pointer border border-slate-700"
@@ -231,7 +255,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     d.setMonth(d.getMonth() - 1);
     return d.toISOString().split("T")[0];
   });
-  const [toDate, setToDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [toDate, setToDate] = useState(
+    () => new Date().toISOString().split("T")[0],
+  );
 
   // Filters - Detailed report tab
   const [reportFromDate, setReportFromDate] = useState("");
@@ -267,7 +293,10 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [clientHistory, setClientHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyClientInfo, setHistoryClientInfo] = useState({ company: "", customer: "" });
+  const [historyClientInfo, setHistoryClientInfo] = useState({
+    company: "",
+    customer: "",
+  });
 
   const getEmployeeId = () => {
     if (propEmployeeId !== undefined) return propEmployeeId;
@@ -327,15 +356,25 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     if (status === "cancelled") return "Lead Cancelled";
     if (status === "converted") return "Converted / Lead";
     if (status === "droped" || status === "dropped") return "Dropped";
-    return status.split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+    return status
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
 
-  const fetchClientHistory = async (clientId, company = "", customer = "", phone = "") => {
+  const fetchClientHistory = async (
+    clientId,
+    company = "",
+    customer = "",
+    phone = "",
+  ) => {
     try {
       setHistoryClientInfo({ company, customer, phone });
       setHistoryLoading(true);
       setHistoryModalOpen(true);
-      const res = await fetch(`${API_URL}/ManagementFollowups/client/${clientId}`);
+      const res = await fetch(
+        `${API_URL}/Analytics/client-history/${clientId}`,
+      );
       const result = await res.json();
       if (result.success && Array.isArray(result.data)) {
         setClientHistory(result.data);
@@ -372,7 +411,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       if (overviewFromDate) params.append("from_date", overviewFromDate);
       if (overviewToDate) params.append("to_date", overviewToDate);
       if (empId) params.append("employee_id", empId);
-      
+
       const queryString = params.toString();
       if (queryString) {
         url += `?${queryString}`;
@@ -434,7 +473,8 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       const params = new URLSearchParams();
       if (meetingFromDate) params.append("from_date", meetingFromDate);
       if (meetingToDate) params.append("to_date", meetingToDate);
-      if (meetingStatusFilter && meetingStatusFilter !== "all") params.append("status", meetingStatusFilter);
+      if (meetingStatusFilter && meetingStatusFilter !== "all")
+        params.append("status", meetingStatusFilter);
       if (empId) params.append("employee_id", empId);
       const url = `${API_URL}/management/analytics/meetings${params.toString() ? `?${params}` : ""}`;
       const res = await fetch(url);
@@ -495,9 +535,15 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       { name: "Missed Follow Up", color: "#EF4444" },
     ];
     if (!analyticsData?.distribution) {
-      return activeCategories.map((c) => ({ name: c.name, value: 0, color: c.color }));
+      return activeCategories.map((c) => ({
+        name: c.name,
+        value: 0,
+        color: c.color,
+      }));
     }
-    const distMap = new Map(analyticsData.distribution.map((i) => [i.name, i.value]));
+    const distMap = new Map(
+      analyticsData.distribution.map((i) => [i.name, i.value]),
+    );
     return activeCategories.map((c) => ({
       name: c.name,
       value: distMap.get(c.name) || 0,
@@ -516,9 +562,15 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       { name: "Dropped", color: "#6B7280" },
     ];
     if (!analyticsData?.distribution) {
-      return outcomeCategories.map((c) => ({ name: c.name, value: 0, color: c.color }));
+      return outcomeCategories.map((c) => ({
+        name: c.name,
+        value: 0,
+        color: c.color,
+      }));
     }
-    const distMap = new Map(analyticsData.distribution.map((i) => [i.name, i.value]));
+    const distMap = new Map(
+      analyticsData.distribution.map((i) => [i.name, i.value]),
+    );
     return outcomeCategories.map((c) => ({
       name: c.name,
       value: distMap.get(c.name) || 0,
@@ -533,7 +585,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
   const notInterestedCount = useMemo(() => {
     if (!analyticsData?.distribution) return 0;
-    const item = analyticsData.distribution.find(i => i.name === "Not Interested");
+    const item = analyticsData.distribution.find(
+      (i) => i.name === "Not Interested",
+    );
     return item ? item.value : 0;
   }, [analyticsData]);
 
@@ -543,33 +597,53 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       return {
         activeFollowups: [],
         leads: [],
-        cancelledDropped: []
+        cancelledDropped: [],
       };
     }
-    const distMap = new Map(analyticsData.distribution.map(i => [i.name, i.value]));
-    
+    const distMap = new Map(
+      analyticsData.distribution.map((i) => [i.name, i.value]),
+    );
+
     return {
       activeFollowups: [
-        { label: "Not Picking / Busy / Others", count: distMap.get("Not Picking / Busy / Others") || 0 },
+        {
+          label: "Not Picking / Busy / Others",
+          count: distMap.get("Not Picking / Busy / Others") || 0,
+        },
         { label: "In Progress", count: distMap.get("In Progress") || 0 },
-        { label: "Shared Proposal", count: distMap.get("Shared Proposal") || 0 },
+        {
+          label: "Shared Proposal",
+          count: distMap.get("Shared Proposal") || 0,
+        },
         { label: "Meetings", count: distMap.get("Meetings") || 0 },
-        { label: "Missed Follow Up", count: distMap.get("Missed Follow Up") || 0 },
+        {
+          label: "Missed Follow Up",
+          count: distMap.get("Missed Follow Up") || 0,
+        },
       ],
       leads: [
-        { label: "Payment Proposal", count: distMap.get("Payment Proposal") || 0 },
-        { label: "Lead Inprogress", count: distMap.get("Lead Inprogress") || 0 },
+        {
+          label: "Payment Proposal",
+          count: distMap.get("Payment Proposal") || 0,
+        },
+        {
+          label: "Lead Inprogress",
+          count: distMap.get("Lead Inprogress") || 0,
+        },
         { label: "Lead Onboarded", count: distMap.get("Lead Onboarded") || 0 },
       ],
       cancelledDropped: [
         { label: "Lead Cancelled", count: distMap.get("Lead Cancelled") || 0 },
         { label: "Dropped", count: distMap.get("Dropped") || 0 },
-      ]
+      ],
     };
   }, [analyticsData]);
 
   const cancelledDroppedCount = useMemo(() => {
-    return breakdownData.cancelledDropped.reduce((acc, curr) => acc + curr.count, 0);
+    return breakdownData.cancelledDropped.reduce(
+      (acc, curr) => acc + curr.count,
+      0,
+    );
   }, [breakdownData]);
 
   // Filtered Report Data
@@ -610,14 +684,25 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       const matchesStatus =
         !reportStatusFilter ||
         row.status === reportStatusFilter ||
-        (reportStatusFilter === "inprogress" && (row.status === "inProgress" || row.status === "inprogress")) ||
-        (reportStatusFilter === "dropped" && (row.status === "droped" || row.status === "dropped"));
+        (reportStatusFilter === "inprogress" &&
+          (row.status === "inProgress" || row.status === "inprogress")) ||
+        (reportStatusFilter === "dropped" &&
+          (row.status === "droped" || row.status === "dropped"));
 
       return dateOk && matchesSearch && matchesStatus;
     });
-  }, [reportData, reportFromDate, reportToDate, reportSearch, reportStatusFilter]);
+  }, [
+    reportData,
+    reportFromDate,
+    reportToDate,
+    reportSearch,
+    reportStatusFilter,
+  ]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredReportData.length / itemsPerPage));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredReportData.length / itemsPerPage),
+  );
   const paginatedReportData = useMemo(() => {
     const startIdx = (currentPage - 1) * itemsPerPage;
     return filteredReportData.slice(startIdx, startIdx + itemsPerPage);
@@ -634,9 +719,10 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
     const rows = filteredReportData.map((row, index) => ({
       sno: index + 1,
-      date: (parseDate(row.followupDate) || parseDate(row.created_at))
-        ? formatDateFormatted(row.followupDate || row.created_at)
-        : "-",
+      date:
+        parseDate(row.followupDate) || parseDate(row.created_at)
+          ? formatDateFormatted(row.followupDate || row.created_at)
+          : "-",
       company: row.company_name || "-",
       customer: row.customer_name || "-",
       phone: row.phone || "-",
@@ -658,7 +744,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               h.contact_person_phone ? ` (${h.contact_person_phone})` : ""
             }`,
             remarks: h.remarks || "-",
-            nextFollowupDate: h.nextFollowupDate ? formatDateOnly(h.nextFollowupDate) : "-",
+            nextFollowupDate: h.nextFollowupDate
+              ? formatDateOnly(h.nextFollowupDate)
+              : "-",
           })),
         }))
       : null;
@@ -666,7 +754,8 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     const activeFilters = [];
     if (reportFromDate) activeFilters.push(`From: ${reportFromDate}`);
     if (reportToDate) activeFilters.push(`To: ${reportToDate}`);
-    if (reportStatusFilter) activeFilters.push(`Status: ${formatStatus(reportStatusFilter)}`);
+    if (reportStatusFilter)
+      activeFilters.push(`Status: ${formatStatus(reportStatusFilter)}`);
     if (selectedEmployee) {
       const emp = employees.find((e) => e.employee_id === selectedEmployee);
       activeFilters.push(`Employee: ${emp?.employee_name || selectedEmployee}`);
@@ -681,8 +770,30 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
             fileName,
             title: reportTitle,
             titleAlign: "right",
-            headers: [["S.NO", "Date", "Company", "Customer", "Phone", "Location", "Status", "Remarks", "Handled By"]],
-            dataKeys: ["sno", "date", "company", "customer", "phone", "location", "status", "remarks", "handled_by"],
+            headers: [
+              [
+                "S.NO",
+                "Date",
+                "Company",
+                "Customer",
+                "Phone",
+                "Location",
+                "Status",
+                "Remarks",
+                "Handled By",
+              ],
+            ],
+            dataKeys: [
+              "sno",
+              "date",
+              "company",
+              "customer",
+              "phone",
+              "location",
+              "status",
+              "remarks",
+              "handled_by",
+            ],
             filters: activeFilters,
             logoImg,
             withHistory: exportWithHistory,
@@ -744,7 +855,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
             <>
               <div className="flex items-center gap-[0.8vw] bg-gray-50/80 px-[0.8vw] py-[0.35vw] rounded-lg border border-gray-200">
                 <div className="flex items-center gap-[0.4vw]">
-                  <span className="text-[0.78vw] font-medium text-gray-600">From:</span>
+                  <span className="text-[0.78vw] font-medium text-gray-600">
+                    From:
+                  </span>
                   <input
                     type="date"
                     value={overviewFromDate}
@@ -759,7 +872,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   />
                 </div>
                 <div className="flex items-center gap-[0.4vw]">
-                  <span className="text-[0.78vw] font-medium text-gray-600">To:</span>
+                  <span className="text-[0.78vw] font-medium text-gray-600">
+                    To:
+                  </span>
                   <input
                     type="date"
                     value={overviewToDate}
@@ -784,7 +899,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               {/* Employee Selector for Overview */}
               {propEmployeeId === undefined && (
                 <div className="flex items-center gap-[0.5vw]">
-                  <span className="text-[0.8vw] font-medium text-gray-600">Employee:</span>
+                  <span className="text-[0.8vw] font-medium text-gray-600">
+                    Employee:
+                  </span>
                   <select
                     value={selectedEmployee}
                     onChange={(e) => setSelectedEmployee(e.target.value)}
@@ -830,13 +947,20 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 <button
                   onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
                   className={`px-[0.9vw] py-[0.38vw] rounded-lg font-semibold text-[0.78vw] flex items-center gap-[0.4vw] border transition cursor-pointer shadow-xs ${
-                    isFilterPanelOpen || reportFromDate || reportToDate || selectedEmployee || reportStatusFilter
+                    isFilterPanelOpen ||
+                    reportFromDate ||
+                    reportToDate ||
+                    selectedEmployee ||
+                    reportStatusFilter
                       ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
                       : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                   }`}
                 >
                   <Filter size={14} /> Filters
-                  {(reportFromDate || reportToDate || selectedEmployee || reportStatusFilter) && (
+                  {(reportFromDate ||
+                    reportToDate ||
+                    selectedEmployee ||
+                    reportStatusFilter) && (
                     <span className="w-[0.5vw] h-[0.5vw] rounded-full bg-white animate-pulse" />
                   )}
                 </button>
@@ -844,116 +968,135 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 {/* Filter Popup Panel */}
                 {isFilterPanelOpen && (
                   <div className="absolute right-0 top-full mt-[0.5vw] bg-white border border-gray-200 rounded-xl shadow-xl p-[1.2vw] z-50 flex flex-col gap-[1vw] min-w-[22vw]">
-                  <div className="flex items-center justify-between border-b border-gray-100 pb-[0.5vw]">
-                    <span className="text-[0.85vw] font-bold text-gray-800 flex items-center gap-[0.4vw]">
-                      <Filter size={15} className="text-blue-600" /> Filter Options
-                    </span>
-                    <button
-                      onClick={() => setIsFilterPanelOpen(false)}
-                      className="text-gray-400 hover:text-gray-600 transition cursor-pointer"
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-
-                  {/* Status Filter inside panel */}
-                  <div className="flex flex-col gap-[0.4vw]">
-                    <label className="text-[0.78vw] font-semibold text-gray-700">Status:</label>
-                    <select
-                      value={reportStatusFilter}
-                      onChange={(e) => {
-                        setReportStatusFilter(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className="w-full px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-gray-700"
-                    >
-                      <option value="">All Statuses</option>
-                      <option value="first_followup">First Followup</option>
-                      <option value="not_picking">Not Picking / Busy / Others</option>
-                      <option value="not_interested">Not Interested</option>
-                      <option value="inprogress">In Progress</option>
-                      <option value="proposed">Shared Proposal</option>
-                      <option value="meeting">Meetings</option>
-                      <option value="billing">Payment Proposal</option>
-                      <option value="lead">Lead Inprogress</option>
-                      <option value="project_onboard">Lead Onboarded</option>
-                      <option value="cancelled">Lead Cancelled</option>
-                      <option value="dropped">Dropped</option>
-                    </select>
-                  </div>
-
-                  {/* Date Range Options */}
-                  <div className="flex flex-col gap-[0.4vw]">
-                    <label className="text-[0.78vw] font-semibold text-gray-700">Date Range:</label>
-                    <div className="grid grid-cols-2 gap-[0.6vw]">
-                      <div>
-                        <span className="text-[0.7vw] text-gray-500 block mb-[0.1vw]">From Date:</span>
-                        <input
-                          type="date"
-                          value={reportFromDate}
-                          onChange={(e) => {
-                            const newFrom = e.target.value;
-                            setReportFromDate(newFrom);
-                            if (reportToDate && reportToDate < newFrom) {
-                              setReportToDate("");
-                            }
-                            setCurrentPage(1);
-                          }}
-                          className="w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-[0.7vw] text-gray-500 block mb-[0.1vw]">To Date:</span>
-                        <input
-                          type="date"
-                          value={reportToDate}
-                          min={reportFromDate || undefined}
-                          onChange={(e) => {
-                            setReportToDate(e.target.value);
-                            setCurrentPage(1);
-                          }}
-                          className="w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
-                        />
-                      </div>
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-[0.5vw]">
+                      <span className="text-[0.85vw] font-bold text-gray-800 flex items-center gap-[0.4vw]">
+                        <Filter size={15} className="text-blue-600" /> Filter
+                        Options
+                      </span>
+                      <button
+                        onClick={() => setIsFilterPanelOpen(false)}
+                        className="text-gray-400 hover:text-gray-600 transition cursor-pointer"
+                      >
+                        <X size={15} />
+                      </button>
                     </div>
-                  </div>
 
-                  {/* Employee Filter inside panel */}
-                  {propEmployeeId === undefined && (
+                    {/* Status Filter inside panel */}
                     <div className="flex flex-col gap-[0.4vw]">
-                      <label className="text-[0.78vw] font-semibold text-gray-700">Employee:</label>
+                      <label className="text-[0.78vw] font-semibold text-gray-700">
+                        Status:
+                      </label>
                       <select
-                        value={selectedEmployee}
-                        onChange={(e) => setSelectedEmployee(e.target.value)}
+                        value={reportStatusFilter}
+                        onChange={(e) => {
+                          setReportStatusFilter(e.target.value);
+                          setCurrentPage(1);
+                        }}
                         className="w-full px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-gray-700"
                       >
-                        <option value="">All Employees</option>
-                        {employees.map((emp) => (
-                          <option key={emp.employee_id} value={emp.employee_id}>
-                            {emp.employee_name} ({emp.employee_id})
-                          </option>
-                        ))}
+                        <option value="">All Statuses</option>
+                        <option value="first_followup">First Followup</option>
+                        <option value="not_picking">
+                          Not Picking / Busy / Others
+                        </option>
+                        <option value="not_interested">Not Interested</option>
+                        <option value="inprogress">In Progress</option>
+                        <option value="proposed">Shared Proposal</option>
+                        <option value="meeting">Meetings</option>
+                        <option value="billing">Payment Proposal</option>
+                        <option value="lead">Lead Inprogress</option>
+                        <option value="project_onboard">Lead Onboarded</option>
+                        <option value="cancelled">Lead Cancelled</option>
+                        <option value="dropped">Dropped</option>
                       </select>
                     </div>
-                  )}
 
-                  {/* Reset Panel Filters */}
-                  {(reportFromDate || reportToDate || selectedEmployee || reportStatusFilter) && (
-                    <button
-                      onClick={() => {
-                        setReportFromDate("");
-                        setReportToDate("");
-                        setSelectedEmployee("");
-                        setReportStatusFilter("");
-                        setCurrentPage(1);
-                      }}
-                      className="w-full py-[0.35vw] text-[0.75vw] font-semibold text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition text-center cursor-pointer border border-red-100"
-                    >
-                      Clear All Filters
-                    </button>
-                  )}
-                </div>
-              )}
+                    {/* Date Range Options */}
+                    <div className="flex flex-col gap-[0.4vw]">
+                      <label className="text-[0.78vw] font-semibold text-gray-700">
+                        Date Range:
+                      </label>
+                      <div className="grid grid-cols-2 gap-[0.6vw]">
+                        <div>
+                          <span className="text-[0.7vw] text-gray-500 block mb-[0.1vw]">
+                            From Date:
+                          </span>
+                          <input
+                            type="date"
+                            value={reportFromDate}
+                            onChange={(e) => {
+                              const newFrom = e.target.value;
+                              setReportFromDate(newFrom);
+                              if (reportToDate && reportToDate < newFrom) {
+                                setReportToDate("");
+                              }
+                              setCurrentPage(1);
+                            }}
+                            className="w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-[0.7vw] text-gray-500 block mb-[0.1vw]">
+                            To Date:
+                          </span>
+                          <input
+                            type="date"
+                            value={reportToDate}
+                            min={reportFromDate || undefined}
+                            onChange={(e) => {
+                              setReportToDate(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-md text-[0.75vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Employee Filter inside panel */}
+                    {propEmployeeId === undefined && (
+                      <div className="flex flex-col gap-[0.4vw]">
+                        <label className="text-[0.78vw] font-semibold text-gray-700">
+                          Employee:
+                        </label>
+                        <select
+                          value={selectedEmployee}
+                          onChange={(e) => setSelectedEmployee(e.target.value)}
+                          className="w-full px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-gray-700"
+                        >
+                          <option value="">All Employees</option>
+                          {employees.map((emp) => (
+                            <option
+                              key={emp.employee_id}
+                              value={emp.employee_id}
+                            >
+                              {emp.employee_name} ({emp.employee_id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Reset Panel Filters */}
+                    {(reportFromDate ||
+                      reportToDate ||
+                      selectedEmployee ||
+                      reportStatusFilter) && (
+                      <button
+                        onClick={() => {
+                          setReportFromDate("");
+                          setReportToDate("");
+                          setSelectedEmployee("");
+                          setReportStatusFilter("");
+                          setCurrentPage(1);
+                        }}
+                        className="w-full py-[0.35vw] text-[0.75vw] font-semibold text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition text-center cursor-pointer border border-red-100"
+                      >
+                        Clear All Filters
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -962,19 +1105,24 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
           {subTab === "meetings" && (
             <div className="flex items-center gap-[0.7vw]">
               <div className="flex items-center gap-[0.4vw]">
-                <span className="text-[0.78vw] font-medium text-gray-600">From:</span>
+                <span className="text-[0.78vw] font-medium text-gray-600">
+                  From:
+                </span>
                 <input
                   type="date"
                   value={meetingFromDate}
                   onChange={(e) => {
                     setMeetingFromDate(e.target.value);
-                    if (meetingToDate && meetingToDate < e.target.value) setMeetingToDate("");
+                    if (meetingToDate && meetingToDate < e.target.value)
+                      setMeetingToDate("");
                   }}
                   className="px-[0.6vw] py-[0.25vw] border border-gray-300 rounded-md text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                 />
               </div>
               <div className="flex items-center gap-[0.4vw]">
-                <span className="text-[0.78vw] font-medium text-gray-600">To:</span>
+                <span className="text-[0.78vw] font-medium text-gray-600">
+                  To:
+                </span>
                 <input
                   type="date"
                   value={meetingToDate}
@@ -1000,7 +1148,10 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 onChange={(e) => setMeetingSearch(e.target.value)}
                 className="px-[0.8vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white w-[15vw]"
               />
-              {(meetingFromDate || meetingToDate || meetingStatusFilter !== "all" || meetingSearch) && (
+              {(meetingFromDate ||
+                meetingToDate ||
+                meetingStatusFilter !== "all" ||
+                meetingSearch) && (
                 <button
                   onClick={() => {
                     setMeetingFromDate("");
@@ -1020,8 +1171,8 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
       {/* Main Contents Area */}
       <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden flex flex-col  min-h-0">
-        {subTab === "overview" && (
-          loading ? (
+        {subTab === "overview" &&
+          (loading ? (
             <div className="flex-1 flex justify-center items-center">
               <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
             </div>
@@ -1030,17 +1181,54 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               {/* Cards grid */}
               <div className="grid grid-cols-6 gap-[1vw] flex-shrink-0">
                 {[
-                  { title: "Total Client Data", value: totalCustomers, color: "bg-blue-50 text-blue-600 border-blue-200", breakdown: null },
-                  { title: "Fresh Data", value: freshDataCount, color: "bg-gray-50 text-gray-600 border-gray-200", breakdown: null },
-                  { title: "Active Followups", value: followupsCount, color: "bg-purple-50 text-purple-600 border-purple-200", breakdown: breakdownData.activeFollowups },
-                  { title: "Not Interested", value: notInterestedCount, color: "bg-amber-50 text-amber-600 border-amber-200", breakdown: null },
-                  { title: "Leads (Payment/Onboard)", value: leadsCount, color: "bg-emerald-50 text-emerald-600 border-emerald-200", breakdown: breakdownData.leads },
-                  { title: "Cancelled / Dropped", value: cancelledDroppedCount, color: "bg-rose-50 text-rose-600 border-rose-200", breakdown: breakdownData.cancelledDropped }
+                  {
+                    title: "Total Client Data",
+                    value: totalCustomers,
+                    color: "bg-blue-50 text-blue-600 border-blue-200",
+                    breakdown: null,
+                  },
+                  {
+                    title: "Fresh Data",
+                    value: freshDataCount,
+                    color: "bg-gray-50 text-gray-600 border-gray-200",
+                    breakdown: null,
+                  },
+                  {
+                    title: "Active Followups",
+                    value: followupsCount,
+                    color: "bg-purple-50 text-purple-600 border-purple-200",
+                    breakdown: breakdownData.activeFollowups,
+                  },
+                  {
+                    title: "Not Interested",
+                    value: notInterestedCount,
+                    color: "bg-amber-50 text-amber-600 border-amber-200",
+                    breakdown: null,
+                  },
+                  {
+                    title: "Leads (Payment/Onboard)",
+                    value: leadsCount,
+                    color: "bg-emerald-50 text-emerald-600 border-emerald-200",
+                    breakdown: breakdownData.leads,
+                  },
+                  {
+                    title: "Cancelled / Dropped",
+                    value: cancelledDroppedCount,
+                    color: "bg-rose-50 text-rose-600 border-rose-200",
+                    breakdown: breakdownData.cancelledDropped,
+                  },
                 ].map((card, idx) => (
-                  <div key={idx} className={`group relative p-[0.8vw] rounded-xl border flex flex-col justify-between ${card.color} cursor-pointer`}>
+                  <div
+                    key={idx}
+                    className={`group relative p-[0.8vw] rounded-xl border flex flex-col justify-between ${card.color} cursor-pointer`}
+                  >
                     <div className="space-y-[0.3vw]">
-                      <p className="text-[1.7vw] font-bold leading-none mb-[0.2vw] text-left">{card.value}</p>
-                      <span className="text-[0.75vw] font-semibold text-gray-500 block leading-tight text-right">{card.title}</span>
+                      <p className="text-[1.7vw] font-bold leading-none mb-[0.2vw] text-left">
+                        {card.value}
+                      </p>
+                      <span className="text-[0.75vw] font-semibold text-gray-500 block leading-tight text-right">
+                        {card.title}
+                      </span>
                     </div>
 
                     {/* Hover Popover Breakdown for Grouped Cards */}
@@ -1050,9 +1238,14 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                           {card.title} Breakdown:
                         </div>
                         {card.breakdown.map((item, bIdx) => (
-                          <div key={bIdx} className="flex justify-between items-center gap-[0.5vw]">
+                          <div
+                            key={bIdx}
+                            className="flex justify-between items-center gap-[0.5vw]"
+                          >
                             <span className="text-gray-300">{item.label}</span>
-                            <span className="font-bold text-white">{item.count}</span>
+                            <span className="font-bold text-white">
+                              {item.count}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -1071,54 +1264,80 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="w-full h-full flex items-center justify-evenly gap-[1.5vw]">
                       <div className="w-[17vw] h-[17vw]">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={
-                                  activeFollowupsPieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? [{ name: "No Data", value: 1, color: "#E5E7EB" }]
-                                    : activeFollowupsPieData
-                                }
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                label={
-                                  activeFollowupsPieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? false
-                                    : renderPercentLabel
-                                }
-                                outerRadius="90%"
-                                fill="#8884d8"
-                                dataKey="value"
-                              >
-                                {(
-                                  activeFollowupsPieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? [{ name: "No Data", value: 1, color: "#E5E7EB" }]
-                                    : activeFollowupsPieData
-                                ).map((entry, index) => (
-                                  <Cell key={`active-cell-${index}`} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip content={<CustomTooltip />} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="flex flex-col gap-[1vw]">
-                          {activeFollowupsPieData.map((entry, index) => (
-                            <div key={index} className="flex items-center gap-[0.6vw]">
-                              <div
-                                className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
-                                style={{ backgroundColor: entry.color }}
-                              >
-                                {entry.value}
-                              </div>
-                              <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
-                                {entry.name}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={
+                                activeFollowupsPieData.reduce(
+                                  (acc, curr) => acc + curr.value,
+                                  0,
+                                ) === 0
+                                  ? [
+                                      {
+                                        name: "No Data",
+                                        value: 1,
+                                        color: "#E5E7EB",
+                                      },
+                                    ]
+                                  : activeFollowupsPieData
+                              }
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={
+                                activeFollowupsPieData.reduce(
+                                  (acc, curr) => acc + curr.value,
+                                  0,
+                                ) === 0
+                                  ? false
+                                  : renderPercentLabel
+                              }
+                              outerRadius="90%"
+                              fill="#8884d8"
+                              dataKey="value"
+                            >
+                              {(activeFollowupsPieData.reduce(
+                                (acc, curr) => acc + curr.value,
+                                0,
+                              ) === 0
+                                ? [
+                                    {
+                                      name: "No Data",
+                                      value: 1,
+                                      color: "#E5E7EB",
+                                    },
+                                  ]
+                                : activeFollowupsPieData
+                              ).map((entry, index) => (
+                                <Cell
+                                  key={`active-cell-${index}`}
+                                  fill={entry.color}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip content={<CustomTooltip />} />
+                          </PieChart>
+                        </ResponsiveContainer>
                       </div>
+                      <div className="flex flex-col gap-[1vw]">
+                        {activeFollowupsPieData.map((entry, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center gap-[0.6vw]"
+                          >
+                            <div
+                              className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
+                              style={{ backgroundColor: entry.color }}
+                            >
+                              {entry.value}
+                            </div>
+                            <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
+                              {entry.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1129,65 +1348,89 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   </h4>
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="w-full h-full flex items-center justify-evenly gap-[1.5vw]">
-                        <div className="w-[17vw] h-[17vw]">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={
-                                  conversionOutcomePieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? [{ name: "No Data", value: 1, color: "#E5E7EB" }]
-                                    : conversionOutcomePieData
-                                }
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                label={
-                                  conversionOutcomePieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? false
-                                    : renderPercentLabel
-                                }
-                                outerRadius="90%"
-                                fill="#8884d8"
-                                dataKey="value"
-                              >
-                                {(
-                                  conversionOutcomePieData.reduce((acc, curr) => acc + curr.value, 0) === 0
-                                    ? [{ name: "No Data", value: 1, color: "#E5E7EB" }]
-                                    : conversionOutcomePieData
-                                ).map((entry, index) => (
-                                  <Cell key={`outcome-cell-${index}`} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip content={<CustomTooltip />} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="flex flex-col gap-[1vw]">
-                          {conversionOutcomePieData.map((entry, index) => (
-                            <div key={index} className="flex items-center gap-[0.6vw]">
-                              <div
-                                className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
-                                style={{ backgroundColor: entry.color }}
-                              >
-                                {entry.value}
-                              </div>
-                              <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
-                                {entry.name}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                      <div className="w-[17vw] h-[17vw]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={
+                                conversionOutcomePieData.reduce(
+                                  (acc, curr) => acc + curr.value,
+                                  0,
+                                ) === 0
+                                  ? [
+                                      {
+                                        name: "No Data",
+                                        value: 1,
+                                        color: "#E5E7EB",
+                                      },
+                                    ]
+                                  : conversionOutcomePieData
+                              }
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={
+                                conversionOutcomePieData.reduce(
+                                  (acc, curr) => acc + curr.value,
+                                  0,
+                                ) === 0
+                                  ? false
+                                  : renderPercentLabel
+                              }
+                              outerRadius="90%"
+                              fill="#8884d8"
+                              dataKey="value"
+                            >
+                              {(conversionOutcomePieData.reduce(
+                                (acc, curr) => acc + curr.value,
+                                0,
+                              ) === 0
+                                ? [
+                                    {
+                                      name: "No Data",
+                                      value: 1,
+                                      color: "#E5E7EB",
+                                    },
+                                  ]
+                                : conversionOutcomePieData
+                              ).map((entry, index) => (
+                                <Cell
+                                  key={`outcome-cell-${index}`}
+                                  fill={entry.color}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip content={<CustomTooltip />} />
+                          </PieChart>
+                        </ResponsiveContainer>
                       </div>
+                      <div className="flex flex-col gap-[1vw]">
+                        {conversionOutcomePieData.map((entry, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center gap-[0.6vw]"
+                          >
+                            <div
+                              className="w-[1.4vw] h-[1.4vw] rounded-full flex items-center justify-center text-white text-[0.7vw] font-bold shadow-xs flex-shrink-0"
+                              style={{ backgroundColor: entry.color }}
+                            >
+                              {entry.value}
+                            </div>
+                            <span className="text-[0.78vw] text-gray-700 font-medium whitespace-nowrap">
+                              {entry.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          )
-        )}
+          ))}
 
         {subTab === "report" && (
           <div className="flex-1 flex flex-col min-h-0  p-[.5vw]">
-
             {/* Table wrapper */}
             <div className="flex-1 border border-gray-200 rounded-xl overflow-visible flex flex-col min-h-0 bg-white shadow-sm">
               <div className="flex-1 overflow-y-auto overflow-x-visible">
@@ -1203,26 +1446,54 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   <table className="w-full table-fixed border-collapse">
                     <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
                       <tr>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3.5vw]">S.No</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">Date</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[11vw]">Company</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">Customer</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">Phone</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">Location</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">Status</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200">Remarks</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">Handled By</th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.8vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">Action</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3.5vw]">
+                          S.No
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                          Date
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[11vw]">
+                          Company
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                          Customer
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                          Phone
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                          Location
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                          Status
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                          Remarks
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.8vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                          Handled By
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.8vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">
+                          Action
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {paginatedReportData.map((row, idx) => {
-                        const serialNumber = (currentPage - 1) * itemsPerPage + idx + 1;
+                        const serialNumber =
+                          (currentPage - 1) * itemsPerPage + idx + 1;
                         return (
-                          <tr key={idx} className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30">
-                            <td className="px-[0.6vw] py-[0.8vw] text-[0.8vw] text-gray-800 border-r border-gray-200">{serialNumber}</td>
+                          <tr
+                            key={idx}
+                            className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30"
+                          >
+                            <td className="px-[0.6vw] py-[0.8vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
+                              {serialNumber}
+                            </td>
                             <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-850 border-r border-gray-200 truncate">
-                              {formatDateFormatted(row.followupDate || row.created_at)}
+                              {formatDateFormatted(
+                                row.followupDate || row.created_at,
+                              )}
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 font-semibold border-r border-gray-200">
                               <CopyTooltip text={row.company_name} />
@@ -1237,13 +1508,17 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                               <CopyTooltip text={row.location} />
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] border-r border-gray-200">
-                              <span className={`px-[0.5vw] py-[0.3vw] rounded-full text-[0.7vw] font-semibold ${
-                                row.status?.includes("onboard") || row.status === "lead"
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : row.status?.includes("interested") || row.status === "droped"
-                                  ? "bg-red-50 text-red-700 border border-red-200"
-                                  : "bg-blue-50 text-blue-700 border border-blue-200"
-                              }`}>
+                              <span
+                                className={`px-[0.5vw] py-[0.3vw] rounded-full text-[0.7vw] font-semibold ${
+                                  row.status?.includes("onboard") ||
+                                  row.status === "lead"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : row.status?.includes("interested") ||
+                                        row.status === "droped"
+                                      ? "bg-red-50 text-red-700 border border-red-200"
+                                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                                }`}
+                              >
                                 {formatStatus(row.status)}
                               </span>
                             </td>
@@ -1251,11 +1526,20 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                               <CopyTooltip text={row.remarks} />
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] text-[0.8vw] text-gray-800 border-r border-gray-200">
-                              <CopyTooltip text={row.employee_name || row.employee_id} />
+                              <CopyTooltip
+                                text={row.employee_name || row.employee_id}
+                              />
                             </td>
                             <td className="px-[0.6vw] py-[0.3vw] text-center">
                               <button
-                                onClick={() => fetchClientHistory(row.clientID, row.company_name, row.customer_name, row.phone)}
+                                onClick={() =>
+                                  fetchClientHistory(
+                                    row.clientID,
+                                    row.company_name,
+                                    row.customer_name,
+                                    row.phone,
+                                  )
+                                }
                                 className="text-blue-600 hover:text-blue-800 font-semibold text-[0.8vw] flex items-center justify-center gap-[0.2vw] mx-auto hover:underline cursor-pointer"
                               >
                                 <History size={14} /> History
@@ -1274,8 +1558,11 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 <div className="flex items-center justify-between px-[1vw] py-[0.5vw] border-t border-gray-200 flex-shrink-0 bg-gray-50">
                   <div className="text-[0.78vw] text-gray-600">
                     Showing {itemsPerPage * (currentPage - 1) + 1} to{" "}
-                    {Math.min(itemsPerPage * currentPage, filteredReportData.length)} of{" "}
-                    {filteredReportData.length} entries
+                    {Math.min(
+                      itemsPerPage * currentPage,
+                      filteredReportData.length,
+                    )}{" "}
+                    of {filteredReportData.length} entries
                   </div>
                   <div className="flex items-center gap-[0.4vw]">
                     <button
@@ -1289,7 +1576,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                       Page {currentPage} of {totalPages}
                     </span>
                     <button
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      onClick={() =>
+                        setCurrentPage((p) => Math.min(totalPages, p + 1))
+                      }
                       disabled={currentPage === totalPages}
                       className="px-[0.8vw] py-[0.4vw] bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-[0.78vw] font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center"
                     >
@@ -1303,134 +1592,182 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
         )}
 
         {/* ===== Meetings Tab ===== */}
-        {subTab === "meetings" && (() => {
-          const filteredMeetings = meetingsData.filter((m) => {
-            if (!meetingSearch) return true;
-            const q = meetingSearch.toLowerCase();
+        {subTab === "meetings" &&
+          (() => {
+            const filteredMeetings = meetingsData.filter((m) => {
+              if (!meetingSearch) return true;
+              const q = meetingSearch.toLowerCase();
+              return (
+                m.title?.toLowerCase().includes(q) ||
+                m.company_name?.toLowerCase().includes(q) ||
+                m.customer_name?.toLowerCase().includes(q) ||
+                m.contact_person_name?.toLowerCase().includes(q) ||
+                m.type?.toLowerCase().includes(q)
+              );
+            });
+
             return (
-              m.title?.toLowerCase().includes(q) ||
-              m.company_name?.toLowerCase().includes(q) ||
-              m.customer_name?.toLowerCase().includes(q) ||
-              m.contact_person_name?.toLowerCase().includes(q) ||
-              m.type?.toLowerCase().includes(q)
-            );
-          });
+              <div className="flex-1 flex flex-col min-h-0 p-[0.5vw]">
+                <div className="flex-1 border border-gray-200 rounded-xl overflow-hidden flex flex-col min-h-0 bg-white shadow-sm">
+                  <div className="flex-1 overflow-y-auto overflow-x-auto">
+                    {meetingsLoading ? (
+                      <div className="h-full flex justify-center items-center">
+                        <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
+                      </div>
+                    ) : filteredMeetings.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-gray-500 text-[0.9vw]">
+                        No meetings found
+                      </div>
+                    ) : (
+                      <table className="w-full border-collapse">
+                        <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
+                          <tr>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3vw]">
+                              S.No
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Title
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                              Date & Time
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                              Type
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Company
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Customer
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Contact Person
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">
+                              Location
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">
+                              Status
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                              Handled By
+                            </th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">
+                              Action
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {filteredMeetings.map((m, idx) => {
+                            const statusStyles =
+                              m.status === "completed"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : m.status === "cancelled"
+                                  ? "bg-red-50 text-red-700 border border-red-200"
+                                  : "bg-blue-50 text-blue-700 border border-blue-200";
 
-          return (
-            <div className="flex-1 flex flex-col min-h-0 p-[0.5vw]">
-              <div className="flex-1 border border-gray-200 rounded-xl overflow-hidden flex flex-col min-h-0 bg-white shadow-sm">
-                <div className="flex-1 overflow-y-auto overflow-x-auto">
-                  {meetingsLoading ? (
-                    <div className="h-full flex justify-center items-center">
-                      <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
-                    </div>
-                  ) : filteredMeetings.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-gray-500 text-[0.9vw]">
-                      No meetings found
-                    </div>
-                  ) : (
-                    <table className="w-full border-collapse">
-                      <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
-                        <tr>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3vw]">S.No</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Title</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Date & Time</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Type</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Company</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Customer</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Contact Person</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Location</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">Status</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Handled By</th>
-                          <th className="px-[0.5vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {filteredMeetings.map((m, idx) => {
-                          const statusStyles =
-                            m.status === "completed"
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : m.status === "cancelled"
-                              ? "bg-red-50 text-red-700 border border-red-200"
-                              : "bg-blue-50 text-blue-700 border border-blue-200";
+                            const meetingDate = m.date
+                              ? new Date(m.date).toLocaleDateString("en-GB")
+                              : "-";
 
-                          const meetingDate = m.date
-                            ? new Date(m.date).toLocaleDateString("en-GB")
-                            : "-";
-
-                          return (
-                            <tr key={m.id} className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30">
-                              <td className="px-[0.5vw] py-[0.5vw] text-[0.78vw] text-gray-800 border-r border-gray-200">{idx + 1}</td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
-                                <CopyTooltip text={m.title} />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200 whitespace-nowrap">
-                                <div>{meetingDate}</div>
-                                <div className="text-[0.7vw] text-gray-500">{m.time || ""}</div>
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">{m.type || "-"}</td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                                <CopyTooltip text={m.company_name} />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                                <CopyTooltip text={m.customer_name} />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                                <CopyTooltip
-                                  text={
-                                    m.contact_person_name && m.contact_person_name !== "-"
-                                      ? `${m.contact_person_name}${m.contact_person_phone && m.contact_person_phone !== "-" ? ` (${m.contact_person_phone})` : ""}`
-                                      : "-"
-                                  }
-                                />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
-                                <CopyTooltip text={m.meeting_location && m.meeting_location !== "-" ? m.meeting_location : m.location} />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] border-r border-gray-200">
-                                <span className={`px-[0.45vw] py-[0.2vw] rounded-full text-[0.7vw] font-semibold ${statusStyles}`}>
-                                  {m.status ? m.status.charAt(0).toUpperCase() + m.status.slice(1) : "-"}
-                                </span>
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
-                                <CopyTooltip text={m.employee_name} />
-                              </td>
-                              <td className="px-[0.5vw] py-[0.4vw] text-center">
-                                {m.status === "completed" && (
-                                  <button
-                                    onClick={() => {
-                                      const exporter = new ExportMOM();
-                                      const img = new Image();
-                                      img.crossOrigin = "Anonymous";
-                                      img.src = FistoLogo;
-                                      img.onload = () => exporter.export(m, img);
-                                      img.onerror = () => exporter.export(m, null);
-                                    }}
-                                    className="px-[0.5vw] py-[0.25vw] bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[0.7vw] font-semibold flex items-center gap-[0.2vw] mx-auto cursor-pointer whitespace-nowrap"
+                            return (
+                              <tr
+                                key={m.id}
+                                className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30"
+                              >
+                                <td className="px-[0.5vw] py-[0.5vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                                  {idx + 1}
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
+                                  <CopyTooltip text={m.title} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200 whitespace-nowrap">
+                                  <div>{meetingDate}</div>
+                                  <div className="text-[0.7vw] text-gray-500">
+                                    {m.time || ""}
+                                  </div>
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                                  {m.type || "-"}
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                                  <CopyTooltip text={m.company_name} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                                  <CopyTooltip text={m.customer_name} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                                  <CopyTooltip
+                                    text={
+                                      m.contact_person_name &&
+                                      m.contact_person_name !== "-"
+                                        ? `${m.contact_person_name}${m.contact_person_phone && m.contact_person_phone !== "-" ? ` (${m.contact_person_phone})` : ""}`
+                                        : "-"
+                                    }
+                                  />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                                  <CopyTooltip
+                                    text={
+                                      m.meeting_location &&
+                                      m.meeting_location !== "-"
+                                        ? m.meeting_location
+                                        : m.location
+                                    }
+                                  />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] border-r border-gray-200">
+                                  <span
+                                    className={`px-[0.45vw] py-[0.2vw] rounded-full text-[0.7vw] font-semibold ${statusStyles}`}
                                   >
-                                    <Download size={11} /> MOM
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                    {m.status
+                                      ? m.status.charAt(0).toUpperCase() +
+                                        m.status.slice(1)
+                                      : "-"}
+                                  </span>
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                                  <CopyTooltip text={m.employee_name} />
+                                </td>
+                                <td className="px-[0.5vw] py-[0.4vw] text-center">
+                                  {m.status === "completed" && (
+                                    <button
+                                      onClick={() => {
+                                        const exporter = new ExportMOM();
+                                        const img = new Image();
+                                        img.crossOrigin = "Anonymous";
+                                        img.src = FistoLogo;
+                                        img.onload = () =>
+                                          exporter.export(m, img);
+                                        img.onerror = () =>
+                                          exporter.export(m, null);
+                                      }}
+                                      className="px-[0.5vw] py-[0.25vw] bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[0.7vw] font-semibold flex items-center gap-[0.2vw] mx-auto cursor-pointer whitespace-nowrap"
+                                    >
+                                      <Download size={11} /> MOM
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  {/* Footer Row Count */}
+                  {!meetingsLoading && filteredMeetings.length > 0 && (
+                    <div className="px-[1vw] py-[0.5vw] border-t border-gray-200 bg-gray-50 flex-shrink-0">
+                      <span className="text-[0.78vw] text-gray-600">
+                        Total: <strong>{filteredMeetings.length}</strong>{" "}
+                        meeting{filteredMeetings.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
                   )}
                 </div>
-                {/* Footer Row Count */}
-                {!meetingsLoading && filteredMeetings.length > 0 && (
-                  <div className="px-[1vw] py-[0.5vw] border-t border-gray-200 bg-gray-50 flex-shrink-0">
-                    <span className="text-[0.78vw] text-gray-600">
-                      Total: <strong>{filteredMeetings.length}</strong> meeting{filteredMeetings.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                )}
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
       </div>
 
       {/* History Modal */}
@@ -1468,7 +1805,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               ) : (
                 <div className="relative pl-[2vw] border-l-2 border-blue-200 ml-[1vw] space-y-[1.5vw] py-[0.5vw]">
                   {clientHistory.map((history, idx) => {
-                    const rowDate = formatDateFormatted(history.followupDate || history.created_at);
+                    const rowDate = formatDateFormatted(
+                      history.followupDate || history.created_at,
+                    );
                     const contactName = history.contact_person_name;
                     const contactPhone = history.contact_person_phone;
 
@@ -1476,18 +1815,24 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                       <div key={idx} className="relative">
                         {/* Dot badge */}
                         <div className="absolute -left-[2.7vw] top-[0.2vw] w-[1.2vw] h-[1.2vw] rounded-full bg-blue-600 border-[3px] border-white flex items-center justify-center shadow-sm" />
-                        
+
                         <div className="bg-white p-[1vw] rounded-xl border border-gray-200 shadow-sm flex flex-col gap-[0.4vw]">
                           <div className="flex justify-between items-center">
                             <div className="flex items-center gap-[0.4vw]">
-                              <span className="text-[0.78vw] font-semibold text-gray-700">Status:</span>
-                              <span className={`px-[0.5vw] py-[0.1vw] rounded-full text-[0.7vw] font-semibold ${
-                                history.status?.includes("onboard") || history.status === "lead"
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : history.status?.includes("interested") || history.status === "droped"
-                                  ? "bg-red-50 text-red-700 border border-red-200"
-                                  : "bg-blue-50 text-blue-700 border border-blue-200"
-                              }`}>
+                              <span className="text-[0.78vw] font-semibold text-gray-700">
+                                Status:
+                              </span>
+                              <span
+                                className={`px-[0.5vw] py-[0.1vw] rounded-full text-[0.7vw] font-semibold ${
+                                  history.status?.includes("onboard") ||
+                                  history.status === "lead"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : history.status?.includes("interested") ||
+                                        history.status === "droped"
+                                      ? "bg-red-50 text-red-700 border border-red-200"
+                                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                                }`}
+                              >
                                 {formatStatus(history.status)}
                               </span>
                             </div>
@@ -1497,21 +1842,27 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                           </div>
 
                           <div className="text-[0.78vw] text-gray-600 font-medium">
-                            <span className="font-semibold text-gray-700">Contacted Person: </span>
+                            <span className="font-semibold text-gray-700">
+                              Contacted Person:{" "}
+                            </span>
                             {contactName || historyClientInfo.customer || "-"}
-                            {(contactPhone || historyClientInfo.phone) && (contactPhone || historyClientInfo.phone) !== "-"
+                            {(contactPhone || historyClientInfo.phone) &&
+                            (contactPhone || historyClientInfo.phone) !== "-"
                               ? ` (${contactPhone || historyClientInfo.phone})`
                               : ""}
                           </div>
 
                           <div className="text-[0.82vw] text-gray-700 font-medium mt-[0.1vw]">
-                            <span className="font-semibold text-gray-700">Remarks: </span>
+                            <span className="font-semibold text-gray-700">
+                              Remarks:{" "}
+                            </span>
                             {history.remarks || "No remarks entered"}
                           </div>
 
                           {history.nextFollowupDate && (
                             <div className="text-[0.78vw] font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 rounded px-[0.5vw] py-[0.2vw] mt-[0.3vw] self-start">
-                              Next Followup: {formatDateOnly(history.nextFollowupDate)}
+                              Next Followup:{" "}
+                              {formatDateOnly(history.nextFollowupDate)}
                             </div>
                           )}
                         </div>
@@ -1550,7 +1901,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               >
                 <div
                   className={`w-[1.1vw] h-[1.1vw] rounded-full border-2 flex items-center justify-center ${
-                    exportFormat === "pdf" ? "border-blue-600 bg-white" : "border-gray-300"
+                    exportFormat === "pdf"
+                      ? "border-blue-600 bg-white"
+                      : "border-gray-300"
                   }`}
                 >
                   {exportFormat === "pdf" && (
@@ -1567,7 +1920,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               >
                 <div
                   className={`w-[1.1vw] h-[1.1vw] rounded-full border-2 flex items-center justify-center ${
-                    exportFormat === "excel" ? "border-blue-600 bg-white" : "border-gray-300"
+                    exportFormat === "excel"
+                      ? "border-blue-600 bg-white"
+                      : "border-gray-300"
                   }`}
                 >
                   {exportFormat === "excel" && (
@@ -1591,7 +1946,9 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                       : "border-gray-300 bg-white"
                   }`}
                 >
-                  {exportWithHistory && <Check size={13} className="stroke-[3]" />}
+                  {exportWithHistory && (
+                    <Check size={13} className="stroke-[3]" />
+                  )}
                 </div>
                 With History
               </label>

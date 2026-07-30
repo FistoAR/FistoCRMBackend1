@@ -295,7 +295,8 @@ const getMenuConfig = () => ({
   ],
   projectHead: [{ path: "/workdone", icon: AddReportIcon, label: "Work Done" }],
   admin: [
-    { path: "/followup", icon: CallsIcon, label: "Followup's" },
+    { path: "/clientsData", icon: CallsIcon, label: "Client's Data" },
+    { path: "/followup", icon: CallsIcon, label: "Followups & Meetings" },
     { path: "/managementAnalytics", icon: AnalyticsIcon, label: "Analytics" },
     { path: "/budgets", icon: AddReportIcon, label: "Budget's" },
     { path: "/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
@@ -413,7 +414,8 @@ export default function Sidebar() {
   // Helper to map original labels to standard UI text
   const getDisplayLabel = (label) => {
     if (label === "Calls") return "Calls";
-    if (["Followup's", "Followups"].includes(label)) return "Followup's";
+    if (["Client's Data", "Clients Data"].includes(label)) return "Client's Data";
+    if (["Followup's", "Followups", "Followups & Meetings"].includes(label)) return "Followups & Meetings";
     if (label === "Management" || label === "Budgets" || label === "Budget's")
       return "Budget's";
     if (label === "Marketing Leeds" || label === "Marketing Leads")
@@ -504,6 +506,8 @@ export default function Sidebar() {
       return allowedPaths.some(
         (p) =>
           p === item.path ||
+          (p === "/followup" && item.path === "/clientsData") ||
+          (p === "/clientsData" && item.path === "/followup") ||
           (p === "/management" && item.path === "/management") ||
           (p === "/analytics" && item.path === "/analytics"),
       );
@@ -519,9 +523,13 @@ export default function Sidebar() {
       // Respect exact sort_order saved in database
       const orderMap = new Map();
       allowedPaths.forEach((p, idx) => {
-        orderMap.set(p, idx);
+        orderMap.set(p, idx + 1);
         const pSuffix = p.split("/").pop();
-        if (pSuffix) orderMap.set(pSuffix, idx);
+        if (pSuffix) orderMap.set(pSuffix, idx + 1);
+        if (p === "/followup") {
+          orderMap.set("/clientsData", idx);
+          orderMap.set("clientsData", idx);
+        }
       });
 
       items.sort((a, b) => {
@@ -532,14 +540,17 @@ export default function Sidebar() {
           ? orderMap.get(a.path)
           : orderMap.has(aSuffix)
             ? orderMap.get(aSuffix)
-            : 999;
+            : a.path === "/clientsData" ? 0 : 999;
         const indexB = orderMap.has(b.path)
           ? orderMap.get(b.path)
           : orderMap.has(bSuffix)
             ? orderMap.get(bSuffix)
-            : 999;
+            : b.path === "/clientsData" ? 0 : 999;
 
-        return indexA - indexB;
+        if (indexA !== indexB) return indexA - indexB;
+        if (a.path === "/clientsData") return -1;
+        if (b.path === "/clientsData") return 1;
+        return 0;
       });
     }
 
