@@ -4,10 +4,10 @@ import { createPortal } from "react-dom";
 import AssEmp from "../../assets/ProjectPages/overview/assEmp.webp";
 import TotalTask from "../../assets/ProjectPages/overview/totalTask.webp";
 import Completed from "../../assets/ProjectPages/overview/completed.webp";
-import OnGoing from "../../assets/ProjectPages/overview/onGoing.webp";
+import OnGoing from "../../assets/ProjectPages/overview/on-going-new.webp";
 import Delayed from "../../assets/ProjectPages/overview/delayed.webp";
-import Overdue from "../../assets/ProjectPages/overview/overdue.webp";
-
+import Overdue from "../../assets/ProjectPages/overview/overdue-new.webp";
+import OnHold from "../../assets/ProjectPages/overview/on-hold-new.webp";
 // ─── SVG ICONS ───────────────────────────────────────────────────────────────
 const Icon = ({ children, className, strokeWidth = "2" }) => (
   <svg
@@ -58,7 +58,14 @@ const MegaphoneIcon = ({ className }) => (
 );
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-const toDateString = (d) => d.toISOString().split("T")[0];
+const toDateString = (d) => {
+  if (!d) return "";
+  const date = new Date(d);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const getInitials = (name) => {
   if (!name) return "??";
   return name
@@ -705,7 +712,7 @@ const statsDataConfig = [
     type: "hold",
     title: "On Hold",
     color: "text-orange-500",
-    iconSrc: Overdue,
+    iconSrc: OnHold,
   },
   {
     type: "ongoing",
@@ -743,6 +750,7 @@ const TodayTasksCard = ({
   unscheduledTask = [],
   dayTask = [],
   employees = [],
+  approvedLeaves = [],
 }) => {
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
   const [employeeCache, setEmployeeCache] = useState({});
@@ -785,6 +793,8 @@ const TodayTasksCard = ({
         return "Activity";
       case "unscheduled":
         return "Unscheduled";
+      case "leave":
+        return "Leave";
       case "noTask":
         return "No Task";
       default:
@@ -844,25 +854,53 @@ const TodayTasksCard = ({
         });
       });
 
+      const approvedLeaveMap = new Map();
+      (approvedLeaves || []).forEach((l) => {
+        if (l.employee_id) {
+          approvedLeaveMap.set(l.employee_id?.toString(), l);
+        }
+      });
+
       (employees || []).forEach((emp) => {
         const empId =
           emp.employee_id?.toString() || emp._id?.$oid || emp._id?.toString();
         if (!withReports.has(empId)) {
-          items.push({
-            id: `no-task-${empId}`,
-            type: "noTask",
-            priority: 0,
-            taskName: "Not started yet !",
-            activityName: null,
-            description: "No report submitted today",
-            employeeId: empId,
-            projectName: "",
-            startDate: "",
-            startTime: "",
-            endDate: new Date().toISOString().split("T")[0],
-            endTime: "",
-            status: "No Task",
-          });
+          const leaveInfo = approvedLeaveMap.get(empId);
+          if (leaveInfo) {
+            items.push({
+              id: `leave-${empId}`,
+              type: "leave",
+              priority: 0,
+              taskName: "On Leave",
+              activityName: null,
+              description: leaveInfo.reason
+                ? `Leave Approved: ${leaveInfo.reason}`
+                : `Leave Approved (${leaveInfo.leave_type || "Leave"})`,
+              employeeId: empId,
+              projectName: "",
+              startDate: leaveInfo.from_date || "",
+              startTime: "",
+              endDate: leaveInfo.to_date || new Date().toISOString().split("T")[0],
+              endTime: "",
+              status: "Leave",
+            });
+          } else {
+            items.push({
+              id: `no-task-${empId}`,
+              type: "noTask",
+              priority: 0,
+              taskName: "Not started yet !",
+              activityName: null,
+              description: "No report submitted today",
+              employeeId: empId,
+              projectName: "",
+              startDate: "",
+              startTime: "",
+              endDate: new Date().toISOString().split("T")[0],
+              endTime: "",
+              status: "No Task",
+            });
+          }
         }
       });
 
@@ -904,7 +942,95 @@ const TodayTasksCard = ({
           };
         }),
       );
-      setTodaysWorkItems(display);
+
+      const getItemTimestamp = (item) => {
+        if (item.reportedAt) {
+          const t = new Date(item.reportedAt).getTime();
+          if (!isNaN(t) && t > 0) return t;
+        }
+        if (item.startTime) {
+          try {
+            const match = item.startTime.match(
+              /(\d+):(\d+)(?::(\d+))?\s*(AM|PM)?/i,
+            );
+            if (match) {
+              let hours = parseInt(match[1], 10);
+              const minutes = parseInt(match[2], 10);
+              const ampm = match[4];
+              if (ampm) {
+                if (ampm.toUpperCase() === "PM" && hours < 12) hours += 12;
+                if (ampm.toUpperCase() === "AM" && hours === 12) hours = 0;
+              }
+              return hours * 3600000 + minutes * 60000;
+            }
+          } catch (_) {}
+        }
+        return 0;
+      };
+
+      // Group items by employeeId
+      const groupedByEmp = {};
+      const empOrder = [];
+      display.forEach((item) => {
+        const empId = item.employeeId?.toString() || "unknown";
+        if (!groupedByEmp[empId]) {
+          groupedByEmp[empId] = [];
+          empOrder.push(empId);
+        }
+        groupedByEmp[empId].push(item);
+      });
+
+      // Sort items within each employee group by timestamp (newest task first)
+      empOrder.forEach((empId) => {
+        groupedByEmp[empId].sort((a, b) => {
+          const tA = getItemTimestamp(a);
+          const tB = getItemTimestamp(b);
+          if (tA > 0 && tB > 0 && tA !== tB) return tB - tA;
+          return a.priority - b.priority;
+        });
+      });
+
+      // Sort employee groups by their latest task timestamp (newest task on top, earliest at the bottom)
+      empOrder.sort((empIdA, empIdB) => {
+        const itemsA = groupedByEmp[empIdA];
+        const itemsB = groupedByEmp[empIdB];
+
+        const hasTasksA = itemsA.some((it) => it.type !== "noTask" && it.type !== "leave");
+        const hasTasksB = itemsB.some((it) => it.type !== "noTask" && it.type !== "leave");
+
+        // Employees who have not added a task (noTask) or are on leave display at the top
+        if (!hasTasksA && hasTasksB) return -1;
+        if (hasTasksA && !hasTasksB) return 1;
+        if (!hasTasksA && !hasTasksB) return 0;
+
+        const timestampsA = itemsA
+          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .map((it) => getItemTimestamp(it))
+          .filter((t) => t > 0);
+        const timestampsB = itemsB
+          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .map((it) => getItemTimestamp(it))
+          .filter((t) => t > 0);
+
+        const maxA = timestampsA.length ? Math.max(...timestampsA) : 0;
+        const maxB = timestampsB.length ? Math.max(...timestampsB) : 0;
+
+        if (maxA !== maxB) return maxB - maxA;
+        return 0;
+      });
+
+      // Flatten the sorted groups into final list
+      const sortedDisplay = [];
+      empOrder.forEach((empId) => {
+        sortedDisplay.push(...groupedByEmp[empId]);
+      });
+
+      const finalDisplay = sortedDisplay.map((item, idx) => ({
+        ...item,
+        color: avatarColors[idx % avatarColors.length],
+      }));
+
+      setTodaysWorkItems(finalDisplay);
       setLoadingEmployees(false);
       setImageErrors({});
     };
@@ -1043,7 +1169,8 @@ const TodayTasksCard = ({
     return todaysWorkItems.map((item) => {
       const showAvatar = item.avatar && !imageErrors[item.id];
       const isHov = tooltipItem?.id === item.id;
-      const isNone = item.type === "noTask";
+      const isLeave = item.type === "leave";
+      const isNone = item.type === "noTask" || isLeave;
       return (
         <div
           key={item.id}
@@ -1056,7 +1183,7 @@ const TodayTasksCard = ({
             position: "relative",
             backgroundColor: isHov ? "#F9FAFB" : "transparent",
             transition: "background-color 0.2s ease",
-            opacity: isNone ? 0.6 : 1,
+            opacity: item.type === "noTask" ? 0.6 : 1,
           }}
           onMouseEnter={() => !isNone && setTooltipItem(item)}
           onMouseMove={(e) =>
@@ -1122,8 +1249,8 @@ const TodayTasksCard = ({
                   fontSize: "0.6vw",
                   padding: "0.1vw 0.42vw",
                   borderRadius: "0.21vw",
-                  backgroundColor: isNone ? "#FEE2E2" : "#F3F4F6",
-                  color: isNone ? "#DC2626" : "#6B7280",
+                  backgroundColor: isLeave ? "#FEF3C7" : item.type === "noTask" ? "#FEE2E2" : "#F3F4F6",
+                  color: isLeave ? "#D97706" : item.type === "noTask" ? "#DC2626" : "#6B7280",
                   fontWeight: "500",
                 }}
               >
@@ -1866,20 +1993,35 @@ const AnnouncementItem = ({ item, apiUrl1, imgError, onImgError }) => {
         >
           <MegaphoneIcon className="w-[1vw] h-[1vw] text-blue-600" />
         </div>
-        <p
-          style={{
-            fontSize: "0.9vw",
-            color: "#374151",
-            lineHeight: "1.55",
-            paddingLeft: "0.4vw",
-            display: "-webkit-box",
-            WebkitLineClamp: showImg ? 3 : 5,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {item.title || item.agenda || item.quote}
-        </p>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {item.title && item.title !== item.quote && (
+            <h4
+              style={{
+                fontSize: "0.92vw",
+                fontWeight: "700",
+                color: "#1E3A8A",
+                margin: "0 0 0.25vw 0",
+                wordBreak: "break-word",
+              }}
+            >
+              {item.title}
+            </h4>
+          )}
+          <p
+            style={{
+              fontSize: "0.85vw",
+              color: "#374151",
+              lineHeight: "1.55",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: showImg ? "8vw" : "14vw",
+              overflowY: "auto",
+              margin: 0,
+            }}
+          >
+            {item.quote}
+          </p>
+        </div>
       </div>
       {showImg && (
         <div style={{ borderRadius: "0.45vw", overflow: "hidden" }}>
@@ -2152,7 +2294,10 @@ const MeetingsCard = ({ apiBaseUrl }) => {
         const res = await fetch(`${apiBaseUrl}/calendar/date/${dateStr}`);
         const data = await res.json();
         const onlyMeetings = Array.isArray(data)
-          ? data.filter((e) => e.event_type === "Meeting")
+          ? data.filter((e) => {
+              const type = (e.event_type || e.eventtype || e.eventType || "").toLowerCase();
+              return type === "meeting" || type === "technical presentation" || type === "technicalpresentation" || type === "technical_presentation";
+            })
           : [];
         setMeetings(onlyMeetings);
       } catch {
@@ -2163,6 +2308,16 @@ const MeetingsCard = ({ apiBaseUrl }) => {
     };
     fetchMeetings();
   }, [apiBaseUrl, dateStr]);
+
+  const addMonths = (date, months) => {
+    const d = new Date(date);
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + months);
+    const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, maxDays));
+    return d;
+  };
 
   const changeDate = (offset) =>
     setSelectedDate((p) => {
@@ -2235,62 +2390,6 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           }}
         >
           <button
-            onClick={() =>
-              setSelectedDate(
-                (p) => new Date(p.getFullYear(), p.getMonth() - 1, p.getDate()),
-              )
-            }
-            style={{
-              border: "none",
-              background: "#F3F4F6",
-              borderRadius: "0.25vw",
-              padding: "0.12vw 0.35vw",
-              cursor: "pointer",
-              fontSize: "0.65vw",
-              color: "#6B7280",
-              fontWeight: "600",
-              lineHeight: 1,
-            }}
-          >
-            ‹‹
-          </button>
-          <button
-            onClick={() => setShowDatePicker((p) => !p)}
-            style={{
-              border: "0.05vw solid #E5E7EB",
-              background: showDatePicker ? "#EFF6FF" : "transparent",
-              borderRadius: "0.3vw",
-              padding: "0.18vw 0.55vw",
-              cursor: "pointer",
-              fontSize: "0.72vw",
-              fontWeight: "500",
-              color: showDatePicker ? "#2563EB" : "#6B7280",
-              transition: "all 0.15s",
-            }}
-          >
-            {monthYearString}
-          </button>
-          <button
-            onClick={() =>
-              setSelectedDate(
-                (p) => new Date(p.getFullYear(), p.getMonth() + 1, p.getDate()),
-              )
-            }
-            style={{
-              border: "none",
-              background: "#F3F4F6",
-              borderRadius: "0.25vw",
-              padding: "0.12vw 0.35vw",
-              cursor: "pointer",
-              fontSize: "0.65vw",
-              color: "#6B7280",
-              fontWeight: "600",
-              lineHeight: 1,
-            }}
-          >
-            ››
-          </button>
-          <button
             onClick={() => setSelectedDate(new Date())}
             style={{
               fontSize: "0.65vw",
@@ -2305,16 +2404,6 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           >
             Today
           </button>
-          {/* ✅ MiniCalendar now an external stable component */}
-          {showDatePicker && (
-            <MiniCalendar
-              selectedDate={selectedDate}
-              onSelectDate={setSelectedDate}
-              onClose={() => setShowDatePicker(false)}
-              datePickerRef={datePickerRef}
-              isSameDay={isSameDay}
-            />
-          )}
         </div>
       </div>
 
@@ -2447,6 +2536,242 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           </div>
         ) : (
           meetings.map((meeting) => {
+            const meetingStyle = (() => {
+              const now = new Date();
+              const status = meeting.event_status || meeting.eventStatus || meeting.eventstatus;
+              const actStart = meeting.actual_start_time || meeting.actualStartTime;
+              const actEnd = meeting.actual_end_time || meeting.actualEndTime;
+
+              if (status === "Completed" || actEnd) {
+                return {
+                  bgColor: "#f0fdf4",
+                  borderColor: "#86efac",
+                  statusText: "Completed",
+                  statusBg: "#dcfce7",
+                  statusColor: "#166534"
+                };
+              }
+
+              if (actStart && !actEnd) {
+                return {
+                  bgColor: "#eff6ff",
+                  borderColor: "#93c5fd",
+                  statusText: "In Progress",
+                  statusBg: "#dbeafe",
+                  statusColor: "#1e40af"
+                };
+              }
+
+              const isTimeDone = (() => {
+                if (!meeting.date) return false;
+                try {
+                  const dateStr = meeting.date;
+                  const timeStr = meeting.start_time || meeting.startTime || "23:59";
+                  const dt = new Date(`${dateStr}T${timeStr}`);
+                  if (!isNaN(dt.getTime())) return dt < now;
+                  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  const evDate = new Date(dateStr);
+                  evDate.setHours(0, 0, 0, 0);
+                  return evDate < todayStart;
+                } catch {
+                  return false;
+                }
+              })();
+
+              if (isTimeDone) {
+                return {
+                  bgColor: "#fef2f2",
+                  borderColor: "#fca5a5",
+                  statusText: "Time Done (Not Started)",
+                  statusBg: "#fee2e2",
+                  statusColor: "#991b1b"
+                };
+              }
+
+              return {
+                bgColor: "#F9FAFB",
+                borderColor: "#E5E7EB",
+                statusText: null,
+                statusBg: null,
+                statusColor: null
+              };
+            })();
+
+            const typeVal = (meeting.event_type || meeting.eventtype || meeting.eventType || "").toLowerCase();
+            const isTechPres = typeVal === "technical presentation" || typeVal === "technicalpresentation" || typeVal === "technical_presentation";
+
+            if (isTechPres) {
+              const techData = meeting.technical_presentation || meeting.technicalPresentation || {};
+              const presenter1 = techData.presenter1 || meeting.presenter1 || { name: meeting.title, topic: meeting.agenda };
+              const presenter2 = techData.presenter2 || meeting.presenter2 || null;
+              const quote = techData.motivationalQuote || meeting.motivationalQuote || "Learning never exhausts the mind; it empowers the future.";
+
+              // Day name and formatted date
+              const dayName = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return "";
+                  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                  return days[d.getDay()];
+                } catch {
+                  return "";
+                }
+              })();
+
+              const dateFormatted = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return meeting.date;
+                  const day = String(d.getDate()).padStart(2, "0");
+                  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  return `${day} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                } catch (e) {
+                  return meeting.date;
+                }
+              })();
+
+              const shortDate = (() => {
+                if (!meeting.date) return "";
+                try {
+                  const d = new Date(meeting.date);
+                  if (isNaN(d)) return meeting.date;
+                  const day = String(d.getDate()).padStart(2, "0");
+                  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  return `${day} ${monthNames[d.getMonth()]}`;
+                } catch (e) {
+                  return meeting.date;
+                }
+              })();
+
+              const timeDisplay = (() => {
+                const s = formatTime(meeting.start_time || meeting.startTime);
+                const e = formatTime(meeting.end_time || meeting.endTime);
+                if (s && e) return `${s} - ${e}`;
+                return s || e || "3:30 PM - 4:30 PM";
+              })();
+
+              const venueDisplay = meeting.link || "Conference Hall";
+
+              return (
+                <div
+                  key={meeting.id || meeting._id || Math.random()}
+                  style={{
+                    backgroundColor: meetingStyle.bgColor,
+                    border: `0.05vw solid ${meetingStyle.borderColor}`,
+                  }}
+                  className="mb-[0.8vw] rounded-xl p-[0.9vw] shadow-xs text-left text-gray-800 flex flex-col gap-[0.5vw]"
+                >
+                  {/* Card Header */}
+                  <div className="flex items-center justify-between pb-[0.4vw] border-b border-gray-200">
+                    <div className="flex items-center gap-[0.4vw]">
+                      <span className="text-[1vw]">📊</span>
+                      <h4 className="text-[0.88vw] font-bold text-gray-900">
+                        Technical Presentation
+                      </h4>
+                    </div>
+                    {meetingStyle.statusText && (
+                      <span
+                        style={{
+                          fontSize: "0.65vw",
+                          fontWeight: "700",
+                          backgroundColor: meetingStyle.statusBg,
+                          color: meetingStyle.statusColor,
+                          padding: "0.1vw 0.4vw",
+                          borderRadius: "0.4vw",
+                        }}
+                      >
+                        {meetingStyle.statusText}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Presenter 1 */}
+                  <div className="flex flex-col gap-[0.1vw]">
+                    <div className="text-[0.65vw] font-bold text-gray-500 uppercase tracking-wider">
+                      Presenter 1
+                    </div>
+                    <div className="text-[0.82vw] font-bold text-gray-900">
+                      {presenter1?.name || meeting.title || "John David"}
+                    </div>
+                    {presenter1?.topic && (
+                      <div className="text-[0.75vw] text-gray-700 mt-[0.1vw]">
+                        <span className="font-medium text-gray-500">Topic: </span>
+                        <span>{presenter1.topic}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presenter 2 (only if Presenter 2 Name exists) */}
+                  {presenter2 && presenter2.name && presenter2.name.trim() !== "" && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="flex flex-col gap-[0.1vw]">
+                        <div className="text-[0.65vw] font-bold text-gray-500 uppercase tracking-wider">
+                          Presenter 2
+                        </div>
+                        <div className="text-[0.82vw] font-bold text-gray-900">
+                          {presenter2.name}
+                        </div>
+                        {presenter2?.topic && (
+                          <div className="text-[0.75vw] text-gray-700 mt-[0.1vw]">
+                            <span className="font-medium text-gray-500">Topic: </span>
+                            <span>{presenter2.topic}</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Motivational Quote */}
+                  {quote && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="text-[0.75vw] italic text-gray-700 py-[0.1vw]">
+                        💡 "{quote}"
+                      </div>
+                    </>
+                  )}
+
+                  {/* Actual Meeting Duration / Status */}
+                  {(meeting.actual_duration || meeting.actualDuration || meeting.actual_start_time || meeting.actualStartTime) && (
+                    <>
+                      <hr className="border-gray-200" />
+                      <div className="flex items-center justify-between text-[0.72vw] bg-blue-50 border border-blue-100 rounded-lg p-[0.3vw] px-[0.5vw] text-blue-900">
+                        {meeting.actual_duration || meeting.actualDuration ? (
+                          <span className="font-semibold">
+                            ⏱️ Actual Duration: {meeting.actual_duration || meeting.actualDuration}
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-[#1e40af] animate-pulse flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span> In Progress
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Event Information (Date, Time, Venue) */}
+                  <hr className="border-gray-200" />
+                  <div className="flex items-center justify-between text-[0.72vw] text-gray-600 pt-[0.1vw]">
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>📅</span>
+                      <span className="font-medium">{dateFormatted || shortDate}</span>
+                    </div>
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>🕒</span>
+                      <span className="font-medium">{timeDisplay}</span>
+                    </div>
+                    <div className="flex items-center gap-[0.2vw]">
+                      <span>📍</span>
+                      <span className="font-medium truncate max-w-[10vw]" title={venueDisplay}>{venueDisplay}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             const isHov = hoveredMeeting === meeting.id;
             const startFmt = formatTime(meeting.start_time);
             const endFmt = formatTime(meeting.end_time);
@@ -2469,28 +2794,44 @@ const MeetingsCard = ({ apiBaseUrl }) => {
                 {/* ── Card ── */}
                 <div
                   style={{
-                    backgroundColor: "#F9FAFB",
+                    backgroundColor: meetingStyle.bgColor,
                     border: isHov
-                      ? "0.05vw solid #D1D5DB"
-                      : "0.05vw solid #E5E7EB",
+                      ? `0.05vw solid ${meetingStyle.borderColor}`
+                      : `0.05vw solid ${meetingStyle.borderColor}`,
                     borderRadius: "0.6vw",
                     padding: "0.7vw 0.9vw",
-                    transition: "border-color 0.15s",
+                    transition: "border-color 0.15s, background-color 0.15s",
                   }}
                 >
-                  {(startFmt || endFmt) && (
-                    <p
-                      style={{
-                        fontSize: "0.75vw",
-                        color: "#6B7280",
-                        margin: "0 0 0.2vw 0",
-                        fontWeight: "400",
-                      }}
-                    >
-                      {startFmt}
-                      {endFmt ? ` - ${endFmt}` : ""}
-                    </p>
-                  )}
+                  <div className="flex items-center justify-between">
+                    {(startFmt || endFmt) && (
+                      <p
+                        style={{
+                          fontSize: "0.75vw",
+                          color: "#6B7280",
+                          margin: "0 0 0.2vw 0",
+                          fontWeight: "400",
+                        }}
+                      >
+                        {startFmt}
+                        {endFmt ? ` - ${endFmt}` : ""}
+                      </p>
+                    )}
+                    {meetingStyle.statusText && (
+                      <span
+                        style={{
+                          fontSize: "0.65vw",
+                          fontWeight: "700",
+                          backgroundColor: meetingStyle.statusBg,
+                          color: meetingStyle.statusColor,
+                          padding: "0.1vw 0.4vw",
+                          borderRadius: "0.4vw",
+                        }}
+                      >
+                        {meetingStyle.statusText}
+                      </span>
+                    )}
+                  </div>
                   <p
                     style={{
                       fontSize: "0.85vw",
@@ -2590,6 +2931,7 @@ const Personal = () => {
   const [unscheduledTask, setUnscheduledTask] = useState([]);
   const [dayTask, setDayTask] = useState([]);
   const [taskEmployees, setTaskEmployees] = useState([]);
+  const [approvedLeaves, setApprovedLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -2597,8 +2939,9 @@ const Personal = () => {
   const memoizedEmployees = useMemo(() => taskEmployees, [taskEmployees]);
 
   useEffect(() => {
+    let isInitial = true;
     const fetchAll = async () => {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       setError(null);
       try {
         const [statsRes, empsRes, tasksRes] = await Promise.all([
@@ -2635,13 +2978,20 @@ const Personal = () => {
         setUnscheduledTask(tasksData.unscheduledTask || []);
         setDayTask(tasksData.dayTask || []);
         setTaskEmployees(tasksData.employees || []);
+        setApprovedLeaves(tasksData.approvedLeaves || []);
       } catch (err) {
         setError(err.message);
       } finally {
-        setLoading(false);
+        if (isInitial) {
+          setLoading(false);
+          isInitial = false;
+        }
       }
     };
     fetchAll();
+
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
   }, [API_BASE_URL]);
 
   return (
@@ -2677,6 +3027,7 @@ const Personal = () => {
             unscheduledTask={unscheduledTask}
             dayTask={dayTask}
             employees={memoizedEmployees}
+            approvedLeaves={approvedLeaves}
           />
         </div>
         <div className="flex flex-col gap-[1.5vh] h-full min-h-0">

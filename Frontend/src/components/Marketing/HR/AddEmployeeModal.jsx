@@ -679,14 +679,12 @@ const AddEmployee = ({
       if (formData.probation)
         submitFormData.append("probation", formData.probation);
 
-      if (formData.workingStatus === "Relieved") {
-        if (formData.paySlip)
-          submitFormData.append("paySlip", formData.paySlip);
-        if (formData.experienceLetter)
-          submitFormData.append("experienceLetter", formData.experienceLetter);
-        if (formData.relievingLetter)
-          submitFormData.append("relievingLetter", formData.relievingLetter);
-      }
+      if (formData.paySlip)
+        submitFormData.append("paySlip", formData.paySlip);
+      if (formData.experienceLetter)
+        submitFormData.append("experienceLetter", formData.experienceLetter);
+      if (formData.relievingLetter)
+        submitFormData.append("relievingLetter", formData.relievingLetter);
 
       if(formData.intershipCertificate)
           submitFormData.append("intershipCertificate", formData.intershipCertificate);

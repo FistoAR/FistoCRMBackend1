@@ -51,6 +51,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://pspc32l5-5174.inc1.devtunnels.ms",
+      "https://pvkwh5mp-5173.inc1.devtunnels.ms",
       "https://www.fist-o.com",
       "https://fistocrmbackend1-2.onrender.com",
       "https://fistocrmbackend1-1-n61p.onrender.com"
@@ -80,8 +81,8 @@ app.use(
   })
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use("/Images", express.static(path.join(__dirname, "Images")));
 
 app.set("io", io);

@@ -221,6 +221,68 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess, fetchClients }) => {
     document.body.removeChild(link);
   };
 
+  const [unimportedRecords, setUnimportedRecords] = useState([]);
+  const [uploadProgressMsg, setUploadProgressMsg] = useState("");
+
+  const exportUnimportedRecordsCSV = (pendingRows) => {
+    const list = pendingRows || unimportedRecords;
+    if (!list || list.length === 0) return;
+
+    const timestamp = getFormattedTimestampIST();
+    const metaRows = [
+      `"Report Name","Pending / Unimported Client Records Report"`,
+      `"Generated Date & Time","${timestamp} IST"`,
+      `"Note","These rows were not imported due to upload interruption or error. You can re-upload this file."`,
+      `""`,
+    ];
+
+    const headers = [
+      "Company Name",
+      "Customer Name",
+      "Industry Type",
+      "Website",
+      "City",
+      "State",
+      "Address",
+      "Reference",
+      "Requirements",
+      "Contact Person",
+      "Phone Number",
+      "Mail ID",
+      "Designation",
+    ];
+
+    const rows = list.map((r) => [
+      `"${(r["Company name"] || r["company_name"] || r["Company Name"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Customer Name"] || r["customer_name"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Industry Type"] || r["industry_type"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Website"] || r["website"] || "").replace(/"/g, '""')}"`,
+      `"${(r["City"] || r["city"] || "").replace(/"/g, '""')}"`,
+      `"${(r["State"] || r["state"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Address"] || r["address"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Reference"] || r["reference"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Requirements"] || r["requirements"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Contact Person"] || r["contact_person"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Phone Number"] || r["phone_number"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Mail ID"] || r["email"] || "").replace(/"/g, '""')}"`,
+      `"${(r["Designation"] || r["designation"] || "").replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [...metaRows, headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute(
+      "download",
+      `Pending_Unimported_Rows_${file?.name || "records"}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImportDistinct = async () => {
     if (!validationData || !validationData.validRecords?.length) {
       setError("No distinct records available to import");
@@ -235,33 +297,77 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess, fetchClients }) => {
     setUploading(true);
     setError("");
     setSuccess(false);
+    setUnimportedRecords([]);
+    setUploadProgressMsg("");
 
-    try {
-      const response = await fetch(`${API_URL}/clientAddManagement/upload`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employee_id: employeeId,
-          records: validationData.validRecords,
-        }),
-      });
+    const recordsToUpload = validationData.validRecords;
+    const CHUNK_SIZE = 1000;
+    let totalInserted = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
 
-      const result = await response.json();
+    for (let i = 0; i < recordsToUpload.length; i += CHUNK_SIZE) {
+      const chunk = recordsToUpload.slice(i, i + CHUNK_SIZE);
+      const batchNum = Math.floor(i / CHUNK_SIZE) + 1;
+      const totalBatches = Math.ceil(recordsToUpload.length / CHUNK_SIZE);
 
-      if (response.ok) {
-        setSuccess(true);
-        setError("");
-        if (typeof onSuccess === "function") onSuccess();
-        if (typeof fetchClients === "function") fetchClients();
-      } else {
-        setError(result.message || "Upload failed");
+      setUploadProgressMsg(`Importing batch ${batchNum} of ${totalBatches} (${totalInserted} / ${recordsToUpload.length} imported)...`);
+
+      try {
+        const response = await fetch(`${API_URL}/clientAddManagement/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            employee_id: employeeId,
+            records: chunk,
+          }),
+        });
+
+        const result = await response.json();
+        if (response.ok) {
+          totalInserted += result.inserted || 0;
+          totalSkipped += result.skipped || 0;
+          totalFailed += result.failed || 0;
+        } else {
+          // Process interruption: slice remaining records
+          const remainingRows = recordsToUpload.slice(i);
+          setUnimportedRecords(remainingRows);
+          const pendingCount = remainingRows.length;
+          setError(
+            `Upload Interrupted: ${totalInserted} records uploaded successfully. ${pendingCount} pending records were not imported. You can download the unimported records file below.`
+          );
+          setUploading(false);
+          setUploadProgressMsg("");
+          if (totalInserted > 0) {
+            if (typeof onSuccess === "function") onSuccess();
+            if (typeof fetchClients === "function") fetchClients();
+          }
+          return;
+        }
+      } catch (err) {
+        console.error("Upload chunk error:", err);
+        const remainingRows = recordsToUpload.slice(i);
+        setUnimportedRecords(remainingRows);
+        const pendingCount = remainingRows.length;
+        setError(
+          `Upload Interrupted: ${totalInserted} records uploaded successfully. ${pendingCount} pending records were not imported. You can download the unimported records file below.`
+        );
+        setUploading(false);
+        setUploadProgressMsg("");
+        if (totalInserted > 0) {
+          if (typeof onSuccess === "function") onSuccess();
+          if (typeof fetchClients === "function") fetchClients();
+        }
+        return;
       }
-    } catch (err) {
-      console.error("Upload error:", err);
-      setError("Failed to import client records.");
-    } finally {
-      setUploading(false);
     }
+
+    setSuccess(true);
+    setError("");
+    setUploadProgressMsg("");
+    if (typeof onSuccess === "function") onSuccess();
+    if (typeof fetchClients === "function") fetchClients();
+    setUploading(false);
   };
 
   const handleClose = () => {
@@ -518,7 +624,15 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess, fetchClients }) => {
 
         {/* Footer Actions */}
         <div className="flex items-center justify-between border-t border-gray-200 pt-[0.6vw] mt-[0.8vw]">
-          {validationData && validationData.duplicateCount > 0 ? (
+          {unimportedRecords.length > 0 ? (
+            <button
+              onClick={() => exportUnimportedRecordsCSV()}
+              className="px-[0.9vw] py-[0.45vw] text-[0.8vw] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg flex items-center gap-[0.4vw] transition-colors cursor-pointer"
+            >
+              <Download size={"0.9vw"} />
+              Download Unimported Rows ({unimportedRecords.length} pending)
+            </button>
+          ) : validationData && validationData.duplicateCount > 0 ? (
             <button
               onClick={exportDuplicatesCSV}
               className="px-[0.9vw] py-[0.45vw] text-[0.8vw] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-[0.4vw] transition-colors cursor-pointer"
@@ -531,6 +645,12 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess, fetchClients }) => {
           )}
 
           <div className="flex items-center gap-[0.6vw]">
+            {uploading && uploadProgressMsg && (
+              <span className="text-[0.78vw] text-blue-700 font-medium animate-pulse mr-[0.5vw]">
+                {uploadProgressMsg}
+              </span>
+            )}
+
             <button
               onClick={handleClose}
               disabled={uploading}

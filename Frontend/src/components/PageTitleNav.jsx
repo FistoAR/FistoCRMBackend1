@@ -85,8 +85,6 @@ export function usePageTitle() {
     "/threeD/taskCalendar": "Task Calendar",
     "/threeD/employeeReports": " Employee Reports",
     "/threeD/employeeRequest": "Employee Request",
-
-    "/projectHead/projects": "Projects",
     "/notes": "Sticky Notes",
   };
 

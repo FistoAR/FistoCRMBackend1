@@ -1235,8 +1235,9 @@ function parseExcel(filePath) {
 
 async function insertClientsData(clientsData, employee_id) {
   const results = { inserted: 0, skipped: 0, failed: 0, errors: [] };
+  if (!Array.isArray(clientsData) || clientsData.length === 0) return results;
 
-  // Fetch existing company names and contact phone numbers to omit duplicates
+  // 1. Fetch existing company names and contact phone numbers in a single query
   const existingRows = await queryWithRetry(
     "SELECT LOWER(TRIM(company_name)) AS comp, contactPersons FROM ClientsDataManagement",
   );
@@ -1262,6 +1263,9 @@ async function insertClientsData(clientsData, employee_id) {
     }
   });
 
+  // Prepare valid insert rows
+  const rowsToInsert = [];
+
   for (const row of clientsData) {
     try {
       const companyName = String(
@@ -1276,14 +1280,14 @@ async function insertClientsData(clientsData, employee_id) {
         continue;
       }
 
-      // 1. Omit Duplicates: Check if company already exists
+      // Check if company already exists
       const lowerComp = companyName.toLowerCase();
       if (lowerComp && existingSet.has(lowerComp)) {
         results.skipped++;
         continue;
       }
 
-      // 2. Parse Comma-Separated Contact Persons & Details
+      // Parse Comma-Separated Contact Persons & Details
       const rawContactName = String(
         row["Contact Person"] || row["contact_person"] || "",
       ).trim();
@@ -1314,6 +1318,7 @@ async function insertClientsData(clientsData, employee_id) {
         results.skipped++;
         continue;
       }
+
       const emails = rawEmail
         ? rawEmail
             .split(",")
@@ -1327,7 +1332,7 @@ async function insertClientsData(clientsData, employee_id) {
             .filter(Boolean)
         : [];
 
-      // 3. Omit Duplicates: Check if any phone number already exists in DB
+      // Check if any phone number already exists in DB or within current batch
       let phoneExists = false;
       for (const p of phones) {
         if (existingPhoneSet.has(p)) {
@@ -1375,40 +1380,51 @@ async function insertClientsData(clientsData, employee_id) {
       const contactPersonsWithIds = ensureContactPersonIds(contactPersons);
       const contactPersonsJSON = JSON.stringify(contactPersonsWithIds);
 
-      await queryWithRetry(
-        `INSERT INTO ClientsDataManagement 
-         (employee_id, company_name, customer_name, industry_type, 
-          website, contactPersons, address, city, state, reference, requirements)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          employee_id,
-          companyName,
-          customerName,
-          row["Industry Type"] || row["industry_type"] || "",
-          row["Website"] || row["website"] || "",
-          contactPersonsJSON,
-          row["Address"] || row["address"] || "",
-          row["City"] || row["city"] || "",
-          row["State"] || row["state"] || "",
-          row["Reference"] || row["reference"] || "",
-          row["Requirements"] || row["requirements"] || "",
-        ],
-      );
+      rowsToInsert.push([
+        employee_id,
+        companyName,
+        customerName,
+        row["Industry Type"] || row["industry_type"] || "",
+        row["Website"] || row["website"] || "",
+        contactPersonsJSON,
+        row["Address"] || row["address"] || "",
+        row["City"] || row["city"] || "",
+        row["State"] || row["state"] || "",
+        row["Reference"] || row["reference"] || "",
+        row["Requirements"] || row["requirements"] || "",
+      ]);
 
-      if (lowerComp) {
-        existingSet.add(lowerComp);
-      }
+      if (lowerComp) existingSet.add(lowerComp);
       for (const cp of contactPersons) {
         const cleaned = String(cp.contactNumber || "")
           .replace(/[^0-9]/g, "")
           .trim();
         if (cleaned) existingPhoneSet.add(cleaned);
       }
-      results.inserted++;
     } catch (error) {
-      console.error("Insert error:", error);
+      console.error("Insert parse error:", error);
       results.failed++;
       results.errors.push({ row, error: error.message });
+    }
+  }
+
+  // 2. Perform Bulk Multi-Row SQL Inserts in chunks of 500
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < rowsToInsert.length; i += BATCH_SIZE) {
+    const chunk = rowsToInsert.slice(i, i + BATCH_SIZE);
+    try {
+      await queryWithRetry(
+        `INSERT INTO ClientsDataManagement 
+         (employee_id, company_name, customer_name, industry_type, 
+          website, contactPersons, address, city, state, reference, requirements)
+         VALUES ?`,
+        [chunk],
+      );
+      results.inserted += chunk.length;
+    } catch (error) {
+      console.error("Bulk insert batch error:", error);
+      results.failed += chunk.length;
+      results.errors.push({ batchIndex: i, error: error.message });
     }
   }
 

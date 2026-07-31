@@ -1,6 +1,6 @@
 /**
  * Fisto CRM Database Schema Specification
- * Generated automatically on 2026-07-30T10:25:41.963Z
+ * Generated automatically on 2026-07-31T07:33:20.727Z
  */
 
 const databaseSchema = {

@@ -161,6 +161,8 @@ const Quotes = () => {
     setEditingQuote(null);
     setFormData({
       date: "",
+      end_date: "",
+      title: "",
       quote: "",
       occasion: "",
       image: null,
@@ -174,6 +176,8 @@ const Quotes = () => {
     setEditingQuote(quote);
     setFormData({
       date: formatDateForInput(quote.date),
+      end_date: formatDateForInput(quote.end_date || quote.endDate),
+      title: quote.title || "",
       quote: quote.quote,
       occasion: quote.occasion || "",
       image: null,
@@ -213,7 +217,13 @@ const Quotes = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === "occasion" && value !== "Announcement") {
+        next.end_date = "";
+      }
+      return next;
+    });
     if (errors[name]) {
       setErrors((prev) => {
         const { [name]: removed, ...rest } = prev;
@@ -327,8 +337,11 @@ const Quotes = () => {
 
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.date) newErrors.date = "Date is required";
-    if (!formData.quote.trim()) newErrors.quote = "Quote is required";
+    if (!formData.date) newErrors.date = "From Date is required";
+    if (formData.end_date && formData.date && formData.end_date < formData.date) {
+      newErrors.end_date = "To Date cannot be earlier than From Date";
+    }
+    if (!formData.quote.trim()) newErrors.quote = "Content is required";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -344,6 +357,12 @@ const Quotes = () => {
     try {
       const submitFormData = new FormData();
       submitFormData.append("date", formData.date);
+      if (formData.end_date) {
+        submitFormData.append("end_date", formData.end_date);
+      }
+      if (formData.title) {
+        submitFormData.append("title", formData.title);
+      }
       submitFormData.append("quote", formData.quote);
       submitFormData.append("occasion", formData.occasion);
 
@@ -384,6 +403,8 @@ const Quotes = () => {
     setEditingQuote(null);
     setFormData({
       date: "",
+      end_date: "",
+      title: "",
       quote: "",
       occasion: "",
       image: null,
@@ -510,12 +531,20 @@ const Quotes = () => {
 
                 <div className="p-[0.8vw]">
                   <div className="flex items-center justify-between mb-[0.5vw]">
-                    <div className="text-[0.75vw] text-gray-500 font-medium">{formatDate(q.date)}</div>
+                    <div className="text-[0.75vw] text-gray-500 font-medium">
+                      {formatDate(q.date)}
+                      {q.end_date && q.end_date !== q.date && ` - ${formatDate(q.end_date)}`}
+                    </div>
                     <button onClick={() => handleDownload(q)} className="text-gray-600 hover:text-blue-600 cursor-pointer">
                       <Download size={"0.9vw"} />
                     </button>
                   </div>
-                  <p className="text-[0.85vw] text-gray-800 font-medium line-clamp-3">"{q.quote}"</p>
+                  {q.title && (
+                    <h4 className="text-[0.9vw] font-bold text-gray-900 mb-[0.2vw] truncate">
+                      {q.title}
+                    </h4>
+                  )}
+                  <p className="text-[0.85vw] text-gray-800 font-medium whitespace-pre-wrap line-clamp-4">{q.quote}</p>
                 </div>
               </div>
             ))}
@@ -569,10 +598,10 @@ const Quotes = () => {
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto flex flex-col">
               <div className="flex-1 overflow-y-auto p-[1.2vw]">
                 <div className="space-y-[1vw]">
-                  <div className="grid grid-cols-2 gap-[1vw]">
+                  <div className="grid grid-cols-3 gap-[1vw]">
                     <div>
                       <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                        Date <span className="text-red-500">*</span>
+                        From Date <span className="text-red-500">*</span>
                       </label>
                       <div className="relative">
                         <Calendar className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
@@ -585,6 +614,25 @@ const Quotes = () => {
                         />
                       </div>
                       {errors.date && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.date}</p>}
+                    </div>
+
+                    <div>
+                      <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                        To Date <span className="text-gray-400 font-normal">{formData.occasion === "Announcement" ? "(Optional)" : "(Announcement Only)"}</span>
+                      </label>
+                      <div className="relative">
+                        <Calendar className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          name="end_date"
+                          type="date"
+                          value={formData.end_date}
+                          onChange={handleInputChange}
+                          disabled={!formData.date || formData.occasion !== "Announcement"}
+                          min={formData.date || undefined}
+                          className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border rounded-full text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black ${errors.end_date ? "border-red-500" : "border-gray-300"} ${!formData.date || formData.occasion !== "Announcement" ? "bg-gray-100 cursor-not-allowed text-gray-400" : ""}`}
+                        />
+                      </div>
+                      {errors.end_date && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.end_date}</p>}
                     </div>
 
                     <div>
@@ -611,15 +659,29 @@ const Quotes = () => {
 
                   <div>
                     <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                      Quote <span className="text-red-500">*</span>
+                      Title / Heading <span className="text-gray-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      name="title"
+                      type="text"
+                      value={formData.title}
+                      onChange={handleInputChange}
+                      placeholder="Enter announcement title or headline..."
+                      className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                      Content <span className="text-red-500">*</span>
                     </label>
                     <textarea
                       name="quote"
                       value={formData.quote}
                       onChange={handleInputChange}
-                      rows={3}
-                      className={`w-full px-[0.8vw] py-[0.6vw] border rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black resize-vertical ${errors.quote ? "border-red-500" : "border-gray-300"}`}
-                      placeholder="Enter your inspirational quote here..."
+                      rows={4}
+                      className={`w-full px-[0.8vw] py-[0.6vw] border rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black resize-vertical whitespace-pre-wrap ${errors.quote ? "border-red-500" : "border-gray-300"}`}
+                      placeholder="Enter announcement text or quote..."
                     />
                     {errors.quote && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.quote}</p>}
                   </div>

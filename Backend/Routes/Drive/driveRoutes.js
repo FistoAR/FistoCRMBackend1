@@ -95,6 +95,15 @@ oauth2Client.on("tokens", (newTokens) => {
 
 const drive = google.drive({ version: "v3", auth: oauth2Client });
 
+// Auto-run folder reorganization on server start to ensure Employee Documents is inside HR Resource
+setTimeout(() => {
+  const db = require("../../dataBase/connection");
+  const { organizeDriveFolders } = require("../../utils/driveService");
+  organizeDriveFolders(db.pool).catch((err) => {
+    console.warn("⚠️ Initial organizeDriveFolders warning:", err.message);
+  });
+}, 3000);
+
 // ─── MIME icon helper ───
 const getMimeIcon = (mimeType) => {
   if (mimeType === "application/vnd.google-apps.folder") return "folder";

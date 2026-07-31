@@ -744,6 +744,7 @@ router.delete("/deleteFile/:id", (req, res) => {
   }
 
   const fieldMapping = {
+    profile: { column: "profile_url", jsonKey: null },
     resume: { column: "resume_url", jsonKey: null },
     offerLetter: { column: "offer_letter_url", jsonKey: null },
     InternofferLetter: { column: "intern_offer_letter_url", jsonKey: null },

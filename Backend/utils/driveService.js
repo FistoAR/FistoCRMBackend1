@@ -184,6 +184,32 @@ async function organizeDriveFolders(dbPool) {
 
   try {
     const hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
+
+    // Move any root-level 'Employee Documents' folder inside 'HR Resource'
+    try {
+      const rootEmpDocsRes = await drive.files.list({
+        q: `'${ROOT_FOLDER_ID}' in parents and name = 'Employee Documents' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: "files(id, name, parents)",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const rootFolders = rootEmpDocsRes.data.files || [];
+      for (const folder of rootFolders) {
+        if (folder.id !== hrResourceFolderId) {
+          console.log(`📁 Moving root '${folder.name}' (${folder.id}) inside 'HR Resource'...`);
+          await drive.files.update({
+            fileId: folder.id,
+            addParents: hrResourceFolderId,
+            removeParents: ROOT_FOLDER_ID,
+            fields: "id, parents",
+            supportsAllDrives: true,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed moving root Employee Documents folder:", err.message);
+    }
+
     const VALID_SUBFOLDERS = [
       "Birthday",
       "Work Anniversary",
@@ -540,7 +566,7 @@ async function getOrCreateSubfolder(folderName, parentFolderId = ROOT_FOLDER_ID)
 }
 
 /**
- * Uploads an employee document to Google Drive under 'Employee Documents' -> [docCategory] (e.g., 'Resume', 'Profiles', 'IDs', etc.)
+ * Uploads an employee document to Google Drive under 'HR Resource' -> 'Employee Documents' -> [docCategory] (e.g., 'Resume', 'Profiles', 'IDs', 'Relived Documents', etc.)
  * Returns persistent preview path containing Google Drive file ID (e.g., /api/drive/preview/${fileId}).
  */
 async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docCategory = "others" }) {
@@ -556,20 +582,49 @@ async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docC
     ids: "IDs",
     certificates: "Certificates",
     offer_letters: "Offer Letters",
-    exit_docs: "Exit Docs",
+    exit_docs: "Relived Documents",
     others: "Others",
   };
 
   try {
-    // 1. Get or create master parent folder "Employee Documents" under ROOT_FOLDER_ID
-    let mainFolderId = await getOrCreateSubfolder("Employee Documents", ROOT_FOLDER_ID);
+    // 1. Get or create master parent folder "HR Resource" under ROOT_FOLDER_ID
+    let hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
 
-    // 2. Get or create category subfolder inside "Employee Documents" (e.g. 'Resume', 'Profiles', 'IDs', 'Certificates', etc.)
+    // Check & move any root-level 'Employee Documents' folder inside 'HR Resource'
+    try {
+      const rootEmpDocsRes = await drive.files.list({
+        q: `'${ROOT_FOLDER_ID}' in parents and name = 'Employee Documents' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: "files(id, name, parents)",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const rootFolders = rootEmpDocsRes.data.files || [];
+      for (const folder of rootFolders) {
+        if (folder.id !== hrResourceFolderId) {
+          console.log(`📁 Moving root '${folder.name}' (${folder.id}) inside 'HR Resource'...`);
+          await drive.files.update({
+            fileId: folder.id,
+            addParents: hrResourceFolderId,
+            removeParents: ROOT_FOLDER_ID,
+            fields: "id, parents",
+            supportsAllDrives: true,
+          });
+          delete folderCache[`${ROOT_FOLDER_ID}_Employee Documents`];
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed moving root Employee Documents folder:", err.message);
+    }
+
+    // 2. Get or create subfolder "Employee Documents" inside "HR Resource"
+    let mainFolderId = await getOrCreateSubfolder("Employee Documents", hrResourceFolderId);
+
+    // 3. Get or create category subfolder inside "Employee Documents" (e.g. 'Resume', 'Profiles', 'IDs', 'Certificates', 'Relived Documents', etc.)
     const key = (docCategory || "others").trim().toLowerCase();
     const categoryFolderName = categoryMap[key] || "Others";
     let targetFolderId = await getOrCreateSubfolder(categoryFolderName, mainFolderId);
 
-    // 3. Upload file to Drive under category folder (with auto-retry if folder was deleted)
+    // 4. Upload file to Drive under category folder (with auto-retry if folder was deleted)
     let fileRes;
     try {
       fileRes = await drive.files.create({
@@ -586,10 +641,12 @@ async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docC
       });
     } catch (createErr) {
       console.warn("⚠️ Drive upload target folder failed, re-creating missing folder structure...", createErr.message);
-      delete folderCache[`${ROOT_FOLDER_ID}_Employee Documents`];
+      delete folderCache[`${ROOT_FOLDER_ID}_HR Resource`];
+      delete folderCache[`${hrResourceFolderId}_Employee Documents`];
       delete folderCache[`${mainFolderId}_${categoryFolderName}`];
 
-      mainFolderId = await getOrCreateSubfolder("Employee Documents", ROOT_FOLDER_ID);
+      hrResourceFolderId = await getOrCreateSubfolder("HR Resource", ROOT_FOLDER_ID);
+      mainFolderId = await getOrCreateSubfolder("Employee Documents", hrResourceFolderId);
       targetFolderId = await getOrCreateSubfolder(categoryFolderName, mainFolderId);
 
       fileRes = await drive.files.create({
