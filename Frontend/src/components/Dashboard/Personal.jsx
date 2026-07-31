@@ -2390,54 +2390,6 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           }}
         >
           <button
-            onClick={() => setSelectedDate((p) => addMonths(p, -1))}
-            style={{
-              border: "none",
-              background: "#F3F4F6",
-              borderRadius: "0.25vw",
-              padding: "0.12vw 0.35vw",
-              cursor: "pointer",
-              fontSize: "0.65vw",
-              color: "#6B7280",
-              fontWeight: "600",
-              lineHeight: 1,
-            }}
-          >
-            ‹‹
-          </button>
-          <button
-            onClick={() => setShowDatePicker((p) => !p)}
-            style={{
-              border: "0.05vw solid #E5E7EB",
-              background: showDatePicker ? "#EFF6FF" : "transparent",
-              borderRadius: "0.3vw",
-              padding: "0.18vw 0.55vw",
-              cursor: "pointer",
-              fontSize: "0.72vw",
-              fontWeight: "500",
-              color: showDatePicker ? "#2563EB" : "#6B7280",
-              transition: "all 0.15s",
-            }}
-          >
-            {monthYearString}
-          </button>
-          <button
-            onClick={() => setSelectedDate((p) => addMonths(p, 1))}
-            style={{
-              border: "none",
-              background: "#F3F4F6",
-              borderRadius: "0.25vw",
-              padding: "0.12vw 0.35vw",
-              cursor: "pointer",
-              fontSize: "0.65vw",
-              color: "#6B7280",
-              fontWeight: "600",
-              lineHeight: 1,
-            }}
-          >
-            ››
-          </button>
-          <button
             onClick={() => setSelectedDate(new Date())}
             style={{
               fontSize: "0.65vw",
@@ -2452,16 +2404,6 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           >
             Today
           </button>
-          {/* ✅ MiniCalendar now an external stable component */}
-          {showDatePicker && (
-            <MiniCalendar
-              selectedDate={selectedDate}
-              onSelectDate={setSelectedDate}
-              onClose={() => setShowDatePicker(false)}
-              datePickerRef={datePickerRef}
-              isSameDay={isSameDay}
-            />
-          )}
         </div>
       </div>
 
@@ -2594,6 +2536,67 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           </div>
         ) : (
           meetings.map((meeting) => {
+            const meetingStyle = (() => {
+              const now = new Date();
+              const status = meeting.event_status || meeting.eventStatus || meeting.eventstatus;
+              const actStart = meeting.actual_start_time || meeting.actualStartTime;
+              const actEnd = meeting.actual_end_time || meeting.actualEndTime;
+
+              if (status === "Completed" || actEnd) {
+                return {
+                  bgColor: "#f0fdf4",
+                  borderColor: "#86efac",
+                  statusText: "Completed",
+                  statusBg: "#dcfce7",
+                  statusColor: "#166534"
+                };
+              }
+
+              if (actStart && !actEnd) {
+                return {
+                  bgColor: "#eff6ff",
+                  borderColor: "#93c5fd",
+                  statusText: "In Progress",
+                  statusBg: "#dbeafe",
+                  statusColor: "#1e40af"
+                };
+              }
+
+              const isTimeDone = (() => {
+                if (!meeting.date) return false;
+                try {
+                  const dateStr = meeting.date;
+                  const timeStr = meeting.start_time || meeting.startTime || "23:59";
+                  const dt = new Date(`${dateStr}T${timeStr}`);
+                  if (!isNaN(dt.getTime())) return dt < now;
+                  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  const evDate = new Date(dateStr);
+                  evDate.setHours(0, 0, 0, 0);
+                  return evDate < todayStart;
+                } catch {
+                  return false;
+                }
+              })();
+
+              if (isTimeDone) {
+                return {
+                  bgColor: "#fef2f2",
+                  borderColor: "#fca5a5",
+                  statusText: "Time Done (Not Started)",
+                  statusBg: "#fee2e2",
+                  statusColor: "#991b1b"
+                };
+              }
+
+              return {
+                bgColor: "#F9FAFB",
+                borderColor: "#E5E7EB",
+                statusText: null,
+                statusBg: null,
+                statusColor: null
+              };
+            })();
+
             const typeVal = (meeting.event_type || meeting.eventtype || meeting.eventType || "").toLowerCase();
             const isTechPres = typeVal === "technical presentation" || typeVal === "technicalpresentation" || typeVal === "technical_presentation";
 
@@ -2654,14 +2657,34 @@ const MeetingsCard = ({ apiBaseUrl }) => {
               return (
                 <div
                   key={meeting.id || meeting._id || Math.random()}
-                  className="mb-[0.8vw] bg-white border border-gray-200 rounded-xl p-[0.9vw] shadow-xs text-left text-gray-800 flex flex-col gap-[0.5vw]"
+                  style={{
+                    backgroundColor: meetingStyle.bgColor,
+                    border: `0.05vw solid ${meetingStyle.borderColor}`,
+                  }}
+                  className="mb-[0.8vw] rounded-xl p-[0.9vw] shadow-xs text-left text-gray-800 flex flex-col gap-[0.5vw]"
                 >
                   {/* Card Header */}
-                  <div className="flex items-center gap-[0.4vw] pb-[0.4vw] border-b border-gray-200">
-                    <span className="text-[1vw]">📊</span>
-                    <h4 className="text-[0.88vw] font-bold text-gray-900">
-                      Technical Presentation
-                    </h4>
+                  <div className="flex items-center justify-between pb-[0.4vw] border-b border-gray-200">
+                    <div className="flex items-center gap-[0.4vw]">
+                      <span className="text-[1vw]">📊</span>
+                      <h4 className="text-[0.88vw] font-bold text-gray-900">
+                        Technical Presentation
+                      </h4>
+                    </div>
+                    {meetingStyle.statusText && (
+                      <span
+                        style={{
+                          fontSize: "0.65vw",
+                          fontWeight: "700",
+                          backgroundColor: meetingStyle.statusBg,
+                          color: meetingStyle.statusColor,
+                          padding: "0.1vw 0.4vw",
+                          borderRadius: "0.4vw",
+                        }}
+                      >
+                        {meetingStyle.statusText}
+                      </span>
+                    )}
                   </div>
 
                   {/* Presenter 1 */}
@@ -2721,8 +2744,8 @@ const MeetingsCard = ({ apiBaseUrl }) => {
                             ⏱️ Actual Duration: {meeting.actual_duration || meeting.actualDuration}
                           </span>
                         ) : (
-                          <span className="font-semibold text-emerald-700 animate-pulse flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span> In Progress
+                          <span className="font-semibold text-[#1e40af] animate-pulse flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span> In Progress
                           </span>
                         )}
                       </div>
@@ -2771,28 +2794,44 @@ const MeetingsCard = ({ apiBaseUrl }) => {
                 {/* ── Card ── */}
                 <div
                   style={{
-                    backgroundColor: "#F9FAFB",
+                    backgroundColor: meetingStyle.bgColor,
                     border: isHov
-                      ? "0.05vw solid #D1D5DB"
-                      : "0.05vw solid #E5E7EB",
+                      ? `0.05vw solid ${meetingStyle.borderColor}`
+                      : `0.05vw solid ${meetingStyle.borderColor}`,
                     borderRadius: "0.6vw",
                     padding: "0.7vw 0.9vw",
-                    transition: "border-color 0.15s",
+                    transition: "border-color 0.15s, background-color 0.15s",
                   }}
                 >
-                  {(startFmt || endFmt) && (
-                    <p
-                      style={{
-                        fontSize: "0.75vw",
-                        color: "#6B7280",
-                        margin: "0 0 0.2vw 0",
-                        fontWeight: "400",
-                      }}
-                    >
-                      {startFmt}
-                      {endFmt ? ` - ${endFmt}` : ""}
-                    </p>
-                  )}
+                  <div className="flex items-center justify-between">
+                    {(startFmt || endFmt) && (
+                      <p
+                        style={{
+                          fontSize: "0.75vw",
+                          color: "#6B7280",
+                          margin: "0 0 0.2vw 0",
+                          fontWeight: "400",
+                        }}
+                      >
+                        {startFmt}
+                        {endFmt ? ` - ${endFmt}` : ""}
+                      </p>
+                    )}
+                    {meetingStyle.statusText && (
+                      <span
+                        style={{
+                          fontSize: "0.65vw",
+                          fontWeight: "700",
+                          backgroundColor: meetingStyle.statusBg,
+                          color: meetingStyle.statusColor,
+                          padding: "0.1vw 0.4vw",
+                          borderRadius: "0.4vw",
+                        }}
+                      >
+                        {meetingStyle.statusText}
+                      </span>
+                    )}
+                  </div>
                   <p
                     style={{
                       fontSize: "0.85vw",

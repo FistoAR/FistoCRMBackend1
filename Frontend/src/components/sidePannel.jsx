@@ -664,7 +664,7 @@ export default function Sidebar() {
       {/* Collapse / Expand Toggle Button */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute top-[9vh] -right-[14px] z-50 flex items-center justify-center w-7 h-7 bg-white border border-gray-100 rounded-full shadow-sm hover:shadow hover:bg-gray-50 transition cursor-pointer"
+        className="absolute top-[9vh] -right-[14px] z-20 flex items-center justify-center w-7 h-7 bg-white border border-gray-100 rounded-full shadow-sm hover:shadow hover:bg-gray-50 transition cursor-pointer"
       >
         {isCollapsed ? (
           <ChevronRightIcon className="w-4 h-4 text-zinc-600" />
