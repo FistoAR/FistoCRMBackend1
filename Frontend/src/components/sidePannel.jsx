@@ -5,20 +5,30 @@ import API_BASE_URL from "../config/api";
 
 // Import assets
 import logo from "../assets/Fisto Logo.png";
-import dashboardIcon from "../assets/SidePannelLogos/Dashboard.svg";
-import ActivityIcon from "../assets/SidePannelLogos/Activity.svg";
-import CallsIcon from "../assets/SidePannelLogos/calls.svg";
-import EmployeeRequestIcon from "../assets/SidePannelLogos/employee-request-new.webp";
-import DailyReportsIcon from "../assets/SidePannelLogos/dailyReports.svg";
-import StickyNotesIcon from "../assets/SidePannelLogos/sticky-notes.webp";
-import hrActivityIcon from "../assets/SidePannelLogos/hrActivity.svg";
-import AddReportIcon from "../assets/SidePannelLogos/AddReport.svg";
-import WorkDoneIcon from "../assets/SidePannelLogos/work-done.webp";
-import AnalyticsIcon from "../assets/SidePannelLogos/Analytics.svg";
-import CalendarIcon from "../assets/SidePannelLogos/Calendar.svg";
-import ProjectIcon from "../assets/SidePannelLogos/Projects.svg";
-import MessageIcon from "../assets/SidePannelLogos/Messages.svg";
-import MasterResource from "../assets/SidePannelLogos/folder.png";
+import {
+  LayoutGrid,
+  Activity,
+  Handshake,
+  Layers,
+  UserCheck,
+  ClipboardCheck,
+  Folder,
+  FileText,
+  MessageSquare,
+  Calendar,
+  StickyNote,
+  BarChart3,
+  PhoneCall,
+  ListTodo,
+  UserPlus,
+  Calculator,
+  Quote,
+  ShieldCheck,
+  PieChart,
+  Target,
+  Clock,
+  Users,
+} from "lucide-react";
 
 // Icon components for Accordion styling
 function ChevronDownIcon({ className }) {
@@ -167,12 +177,31 @@ function SidebarLink({
         <div
           className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}
         >
-          <img
-            src={icon}
-            alt={label}
-            className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain`}
-            style={{ filter: isActive ? "brightness(0) invert(1)" : "none" }}
-          />
+          {typeof icon === "function" || typeof icon === "object" ? (
+            (() => {
+              const IconComp = icon;
+              return (
+                <IconComp
+                  className={`${
+                    isCollapsed
+                      ? "w-[1.6vw] h-[1.6vw] min-w-[22px] min-h-[22px]"
+                      : "w-[1.4vw] h-[1.4vw] min-w-[18px] min-h-[18px]"
+                  } transition-colors duration-150 ${
+                    isActive
+                      ? "text-white"
+                      : "text-zinc-600 group-hover:text-black"
+                  }`}
+                />
+              );
+            })()
+          ) : (
+            <img
+              src={icon}
+              alt={label}
+              className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain`}
+              style={{ filter: isActive ? "brightness(0) invert(1)" : "none" }}
+            />
+          )}
         </div>
       )}
       {!isCollapsed && <span className="truncate min-w-0">{label}</span>}
@@ -232,12 +261,31 @@ function CategoryHeader({
           <div
             className={`flex items-center justify-center flex-shrink-0 ${isCollapsed ? "w-full" : "w-[1.8vw] min-w-[24px]"}`}
           >
-            <img
-              src={icon}
-              alt={label}
-              className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain transition-all duration-200`}
-              style={{ filter: isActive ? "brightness(0) invert(1)" : "none" }}
-            />
+            {typeof icon === "function" || typeof icon === "object" ? (
+              (() => {
+                const IconComp = icon;
+                return (
+                  <IconComp
+                    className={`${
+                      isCollapsed
+                        ? "w-[1.6vw] h-[1.6vw] min-w-[22px] min-h-[22px]"
+                        : "w-[1.4vw] h-[1.4vw] min-w-[18px] min-h-[18px]"
+                    } transition-colors duration-200 ${
+                      isActive
+                        ? "text-white"
+                        : "text-zinc-600 group-hover:text-black"
+                    }`}
+                  />
+                );
+              })()
+            ) : (
+              <img
+                src={icon}
+                alt={label}
+                className={`${isCollapsed ? "w-[2vw] h-[2vw] min-w-[24px] min-h-[24px]" : "w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px]"} object-contain transition-all duration-200`}
+                style={{ filter: isActive ? "brightness(0) invert(1)" : "none" }}
+              />
+            )}
           </div>
         )}
         {!isCollapsed && (
@@ -281,58 +329,42 @@ const PATH_PREFIX_MAP = {
 
 const getMenuConfig = () => ({
   marketing: [
-    { path: "/marketingAnalytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/calls", icon: CallsIcon, label: "Calls" },
-    { path: "/resource", icon: ActivityIcon, label: "Marketing Resource" },
-    { path: "/dailyReports", icon: DailyReportsIcon, label: "Daily reports" },
-    { path: "/addReports", icon: MessageIcon, label: "Marketing Task" },
+    { path: "/marketingAnalytics", icon: BarChart3, label: "Analytics" },
+    { path: "/calls", icon: PhoneCall, label: "Calls" },
+    { path: "/resource", icon: Activity, label: "Marketing Resource" },
+    { path: "/dailyReports", icon: FileText, label: "Daily reports" },
+    { path: "/addReports", icon: ListTodo, label: "Marketing Task" },
   ],
   HR: [
-    {
-      path: "/employeeDetails",
-      icon: hrActivityIcon,
-      label: "Employee Details",
-    },
-    { path: "/addDesignation", icon: hrActivityIcon, label: "Add Designation" },
-    { path: "/request", icon: hrActivityIcon, label: "Request" },
-    {
-      path: "/salaryCalculation",
-      icon: hrActivityIcon,
-      label: "Salary Calculation",
-    },
-    {
-      path: "/interviewSchedules",
-      icon: hrActivityIcon,
-      label: "Interview Schedules",
-    },
-    { path: "/quotes", icon: hrActivityIcon, label: "Quotes" },
-    { path: "/maid", icon: hrActivityIcon, label: "Maid" },
-    { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
+    { path: "/employeeDetails", icon: Users, label: "Employee Details" },
+    { path: "/addDesignation", icon: UserPlus, label: "Add Designation" },
+    { path: "/request", icon: MessageSquare, label: "Request" },
+    { path: "/salaryCalculation", icon: Calculator, label: "Salary Calculation" },
+    { path: "/interviewSchedules", icon: Calendar, label: "Interview Schedules" },
+    { path: "/quotes", icon: Quote, label: "Quotes" },
+    { path: "/maid", icon: UserCheck, label: "Maid" },
+    { path: "/roleAccess", icon: ShieldCheck, label: "Role Access" },
   ],
-  projectHead: [{ path: "/workdone", icon: WorkDoneIcon, label: "Work Done" }],
+  projectHead: [{ path: "/workdone", icon: ClipboardCheck, label: "Work Done" }],
   admin: [
-    { path: "/followup", icon: CallsIcon, label: "Followup's" },
-    { path: "/managementAnalytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/budgets", icon: AddReportIcon, label: "Budget's" },
-    { path: "/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
+    { path: "/followup", icon: PhoneCall, label: "Followup's" },
+    { path: "/managementAnalytics", icon: BarChart3, label: "Analytics" },
+    { path: "/budgets", icon: PieChart, label: "Budget's" },
+    { path: "/marketingLeeds", icon: Target, label: "Marketing Leeds" },
   ],
   project: [
-    { path: "/projectAnalytics", icon: AnalyticsIcon, label: "Analytics" },
-    { path: "/projects", icon: ProjectIcon, label: "Projects" },
-    { path: "/unscheduledTask", icon: MessageIcon, label: "Unscheduled Task" },
-    { path: "/taskCalendar", icon: CalendarIcon, label: "Task's Calendar" },
+    { path: "/projectAnalytics", icon: BarChart3, label: "Analytics" },
+    { path: "/projects", icon: Layers, label: "Projects" },
+    { path: "/unscheduledTask", icon: Clock, label: "Unscheduled Task" },
+    { path: "/taskCalendar", icon: Calendar, label: "Task's Calendar" },
   ],
   common: [
-    { path: "/dashboard", icon: dashboardIcon, label: "Dashboard" },
-    { path: "/masterResource", icon: MasterResource, label: "Master Resource" },
-    {
-      path: "/employeeReports",
-      icon: AddReportIcon,
-      label: "Employee Reports",
-    },
-    { path: "/employeeRequest", icon: EmployeeRequestIcon, label: "Employee request" },
-    { path: "/dairyRemainder", icon: CalendarIcon, label: "Dairy Remainder" },
-    { path: "/notes" , icon: StickyNotesIcon, label: "Sticky Notes" },
+    { path: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
+    { path: "/masterResource", icon: Folder, label: "Master Resource" },
+    { path: "/employeeReports", icon: FileText, label: "Employee Reports" },
+    { path: "/employeeRequest", icon: MessageSquare, label: "Employee request" },
+    { path: "/dairyRemainder", icon: Calendar, label: "Dairy Remainder" },
+    { path: "/notes", icon: StickyNote, label: "Sticky Notes" },
   ],
 });
 
@@ -716,7 +748,7 @@ export default function Sidebar() {
           <div className="flex flex-col">
             <CategoryHeader
               label="Management"
-              icon={ActivityIcon}
+              icon={Activity}
               count={sortedAndGroupedMenu.management.length}
               isOpen={openGroups.management}
               isActive={isManagementActive}
@@ -753,7 +785,7 @@ export default function Sidebar() {
           <div className="flex flex-col">
             <CategoryHeader
               label="Marketing"
-              icon={CallsIcon}
+              icon={Handshake}
               count={sortedAndGroupedMenu.marketing.length}
               isOpen={openGroups.marketing}
               isActive={isMarketingActive}
@@ -790,7 +822,7 @@ export default function Sidebar() {
           <div className="flex flex-col">
             <CategoryHeader
               label="Projects"
-              icon={ProjectIcon}
+              icon={Layers}
               count={sortedAndGroupedMenu.projects.length}
               isOpen={openGroups.projects}
               isActive={isProjectsActive}
@@ -827,7 +859,7 @@ export default function Sidebar() {
           <div className="flex flex-col">
             <CategoryHeader
               label="Human Resource"
-              icon={hrActivityIcon}
+              icon={UserCheck}
               count={sortedAndGroupedMenu.hr.length}
               isOpen={openGroups.hr}
               isActive={isHRActive}

@@ -2887,7 +2887,7 @@ const Calendar = () => {
   // ------------------------------------------------------------------ Render Day View ----------------------------------------------------
 
   const renderDayView = () => (
-    <div className="flex-1 text-black bg-white rounded-[1vw] max-h-[88%] overflow-hidden">
+    <div className="flex-1 text-black bg-white rounded-[1vw] max-h-[98%] overflow-hidden">
       <div className="sticky top-0 p-[0.4vw] bg-white border-b border-gray-200 h-[20.5%] max-h-[20.5%]">
         <div className="text-center relative">
           <div
@@ -3494,10 +3494,10 @@ const Calendar = () => {
     return (
       <div
         ref={weekScrollRef}
-        className="flex-1 text-black max-h-[88%] overflow-auto rounded-[1vw]"
+        className="flex-1 text-black max-h-[98%] overflow-auto rounded-[1vw]"
         onMouseUp={handleMouseUp}
       >
-        <div className="sticky top-0 bg-white border-b border-gray-200 z-45">
+        <div className="sticky top-0 bg-white border-b border-gray-200 ">
           <div className="flex" style={{ height: "64px" }}>
             <div className="w-[5%] border-r border-gray-200 flex items-center"></div>
             {weekDays.map((day, index) => {
@@ -4141,7 +4141,7 @@ const Calendar = () => {
     return (
       <div
         ref={monthScrollRef}
-        className="flex-1 overflow-y-auto text-black max-h-[88%] bg-white rounded-[1vw]"
+        className="flex-1 overflow-y-auto text-black max-h-[98%] bg-white rounded-[1vw]"
       >
         <div className="grid grid-cols-7 border-b border-gray-200 sticky top-0 bg-white z-5">
           {weekDays.map((day) => (
@@ -4672,7 +4672,7 @@ const Calendar = () => {
     };
 
     return (
-      <div className="flex-1 p-[1vw] bg-[#f8fafc] flex flex-col gap-[0.8vw] h-full min-h-0 overflow-hidden">
+      <div className="flex-1 p-[1vw] bg-white flex flex-col gap-[0.8vw] h-full min-h-0 overflow-hidden rounded-[2vw] ">
         {/* Top Controls Card - Sticky Title & Filter Header */}
         <div className="bg-white rounded-2xl shadow-xs border border-gray-200 p-[1vw] flex flex-col gap-[0.8vw] shrink-0">
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -5007,7 +5007,7 @@ const Calendar = () => {
       className="h-full flex-1 min-h-0 flex flex-col text-black"
       onMouseUp={handleMouseUp}
     >
-      <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 shadow-2xs">
+      <header className="sticky top-0 z-30   px-4 py-3 shadow-2xs">
         <div className="flex items-start justify-between relative">
           <div className="flex flex-col justify-center space-x-4 gap-[1vw]">
             <div className="flex items-center space-x-2">
@@ -5109,7 +5109,7 @@ const Calendar = () => {
               </div>
 
               <div className="flex border border-gray-300 rounded-full bg-white overflow-hidden shadow-sm">
-                {["day", "week", "month", "history"].map((viewOption) => (
+                {["day", "week", "month"].map((viewOption) => (
                   <button
                     key={viewOption}
                     onClick={() => setView(viewOption)}
@@ -5126,89 +5126,93 @@ const Calendar = () => {
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={() => setView("history")}
-              className={`flex items-center space-x-[0.4vw] px-[0.8vw] py-[0.4vw] rounded-[1vw] transition-colors shadow-sm text-[0.8vw] cursor-pointer font-medium border ${
-                view === "history"
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"
-              }`}
-            >
-              <History className="w-[0.9vw] h-[0.9vw]" />
-              <span>History</span>
-            </button>
-
-            {canCreateEvent() && (
+          <div className="flex flex-col items-end justify-between gap-[0.4vw]">
+            <div className="flex items-center space-x-3">
               <button
-                onClick={() => {
-                  setEditingEvent(null);
-                  setModalActiveTab("details");
-                  setEventForm({
-                    title: "",
-                    eventtype: "Meeting",
-                    startTime: "",
-                    endTime: "",
-                    date: formatDate(currentDate),
-                    endDate: "",
-                    agenda: "",
-                    link: "",
-                    subtype: "",
-                    mode: "",
-                    day: "workingday",
-                    employees: [],
-                    audience: "",
-                    priority: "",
-                    formType: view === "history" ? "day" : view,
-                    eventStatus: "In Progress",
-                    remarks: "",
-                    employeeID: currentEmployeeId || "",
-                  });
-                  setShowEventModal(true);
-                }}
-                className="flex items-center space-x-[0.4vw] bg-blue-600 text-white px-[0.7vw] py-[0.4vw] rounded-[1vw] hover:bg-blue-700 transition-colors shadow-sm text-[0.8vw] cursor-pointer"
+                type="button"
+                onClick={() => setView("history")}
+                className={`flex items-center space-x-[0.4vw] px-[0.8vw] py-[0.4vw] rounded-[1vw] transition-colors shadow-sm text-[0.8vw] cursor-pointer font-medium border ${
+                  view === "history"
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"
+                }`}
               >
-                <Plus className="w-[0.9vw] h-[0.9vw]" />
-                <span>Create</span>
+                <History className="w-[0.9vw] h-[0.9vw]" />
+                <span>History</span>
               </button>
-            )}
-          </div>
 
-          <div className="absolute bottom-[0vw] right-[3vw] text-[0.8vw] text-gray-600">
-            Double click to view Event
-          </div>
+              {canCreateEvent() && (
+                <button
+                  onClick={() => {
+                    setEditingEvent(null);
+                    setModalActiveTab("details");
+                    setEventForm({
+                      title: "",
+                      eventtype: "Meeting",
+                      startTime: "",
+                      endTime: "",
+                      date: formatDate(currentDate),
+                      endDate: "",
+                      agenda: "",
+                      link: "",
+                      subtype: "",
+                      mode: "",
+                      day: "workingday",
+                      employees: [],
+                      audience: "",
+                      priority: "",
+                      formType: view === "history" ? "day" : view,
+                      eventStatus: "In Progress",
+                      remarks: "",
+                      employeeID: currentEmployeeId || "",
+                    });
+                    setShowEventModal(true);
+                  }}
+                  className="flex items-center space-x-[0.4vw] bg-blue-600 text-white px-[0.7vw] py-[0.4vw] rounded-[1vw] hover:bg-blue-700 transition-colors shadow-sm text-[0.8vw] cursor-pointer"
+                >
+                  <Plus className="w-[0.9vw] h-[0.9vw]" />
+                  <span>Create</span>
+                </button>
+              )}
+            </div>
 
-          <div
-            className="absolute bottom-[0vw] right-[0.2vw] text-[0.8vw] text-gray-600"
-            ref={notificationRef}
-            title="Notification"
-          >
-            <img
-              src={NotificationIcon}
-              alt="Notification"
-              className="w-[2vw] h-[2vw] rounded-full cursor-pointer hover:scale-110 transition-transform duration-200"
-              title="Notifications"
-              onClick={handleNotifications}
-            />
-
-            {unreadCount > 0 && (
-              <span className="absolute -top-[0.4vw] -right-[0.4vw] flex items-center justify-center h-[1.2vw] min-w-[1.2vw] px-[0.2vw] bg-red-500 text-white text-[0.65vw] font-bold rounded-full leading-none pointer-events-none">
-                {unreadCount}
+            <div className="flex items-center gap-[0.5vw]">
+              <span className="text-[0.8vw] text-gray-600">
+                Double click to view Event
               </span>
-            )}
 
-            {showNotifications && (
-              <Notification
-                onClose={() => setShowNotifications(false)}
-                onEventClick={handleNotificationEventClick}
-              />
-            )}
+              <div
+                className="relative flex items-center justify-center"
+                ref={notificationRef}
+                title="Notification"
+              >
+                <img
+                  src={NotificationIcon}
+                  alt="Notification"
+                  className="w-[2vw] h-[2vw] rounded-full cursor-pointer hover:scale-110 transition-transform duration-200"
+                  title="Notifications"
+                  onClick={handleNotifications}
+                />
+
+                {unreadCount > 0 && (
+                  <span className="absolute -top-[0.4vw] -right-[0.4vw] flex items-center justify-center h-[1.2vw] min-w-[1.2vw] px-[0.2vw] bg-red-500 text-white text-[0.65vw] font-bold rounded-full leading-none pointer-events-none">
+                    {unreadCount}
+                  </span>
+                )}
+
+                {showNotifications && (
+                  <Notification
+                    onClose={() => setShowNotifications(false)}
+                    onEventClick={handleNotificationEventClick}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden rounded-[1vw] pb-4 ">
         {view === "day" && renderDayView()}
         {view === "week" && renderWeekView()}
         {view === "month" && renderMonthView()}

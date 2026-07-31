@@ -37,7 +37,7 @@ const ClientUploadModal = ({ isOpen, onClose, onSuccess }) => {
   const [userDesignation, setUserDesignation] = useState("");
   const [loggedInEmployeeId, setLoggedInEmployeeId] = useState("");
 
-  const API_URL = import.meta.env.VITE_API_BASE_URL;
+  const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
 
   // Check if user is project head
   const isProjectHead = userDesignation?.toLowerCase() === "project head";

@@ -7,7 +7,7 @@ import { Shield, Eye, EyeOff, User } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import logo from "../../assets/Fisto Logo.png";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
 
 // System designations with built-in sidebar defaults
 const SYSTEM_DESIGNATIONS = [
