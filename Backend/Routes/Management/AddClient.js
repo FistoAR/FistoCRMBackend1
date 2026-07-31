@@ -398,8 +398,10 @@ router.get("/clientFollowupData", async (req, res) => {
         lf.status AS latest_status,
         lf.next_followup_date,
         lf.remarks AS latest_remarks,
-        lf.created_at AS followup_created_at
+        lf.created_at AS followup_created_at,
+        COALESCE(ed.employee_name, c.employee_id) AS employee_name
       FROM ClientsDataManagement c
+      LEFT JOIN employees_details ed ON c.employee_id = ed.employee_id
       LEFT JOIN (
         SELECT client_id, MAX(id) AS max_id
         FROM clientsdataFollowup

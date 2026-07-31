@@ -144,7 +144,7 @@ function AppContent() {
   const socketData = useSocketNotifications();
 
   return (
-    <Router >
+    <Router>
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/mobileRequest" element={<MobileRequest />} />

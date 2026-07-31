@@ -560,9 +560,10 @@ router.get("/report", async (req, res) => {
         c.city,
         c.state,
         c.created_at,
-        COALESCE(p.project_name, (SELECT p2.project_name FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1)) AS project_name,
-        COALESCE(p.project_category, (SELECT p2.project_category FROM projects p2 WHERE p2.client_id = c.id OR p2.id IN (SELECT projectId FROM ManagementFollowup WHERE clientID = c.id AND projectId > 0) ORDER BY p2.id DESC LIMIT 1)) AS project_category,
+        p.project_name AS project_name,
+        p.project_category AS project_category,
         fu.id AS followup_id,
+        fu.projectId AS projectId,
         fu.status,
         fu.remarks,
         fu.created_at AS followupDate,
@@ -572,7 +573,7 @@ router.get("/report", async (req, res) => {
         e.employee_name AS employee_name
       FROM ClientsDataManagement c
       LEFT JOIN employees_details e ON c.employee_id = e.employee_id
-      LEFT JOIN ManagementFollowup fu ON fu.clientID = c.id
+      INNER JOIN ManagementFollowup fu ON fu.clientID = c.id
       LEFT JOIN projects p ON fu.projectId = p.id
       LEFT JOIN ContactPersons cp ON fu.contactPersonID = cp.id
       WHERE c.active = 1
@@ -583,8 +584,8 @@ router.get("/report", async (req, res) => {
     const reportParams = employee_id ? [employee_id] : [];
     const rows = await queryWithRetry(sql, reportParams);
 
-    // Group rows by clientID
-    const clientMap = new Map();
+    // Group rows by clientID and projectId
+    const projectMap = new Map();
 
     rows.forEach((row) => {
       let phone = "-";
@@ -615,9 +616,12 @@ router.get("/report", async (req, res) => {
         location = stateStr;
       }
 
-      if (!clientMap.has(row.clientID)) {
-        clientMap.set(row.clientID, {
+      const groupKey = `${row.clientID}_${row.projectId || 0}`;
+
+      if (!projectMap.has(groupKey)) {
+        projectMap.set(groupKey, {
           clientID: row.clientID,
+          projectId: row.projectId || 0,
           company_name: row.company_name || "-",
           customer_name: row.customer_name || "-",
           project_name: row.project_name || "-",
@@ -634,10 +638,10 @@ router.get("/report", async (req, res) => {
         });
       }
 
-      const clientObj = clientMap.get(row.clientID);
+      const projectObj = projectMap.get(groupKey);
 
       if (row.followup_id) {
-        clientObj.history.push({
+        projectObj.history.push({
           id: row.followup_id,
           status: row.status || "first_followup",
           remarks: row.remarks || "-",
@@ -649,14 +653,14 @@ router.get("/report", async (req, res) => {
       }
     });
 
-    const processedRows = Array.from(clientMap.values()).map((client) => {
-      const latestFollowup = client.history[0] || {};
+    const processedRows = Array.from(projectMap.values()).map((proj) => {
+      const latestFollowup = proj.history[0] || {};
       const statusValue = latestFollowup.status || "first_followup";
       const remarks = latestFollowup.remarks || "-";
-      const followupDate = latestFollowup.followupDate || client.created_at;
+      const followupDate = latestFollowup.followupDate || proj.created_at;
 
       return {
-        ...client,
+        ...proj,
         status: statusValue,
         remarks: remarks,
         followupDate: followupDate,

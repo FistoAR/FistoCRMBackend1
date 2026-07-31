@@ -30,11 +30,13 @@ import {
   Calendar,
   Copy,
   Check,
+  Eye,
 } from "lucide-react";
 import ExportToCSV from "../Analytics/ExportToCSV";
 import ExportToPDF from "../Analytics/ExportToPDF";
 import ExportMOM from "../Analytics/ExportMOM";
 import FistoLogo from "../../assets/Fisto Logo.png";
+import ClientAddModal from "./ClientAdd";
 
 const RADIAN = Math.PI / 180;
 
@@ -261,6 +263,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
   // Filters - Detailed report tab
   const [reportLevel, setReportLevel] = useState("level1"); // level1 | level2
+  const [firstLevelSubFilter, setFirstLevelSubFilter] = useState("all"); // all | not_yet | followed_up
   const [reportFromDate, setReportFromDate] = useState("");
   const [reportToDate, setReportToDate] = useState("");
   const [reportSearch, setReportSearch] = useState("");
@@ -298,6 +301,48 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     company: "",
     customer: "",
   });
+
+  // View Client Modal State
+  const [viewClientModalOpen, setViewClientModalOpen] = useState(false);
+  const [viewClientData, setViewClientData] = useState(null);
+
+  const handleViewClient = (clientRow) => {
+    // If clientRow is an object with full row data, initialize view state immediately
+    if (typeof clientRow === "object" && clientRow !== null) {
+      setViewClientData({
+        id: clientRow.clientID,
+        company_name: clientRow.company_name || "",
+        customer_name: clientRow.customer_name || "",
+        reference: clientRow.reference || "",
+        city: clientRow.city || "",
+        state: clientRow.state || "",
+        contactPersons: clientRow.contactPersons || [],
+      });
+      setViewClientModalOpen(true);
+
+      // Async fetch complete data in background to merge additional fields
+      fetch(`${API_URL}/clientAddManagement/${clientRow.clientID}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.data) {
+            setViewClientData(data.data);
+          }
+        })
+        .catch((err) => console.error("Error background fetching client details:", err));
+    } else {
+      // Fallback if ID is passed
+      setViewClientData({ id: clientRow });
+      setViewClientModalOpen(true);
+      fetch(`${API_URL}/clientAddManagement/${clientRow}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.data) {
+            setViewClientData(data.data);
+          }
+        })
+        .catch((err) => console.error("Error background fetching client details:", err));
+    }
+  };
 
   const getEmployeeId = () => {
     if (propEmployeeId !== undefined) return propEmployeeId;
@@ -372,9 +417,12 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       setHistoryClientInfo({ company, customer, phone });
       setHistoryLoading(true);
       setHistoryModalOpen(true);
-      const res = await fetch(
-        `${API_URL}/Analytics/client-history/${clientId}`,
-      );
+      
+      const endpoint = reportLevel === "level1"
+        ? `${API_URL}/clientAddManagement/history/${clientId}`
+        : `${API_URL}/ManagementFollowups/history/${clientId}`;
+
+      const res = await fetch(endpoint);
       const result = await res.json();
       if (result.success && Array.isArray(result.data)) {
         setClientHistory(result.data);
@@ -450,19 +498,75 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     try {
       setReportLoading(true);
       const empId = getEmployeeId();
-      const params = new URLSearchParams();
-      params.append("level", lvl);
-      if (empId) params.append("employee_id", empId);
 
-      const url = `${API_URL}/management/analytics/report?${params.toString()}`;
+      if (lvl === "level1") {
+        // Fetch First Level report data using AddClient API (/clientFollowupData)
+        const params = new URLSearchParams();
+        if (empId) params.append("employee_id", empId);
 
-      const res = await fetch(url);
-      const result = await res.json();
-      if (result.success && Array.isArray(result.data)) {
-        setReportData(result.data);
+        const url = `${API_URL}/clientAddManagement/clientFollowupData${params.toString() ? `?${params.toString()}` : ""}`;
+        const res = await fetch(url);
+        const result = await res.json();
+        
+        if (result.success && Array.isArray(result.data)) {
+          const mapped = result.data.map((c) => {
+            let phone = "-";
+            let contactName = "-";
+            if (Array.isArray(c.contactPersons) && c.contactPersons.length > 0) {
+              phone = c.contactPersons[0].contactNumber || c.contactPersons[0].phone || "-";
+              contactName = c.contactPersons[0].name || "-";
+            }
+            const cityStr = c.city && c.city !== "-" ? c.city : "";
+            const stateStr = c.state && c.state !== "-" ? c.state : "";
+            let location = "-";
+            if (cityStr && stateStr) location = `${cityStr}, ${stateStr}`;
+            else if (cityStr) location = cityStr;
+            else if (stateStr) location = stateStr;
+
+            const latestProj = Array.isArray(c.projects) && c.projects.length > 0
+              ? c.projects[c.projects.length - 1]
+              : null;
+
+            return {
+              clientID: c.id,
+              company_name: c.company_name || "-",
+              customer_name: c.customer_name || "-",
+              project_name: latestProj ? latestProj.project_name : "-",
+              category: latestProj ? latestProj.project_category : "-",
+              reference: c.reference || "-",
+              phone,
+              contactName,
+              city: c.city || "-",
+              state: c.state || "-",
+              location,
+              created_at: c.created_at,
+              employee_name: c.employee_name || c.employee_id || "-",
+              status: c.latest_status || "not_followed_up",
+              remarks: c.latest_remarks || "-",
+              followupDate: c.followup_created_at || c.created_at,
+              nextFollowupDate: c.next_followup_date || null,
+            };
+          });
+          setReportData(mapped);
+        } else {
+          setReportData([]);
+        }
+      } else {
+        // Fetch Second Level report data using Analytics API (/management/analytics/report?level=level2)
+        const params = new URLSearchParams();
+        params.append("level", "level2");
+        if (empId) params.append("employee_id", empId);
+
+        const url = `${API_URL}/management/analytics/report?${params.toString()}`;
+        const res = await fetch(url);
+        const result = await res.json();
+        const list = result.success && Array.isArray(result.data) ? result.data : [];
+
+        setReportData(list);
       }
     } catch (err) {
       console.error("❌ Report fetch error:", err);
+      setReportData([]);
     } finally {
       setReportLoading(false);
     }
@@ -576,9 +680,27 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
   const followupsCount  = level1Total;
   const leadsCount      = level2Total;
 
+  // Counts for First Level Pills (All, Not Yet, Followed Up)
+  const firstLevelCounts = useMemo(() => {
+    if (reportLevel !== "level1" || !Array.isArray(reportData)) {
+      return { all: 0, not_yet: 0, followed_up: 0 };
+    }
+    const all = reportData.length;
+    const not_yet = reportData.filter((r) => r.status === "not_followed_up" || !r.status).length;
+    const followed_up = all - not_yet;
+    return { all, not_yet, followed_up };
+  }, [reportData, reportLevel]);
+
   // Filtered Report Data
   const filteredReportData = useMemo(() => {
     return reportData.filter((row) => {
+      // Sub-filter for First Level (Pill selector)
+      if (reportLevel === "level1") {
+        const isNotFollowedUp = row.status === "not_followed_up" || !row.status;
+        if (firstLevelSubFilter === "not_yet" && !isNotFollowedUp) return false;
+        if (firstLevelSubFilter === "followed_up" && isNotFollowedUp) return false;
+      }
+
       const rowDate = parseDate(row.followupDate) || parseDate(row.created_at);
       const from = reportFromDate ? new Date(reportFromDate) : null;
       const to = reportToDate ? new Date(reportToDate) : null;
@@ -637,6 +759,8 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
     });
   }, [
     reportData,
+    reportLevel,
+    firstLevelSubFilter,
     reportFromDate,
     reportToDate,
     reportSearch,
@@ -657,7 +781,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
   const [exportFormat, setExportFormat] = useState("pdf"); // 'pdf' | 'excel'
   const [exportWithHistory, setExportWithHistory] = useState(false);
 
-  const executeExport = () => {
+  const executeExport = async () => {
     const fileName = "Management_Followup_Report";
     const reportTitle = "Management Followup Report";
 
@@ -665,35 +789,67 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       sno: index + 1,
       date:
         parseDate(row.followupDate) || parseDate(row.created_at)
-          ? formatDateFormatted(row.followupDate || row.created_at)
+          ? formatDateOnly(row.followupDate || row.created_at)
           : "-",
       company: row.company_name || "-",
       customer: row.customer_name || "-",
-      phone: row.phone || "-",
-      location: row.location || "-",
+      project_name: row.project_name || "-",
+      category: row.category || "-",
+      reference: row.reference || "-",
       status: formatStatus(row.status),
-      remarks: row.remarks || "-",
+      next_followup_date: row.nextFollowupDate
+        ? formatDateOnly(row.nextFollowupDate)
+        : "-",
       handled_by: row.employee_name || row.employee_id || "-",
     }));
 
-    const historyData = exportWithHistory
-      ? filteredReportData.map((client, index) => ({
-          sno: index + 1,
-          company: client.company_name,
-          customer: client.customer_name,
-          history: (client.history || []).map((h) => ({
-            date: formatDateFormatted(h.followupDate || h.created_at),
-            status: formatStatus(h.status),
-            contactPerson: `${h.contact_person_name || client.customer_name || "-"}${
-              h.contact_person_phone ? ` (${h.contact_person_phone})` : ""
-            }`,
-            remarks: h.remarks || "-",
-            nextFollowupDate: h.nextFollowupDate
-              ? formatDateOnly(h.nextFollowupDate)
-              : "-",
-          })),
-        }))
-      : null;
+    let historyData = null;
+    if (exportWithHistory && filteredReportData.length > 0) {
+      setReportLoading(true);
+      try {
+        const historyPromises = filteredReportData.map(async (client, index) => {
+          let clientHistoryList = client.history || [];
+          if (!clientHistoryList || clientHistoryList.length === 0) {
+            try {
+              const endpoint =
+                reportLevel === "level1"
+                  ? `${API_URL}/clientAddManagement/history/${client.clientID}`
+                  : `${API_URL}/ManagementFollowups/history/${client.clientID}`;
+              const res = await fetch(endpoint);
+              const result = await res.json();
+              if (result.success && Array.isArray(result.data)) {
+                clientHistoryList = result.data;
+              }
+            } catch (err) {
+              console.error(`Error fetching history for client ${client.clientID}:`, err);
+            }
+          }
+
+          return {
+            sno: index + 1,
+            company: client.company_name,
+            customer: client.customer_name,
+            history: clientHistoryList.map((h) => ({
+              date: formatDateOnly(h.followupDate || h.created_at),
+              status: formatStatus(h.status),
+              contactPerson: `${h.contact_person_name || client.customer_name || "-"}${
+                h.contact_person_phone || h.contactNumber ? ` (${h.contact_person_phone || h.contactNumber})` : ""
+              }`,
+              remarks: h.remarks || "-",
+              nextFollowupDate: h.nextFollowupDate && h.nextFollowupDate !== "-"
+                ? formatDateOnly(h.nextFollowupDate)
+                : "-",
+            })),
+          };
+        });
+
+        historyData = await Promise.all(historyPromises);
+      } catch (err) {
+        console.error("Error generating history export data:", err);
+      } finally {
+        setReportLoading(false);
+      }
+    }
 
     const activeFilters = [];
     if (reportFromDate) activeFilters.push(`From: ${reportFromDate}`);
@@ -718,12 +874,13 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               [
                 "S.NO",
                 "Date",
-                "Company",
-                "Customer",
-                "Phone",
-                "Location",
+                "Company Name",
+                "Customer Name",
+                "Project Name",
+                "Category",
+                "Reference",
                 "Status",
-                "Remarks",
+                "Next Followup Date",
                 "Handled By",
               ],
             ],
@@ -732,10 +889,11 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
               "date",
               "company",
               "customer",
-              "phone",
-              "location",
+              "project_name",
+              "category",
+              "reference",
               "status",
-              "remarks",
+              "next_followup_date",
               "handled_by",
             ],
             filters: activeFilters,
@@ -868,16 +1026,92 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
 
           {/* Reports Tab Filters */}
           {subTab === "report" && (
-            <div className="flex items-center gap-[0.8vw] relative">
+            <div className="flex items-center gap-[0.5vw] relative">
               {/* Level 1 / Level 2 Sub-tab Toggle */}
-              <div className="flex items-center bg-gray-100/90 p-[0.2vw] rounded-lg border border-gray-200/60 shadow-inner">
+             
+
+              {/* First Level Pill Filter (All, Not Yet, Followed Up) */}
+              {reportLevel === "level1" && (
+                <div className="flex items-center bg-gray-100 p-[0.2vw] rounded-full border border-gray-200/80 shadow-xs flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      setFirstLevelSubFilter("all");
+                      setCurrentPage(1);
+                    }}
+                    className={`flex items-center gap-[0.3vw] px-[0.7vw] py-[0.25vw] rounded-full cursor-pointer text-[0.75vw] font-semibold whitespace-nowrap transition-all duration-150 ${
+                      firstLevelSubFilter === "all"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    <span>All</span>
+                    <span
+                      className={`px-[0.45vw] py-[0.1vw] rounded-full text-[0.68vw] font-bold ${
+                        firstLevelSubFilter === "all"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-gray-200/80 text-gray-700"
+                      }`}
+                    >
+                      {firstLevelCounts.all}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setFirstLevelSubFilter("not_yet");
+                      setCurrentPage(1);
+                    }}
+                    className={`flex items-center gap-[0.3vw] px-[0.7vw] py-[0.25vw] rounded-full cursor-pointer text-[0.75vw] font-semibold whitespace-nowrap transition-all duration-150 ${
+                      firstLevelSubFilter === "not_yet"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    <span>Not Yet</span>
+                    <span
+                      className={`px-[0.45vw] py-[0.1vw] rounded-full text-[0.68vw] font-bold ${
+                        firstLevelSubFilter === "not_yet"
+                          ? "bg-gray-200 text-gray-800"
+                          : "bg-gray-200/80 text-gray-700"
+                      }`}
+                    >
+                      {firstLevelCounts.not_yet}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setFirstLevelSubFilter("followed_up");
+                      setCurrentPage(1);
+                    }}
+                    className={`flex items-center gap-[0.3vw] px-[0.7vw] py-[0.25vw] rounded-full cursor-pointer text-[0.75vw] font-semibold whitespace-nowrap transition-all duration-150 ${
+                      firstLevelSubFilter === "followed_up"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    <span>Followed Up</span>
+                    <span
+                      className={`px-[0.45vw] py-[0.1vw] rounded-full text-[0.68vw] font-bold ${
+                        firstLevelSubFilter === "followed_up"
+                          ? "bg-gray-200 text-gray-800"
+                          : "bg-gray-200/80 text-gray-700"
+                      }`}
+                    >
+                      {firstLevelCounts.followed_up}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+               <div className="flex items-center bg-gray-100/90 p-[0.2vw] rounded-lg border border-gray-200/60 shadow-inner flex-shrink-0">
                 <button
                   onClick={() => {
                     setReportLevel("level1");
                     setReportStatusFilter("");
                     setCurrentPage(1);
                   }}
-                  className={`px-[0.8vw] py-[0.3vw] rounded-md cursor-pointer font-semibold text-[0.78vw] transition-all duration-200 ${
+                  className={`px-[0.7vw] py-[0.35vw] rounded-md cursor-pointer font-semibold text-[0.78vw] whitespace-nowrap transition-all duration-200 ${
                     reportLevel === "level1"
                       ? "bg-purple-600 text-white shadow-sm"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/70"
@@ -891,7 +1125,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                     setReportStatusFilter("");
                     setCurrentPage(1);
                   }}
-                  className={`px-[0.8vw] py-[0.3vw] rounded-md cursor-pointer font-semibold text-[0.78vw] transition-all duration-200 ${
+                  className={`px-[0.7vw] py-[0.35vw] rounded-md cursor-pointer font-semibold text-[0.78vw] whitespace-nowrap transition-all duration-200 ${
                     reportLevel === "level2"
                       ? "bg-emerald-600 text-white shadow-sm"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/70"
@@ -910,15 +1144,15 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   setReportSearch(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="px-[0.8vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white w-[14vw]"
+                className="px-[0.7vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.78vw] focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white w-[12vw] flex-shrink-0"
               />
 
               {/* Exports Button */}
               <button
                 onClick={() => setIsExportModalOpen(true)}
-                className="px-[0.9vw] py-[0.38vw] rounded-lg font-semibold text-[0.78vw] flex items-center gap-[0.4vw] border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 transition cursor-pointer shadow-xs"
+                className="px-[0.8vw] py-[0.35vw] rounded-lg font-semibold text-[0.78vw] whitespace-nowrap flex items-center gap-[0.3vw] border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 transition cursor-pointer shadow-xs flex-shrink-0"
               >
-                <Download size={14} className="text-gray-500" /> Exports
+                <Download size={13} className="text-gray-500" /> Exports
               </button>
 
               {/* Filter Button & Popup Panel */}
@@ -1170,8 +1404,49 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
       <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden flex flex-col  min-h-0">
         {subTab === "overview" &&
           (loading ? (
-            <div className="flex-1 flex justify-center items-center">
-              <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
+            <div className="flex flex-col gap-[1.5vw] h-full overflow-y-auto p-[1.5vw] animate-pulse">
+              {/* 5 Skeleton Metric Cards */}
+              <div className="grid grid-cols-5 gap-[1vw] flex-shrink-0">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="p-[1vw] rounded-xl border border-gray-200 bg-gray-50 flex flex-col justify-between h-[6.5vw]"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="h-[2vw] w-[3vw] bg-gray-200 rounded-md" />
+                      <div className="h-[0.7vw] w-[45%] bg-gray-200 rounded" />
+                    </div>
+                    <div className="h-[0.6vw] w-[70%] bg-gray-150 rounded self-end" />
+                  </div>
+                ))}
+              </div>
+
+              {/* 2 Skeleton Chart Panels */}
+              <div className="grid grid-cols-2 gap-[1.5vw] flex-1 min-h-0">
+                <div className="bg-white p-[1.2vw] rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-0">
+                  <div className="h-[1vw] w-[35%] bg-gray-200 rounded mb-[1vw]" />
+                  <div className="flex-1 flex items-center justify-around">
+                    <div className="w-[12vw] h-[12vw] rounded-full border-[1vw] border-gray-200 bg-gray-100" />
+                    <div className="flex flex-col gap-[0.8vw] w-[30%]">
+                      {Array.from({ length: 4 }).map((_, j) => (
+                        <div key={j} className="h-[1vw] bg-gray-200 rounded w-full" />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-[1.2vw] rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-0">
+                  <div className="h-[1vw] w-[35%] bg-gray-200 rounded mb-[1vw]" />
+                  <div className="flex-1 flex items-center justify-around">
+                    <div className="w-[12vw] h-[12vw] rounded-full border-[1vw] border-gray-200 bg-gray-100" />
+                    <div className="flex flex-col gap-[0.8vw] w-[30%]">
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <div key={j} className="h-[1vw] bg-gray-200 rounded w-full" />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-[1.5vw] h-full overflow-y-auto  p-[1.5vw]">
@@ -1203,7 +1478,7 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                     breakdown: level2Breakdown,
                   },
                   {
-                    title: "Onboarded",
+                    title: "Project Onboard",
                     value: onboardedTotal,
                     color: "bg-amber-50 text-amber-600 border-amber-200",
                     breakdown: onboardedBreakdown,
@@ -1456,9 +1731,46 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
             <div className="flex-1 border border-gray-200 rounded-xl overflow-visible flex flex-col min-h-0 bg-white shadow-sm">
               <div className="flex-1 overflow-y-auto overflow-x-visible">
                 {reportLoading ? (
-                  <div className="h-full flex justify-center items-center">
-                    <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
-                  </div>
+                  <table className="w-full table-fixed border-collapse animate-pulse">
+                    <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
+                      <tr>
+                        <th className="px-[0.4vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[2.2vw]">S.NO</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6.5vw]">Date</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[12.5vw]">Company Name</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10.5vw]">Project Name</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Reference</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10.5vw]">Status</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8vw]">Next Followup Date</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7.5vw]">Handled by</th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[9vw]">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {Array.from({ length: 10 }).map((_, idx) => (
+                        <tr key={idx} className="border-b border-gray-150">
+                          <td className="px-[0.4vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[60%] mx-auto" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[75%]" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200">
+                            <div className="space-y-[0.3vw]">
+                              <div className="h-[0.85vw] bg-gray-250 rounded w-[85%]" />
+                              <div className="h-[0.7vw] bg-gray-200 rounded w-[60%]" />
+                            </div>
+                          </td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200">
+                            <div className="space-y-[0.3vw]">
+                              <div className="h-[0.8vw] bg-gray-200 rounded w-[80%]" />
+                              <div className="h-[0.65vw] bg-gray-150 rounded w-[50%]" />
+                            </div>
+                          </td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[70%]" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-blue-100 rounded-full w-[65%]" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[75%]" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[70%]" /></td>
+                          <td className="px-[0.6vw] py-[0.7vw] text-center"><div className="h-[0.8vw] bg-gray-200 rounded w-[50%] mx-auto" /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 ) : filteredReportData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-gray-500 text-[0.9vw]">
                     No records found matching filters
@@ -1467,34 +1779,31 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                   <table className="w-full table-fixed border-collapse">
                     <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
                       <tr>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3.5vw]">
+                        <th className="px-[0.4vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[2.2vw] whitespace-nowrap">
                           S.NO
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8.5vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6.5vw] whitespace-nowrap">
                           Date
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[12.5vw] whitespace-nowrap">
                           Company Name
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
-                          Customer Name
-                        </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10.5vw] whitespace-nowrap">
                           Project Name
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
-                          Category
-                        </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw] whitespace-nowrap">
                           Reference
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[9vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[10.5vw] whitespace-nowrap">
                           Status
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8.5vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[8vw] whitespace-nowrap">
                           Next Followup Date
                         </th>
-                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[6vw]">
+                        <th className="px-[0.6vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7.5vw] whitespace-nowrap">
+                          Handled by
+                        </th>
+                        <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[9vw] whitespace-nowrap">
                           Actions
                         </th>
                       </tr>
@@ -1508,64 +1817,72 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                             key={idx}
                             className="hover:bg-gray-50 transition-colors border-b border-gray-200 relative hover:z-30"
                           >
-                            <td className="px-[0.6vw] py-[0.6vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                            <td className="px-[0.4vw] py-[0.5vw] text-[0.78vw] text-gray-800 border-r border-gray-200 text-center font-medium whitespace-nowrap">
                               {serialNumber}
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-850 border-r border-gray-200 truncate">
-                              {formatDateFormatted(
+                            <td className="px-[0.6vw] py-[0.5vw] text-[0.78vw] text-gray-850 border-r border-gray-200 whitespace-nowrap">
+                              {formatDateOnly(
                                 row.followupDate || row.created_at,
                               )}
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 font-semibold border-r border-gray-200">
-                              <CopyTooltip text={row.company_name} />
+                            <td className="px-[0.6vw] py-[0.4vw] text-[0.78vw] border-r border-gray-200 whitespace-nowrap">
+                              <div className="flex flex-col">
+                                <span className="font-semibold text-gray-900 leading-tight">
+                                  <CopyTooltip text={row.company_name} />
+                                </span>
+                                <span className="text-[0.72vw] text-gray-500 font-normal leading-tight">
+                                  <CopyTooltip text={row.customer_name} />
+                                </span>
+                              </div>
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
-                              <CopyTooltip text={row.customer_name} />
+                            <td className="px-[0.6vw] py-[0.4vw] text-[0.78vw] border-r border-gray-200 whitespace-nowrap">
+                              <div className="flex flex-col">
+                                <span className="font-medium text-gray-900 leading-tight">
+                                  <CopyTooltip text={row.project_name} />
+                                </span>
+                                <span className="text-[0.72vw] text-gray-500 font-normal leading-tight">
+                                  <CopyTooltip text={row.category} />
+                                </span>
+                              </div>
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 font-medium border-r border-gray-200">
-                              <CopyTooltip text={row.project_name} />
-                            </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
-                              <CopyTooltip text={row.category} />
-                            </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-700 border-r border-gray-200">
+                            <td className="px-[0.6vw] py-[0.5vw] text-[0.78vw] text-gray-700 border-r border-gray-200 whitespace-nowrap">
                               <CopyTooltip text={row.reference} />
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] border-r border-gray-200">
-                              <span
-                                className={`px-[0.5vw] py-[0.3vw] rounded-full text-[0.7vw] font-semibold ${
-                                  row.status?.includes("onboard") ||
-                                  row.status === "lead"
-                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                    : row.status?.includes("interested") ||
-                                        row.status === "droped" ||
-                                        row.status === "dropped"
-                                      ? "bg-red-50 text-red-700 border border-red-200"
-                                      : "bg-blue-50 text-blue-700 border border-blue-200"
-                                }`}
-                              >
+                            <td className="px-[0.6vw] py-[0.5vw] border-r border-gray-200 whitespace-nowrap">
+                              <span className="text-[0.78vw] font-semibold text-blue-600">
                                 {formatStatus(row.status)}
                               </span>
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
+                            <td className="px-[0.6vw] py-[0.5vw] text-[0.78vw] text-gray-800 border-r border-gray-200">
                               {row.nextFollowupDate
                                 ? formatDateOnly(row.nextFollowupDate)
                                 : "-"}
                             </td>
-                            <td className="px-[0.6vw] py-[0.3vw] text-center">
-                              <button
-                                onClick={() =>
-                                  fetchClientHistory(
-                                    row.clientID,
-                                    row.company_name,
-                                    row.customer_name,
-                                    row.phone,
-                                  )
-                                }
-                                className="text-blue-600 hover:text-blue-800 font-semibold text-[0.78vw] flex items-center justify-center gap-[0.2vw] mx-auto hover:underline cursor-pointer"
-                              >
-                                <History size={14} /> History
-                              </button>
+                            <td className="px-[0.6vw] py-[0.5vw] text-[0.78vw] text-gray-800 font-medium border-r border-gray-200 whitespace-nowrap">
+                              <CopyTooltip text={row.employee_name} />
+                            </td>
+                            <td className="px-[0.6vw] py-[0.5vw] text-center">
+                              <div className="flex items-center justify-around gap-[0.5vw]">
+                                <button
+                                  onClick={() => handleViewClient(row)}
+                                  className="text-emerald-600 hover:text-emerald-800 font-semibold text-[0.78vw] flex items-center justify-center gap-[0.2vw] hover:underline cursor-pointer"
+                                >
+                              View
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    fetchClientHistory(
+                                      row.clientID,
+                                      row.company_name,
+                                      row.customer_name,
+                                      row.phone,
+                                    )
+                                  }
+                                  className="text-blue-600 hover:text-blue-800 font-semibold text-[0.78vw] flex items-center justify-center gap-[0.2vw] hover:underline cursor-pointer"
+                                >
+                                  <History size={14} /> History
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1633,9 +1950,40 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
                 <div className="flex-1 border border-gray-200 rounded-xl overflow-hidden flex flex-col min-h-0 bg-white shadow-sm">
                   <div className="flex-1 overflow-y-auto overflow-x-auto">
                     {meetingsLoading ? (
-                      <div className="h-full flex justify-center items-center">
-                        <div className="animate-spin rounded-full h-[2.5vw] w-[2.5vw] border-b-2 border-blue-600" />
-                      </div>
+                      <table className="w-full border-collapse animate-pulse">
+                        <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
+                          <tr>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[3vw]">S.No</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Date & Time</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Company Name</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Project Name</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Title</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">Type</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Agenda</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200">Contact Person</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[6vw]">Status</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-left text-[0.78vw] font-bold text-gray-700 border-b border-r border-gray-200 w-[7vw]">Handled By</th>
+                            <th className="px-[0.5vw] py-[0.5vw] text-center text-[0.78vw] font-bold text-gray-700 border-b border-gray-200 w-[5vw]">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {Array.from({ length: 8 }).map((_, idx) => (
+                            <tr key={idx} className="border-b border-gray-150">
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[60%] mx-auto" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[80%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.85vw] bg-gray-250 rounded w-[85%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[75%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[70%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-purple-100 rounded-full w-[70%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[80%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[75%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-emerald-100 rounded-full w-[75%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] border-r border-gray-200"><div className="h-[0.8vw] bg-gray-200 rounded w-[70%]" /></td>
+                              <td className="px-[0.5vw] py-[0.7vw] text-center"><div className="h-[0.8vw] bg-gray-200 rounded w-[50%] mx-auto" /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     ) : filteredMeetings.length === 0 ? (
                       <div className="h-full flex items-center justify-center text-gray-500 text-[0.9vw]">
                         No meetings found
@@ -1986,6 +2334,16 @@ const ManagementAnalytics = ({ employeeId: propEmployeeId = undefined }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* View Client Details Modal */}
+      {viewClientModalOpen && (
+        <ClientAddModal
+          isOpen={viewClientModalOpen}
+          onClose={() => setViewClientModalOpen(false)}
+          isViewOnly={true}
+          editData={viewClientData}
+        />
       )}
     </div>
   );
