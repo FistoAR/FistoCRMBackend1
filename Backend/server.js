@@ -55,7 +55,7 @@ app.use(
       "https://www.fist-o.com",
       "https://fistocrmbackend1-2.onrender.com",
       "https://fistocrmbackend1-1-n61p.onrender.com",
-      "https://fisto-crm-frontend-11.vercel.app/"
+      "https://fisto-crm-frontend-11.vercel.app"
     ],
     credentials: true,
   })
