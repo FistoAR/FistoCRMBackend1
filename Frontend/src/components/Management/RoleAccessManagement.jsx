@@ -79,12 +79,6 @@ const ALL_SYSTEM_TABS = [
     desc: "Maintenance & Maid Attendance",
     path: "/maid",
   },
-  {
-    group: "Human Resource",
-    label: "Role Access",
-    desc: "Role & Permission Settings",
-    path: "/roleAccess",
-  },
 
   // ─── Project Management Section ───
   {
@@ -142,6 +136,12 @@ const ALL_SYSTEM_TABS = [
     label: "Marketing Leads",
     desc: "Marketing Leads Tracker",
     path: "/marketingLeeds",
+  },
+  {
+    group: "Management",
+    label: "Role Access",
+    desc: "Role & Permission Settings",
+    path: "/roleAccess",
   },
 
   // ─── General Section ───
