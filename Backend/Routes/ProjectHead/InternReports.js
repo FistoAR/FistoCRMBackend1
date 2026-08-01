@@ -232,19 +232,19 @@ function expandLeaveToDays(leave, startDate, endDate) {
         morning_out: null,
         afternoon_in: null,
         afternoon_out: null,
-        total_hours: "LEAVE",
+        total_hours: leave.leave_type === "On-Duty" ? "ON-DUTY" : "LEAVE",
         tasks: [
           {
-            project_name: "LEAVE",
+            project_name: leave.leave_type === "On-Duty" ? "ON-DUTY" : "LEAVE",
             task_name: leave.leave_type || "Planned Leave",
-            outcome: leave.reason || "Personal Leave",
+            outcome: leave.reason || (leave.leave_type === "On-Duty" ? "Official Work" : "Personal Leave"),
             status: leave.status || "Pending",
             team_head_status: phStatus,
             management_status: mgmtStatus,
             from_date: leaveStartStr,
             to_date: leaveEndStr,
             reason: leave.reason || "",
-            task_type: "leave",
+            task_type: leave.leave_type === "On-Duty" ? "on_duty" : "leave",
             percentage: 0
           },
         ],

@@ -390,55 +390,45 @@ const RequestsTab = ({
 
   // Get Final Status
   const getFinalStatus = (request) => {
-    const { team_head_status, management_status } = request;
-    const emp = (activeEmployees || []).find(e => (e.employee_id || e.employeeId || e.userName) === request.employee_id);
-    const empDesignation = (emp?.designation || "").toLowerCase();
-    const isEmpPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
+    const { team_head_status, management_status, status } = request;
 
-    if (isEmpPHorSBU) {
-      if (management_status) {
-        return {
-          status: management_status,
-          label:
-            management_status === "approved"
-              ? "Approved"
-              : management_status === "rejected"
-                ? "Rejected"
-                : "On Hold",
-          color:
-            management_status === "approved"
-              ? "bg-green-100 text-green-800"
-              : management_status === "rejected"
-                ? "bg-red-100 text-red-800"
-                : "bg-yellow-100 text-yellow-800",
-        };
-      }
+    if (
+      status === "approved" ||
+      team_head_status === "approved" ||
+      management_status === "approved"
+    ) {
       return {
-        status: "pending",
-        label: "Pending",
-        color: "bg-gray-100 text-gray-800",
+        status: "approved",
+        label: "Approved",
+        color: "bg-green-100 text-green-800",
       };
     }
 
-    if (management_status) {
+    if (
+      status === "rejected" ||
+      management_status === "rejected" ||
+      team_head_status === "rejected"
+    ) {
       return {
-        status: management_status,
-        label:
-          management_status === "approved"
-            ? "Approved"
-            : management_status === "rejected"
-              ? "Rejected"
-              : "On Hold",
-        color:
-          management_status === "approved"
-            ? "bg-green-100 text-green-800"
-            : management_status === "rejected"
-              ? "bg-red-100 text-red-800"
-              : "bg-yellow-100 text-yellow-800",
+        status: "rejected",
+        label: "Rejected",
+        color: "bg-red-100 text-red-800",
       };
     }
 
-    if (team_head_status) {
+    if (
+      status === "hold" ||
+      management_status === "hold" ||
+      team_head_status === "hold"
+    ) {
+      return {
+        status: "hold",
+        label: "On Hold",
+        color: "bg-yellow-100 text-yellow-800",
+      };
+    }
+
+    if (team_head_status && team_head_status !== "pending") {
       return {
         status: "pending_management",
         label: "Management Pending",
@@ -901,76 +891,76 @@ const RequestsTab = ({
               </p>
             </div>
           ) : (
-            <div className="flex-1 min-h-0 overflow-auto p-[0.8vw] bg-white">
+            <div className="flex-1 min-h-0 overflow-auto bg-white">
               <table className="w-full border-collapse border border-gray-300 bg-white">
-                <thead className="bg-[#E2EBFF] sticky top-0 z-10">
+                <thead className="sticky top-0 z-10 bg-[#E2EBFF]">
                   <tr>
                     {requestSubTab === "Leave Request" ? (
                       <>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           S.NO
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Employee
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Submitted on
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Leave Type
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           From
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           To
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Duration
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Reason
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           By Project Head
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           By Management
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Action
                         </th>
                       </>
                     ) : (
                       <>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           S.NO
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Employee
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Submitted on
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Permission Date
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           From Time
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           To Time
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Duration
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Reason
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Action
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Approved By
                         </th>
                       </>
@@ -987,7 +977,7 @@ const RequestsTab = ({
                         {startIndex + index + 1}
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                        {renderEmployeeCell(req)}
+                        {renderEmployeeCell(req, null, activeEmployees)}
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
                         {formatDateTime(req.created_at)}

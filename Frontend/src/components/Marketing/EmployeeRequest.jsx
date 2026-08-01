@@ -29,6 +29,8 @@ const EmployeeRequest = () => {
   const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
   const designation = (userData.designation || "").toLowerCase();
   const isPHorSBU = designation.includes("project head") || designation.includes("sbu");
+  const currentEmployeeId = userData.userName || userData.employee_id || userData.employeeId || "";
+  const currentEmployeeName = userData.employeeName || userData.employee_name || currentEmployeeId;
 
   const [mainTab, setMainTab] = useState("applyLeave");
   const [subTab, setSubTab] = useState("leave");
@@ -44,14 +46,6 @@ const EmployeeRequest = () => {
     fromTime: "",
     toTime: "",
     permissionDuration: "",
-    reasonPermission: "",
-    meetingDetails: "",
-    meetingDate: "",
-    meetingFromTime: "",
-    meetingToTime: "",
-    meetingDuration: "",
-    attendees: [],
-    meetingDescription: "",
     leaveDurationType: "full",
   });
 
@@ -138,13 +132,8 @@ const EmployeeRequest = () => {
       const to = new Date(`2000-01-01T${formData.toTime}`);
       const duration = (to - from) / (1000 * 60);
       setFormData((prev) => ({ ...prev, permissionDuration: duration.toFixed(1) }));
-    } else if (mainTab === "scheduleMeeting" && formData.meetingFromTime && formData.meetingToTime) {
-      const from = new Date(`2000-01-01T${formData.meetingFromTime}`);
-      const to = new Date(`2000-01-01T${formData.meetingToTime}`);
-      const duration = (to - from) / (1000 * 60);
-      setFormData((prev) => ({ ...prev, meetingDuration: duration.toFixed(0) }));
     }
-  }, [formData.fromTime, formData.toTime, formData.meetingFromTime, formData.meetingToTime, mainTab]);
+  }, [formData.fromTime, formData.toTime, mainTab]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -183,8 +172,7 @@ const EmployeeRequest = () => {
     setFormData({
       leaveType: "", customLeaveType: "", fromDate: "", toDate: "", numberOfDays: "",
       reasonForLeave: "", permissionDate: "", fromTime: "", toTime: "", permissionDuration: "",
-      reasonPermission: "", meetingDetails: "", meetingDate: "", meetingFromTime: "",
-      meetingToTime: "", meetingDuration: "", attendees: [], meetingDescription: "", leaveDurationType: "full",
+      reasonPermission: "", leaveDurationType: "full",
     });
   };
 
@@ -269,36 +257,6 @@ const EmployeeRequest = () => {
         if (result.success) { showToast("Success", "Permission request submitted successfully!"); clearForm(); }
         else showToast("Error", result.error || "Failed to submit permission request");
       }
-
-      if (mainTab === "scheduleMeeting") {
-        if (!formData.meetingDetails || !formData.meetingDate || !formData.meetingFromTime || !formData.meetingToTime || formData.attendees.length === 0) {
-          showToast("Error", "Please fill all required fields and select at least one attendee");
-          setIsSubmitting(false);
-          return;
-        }
-        const response = await fetch(`${API_BASE_URL}/employee-requests/meeting-requests`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-user-data": JSON.stringify(userData) },
-          body: JSON.stringify({
-            meeting_title: formData.meetingDetails,
-            meeting_date: formData.meetingDate,
-            from_time: formData.meetingFromTime,
-            to_time: formData.meetingToTime,
-            duration_minutes: parseFloat(formData.meetingDuration),
-            attendees: formData.attendees,
-            description: formData.meetingDescription || null,
-          }),
-        });
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          showToast("Error", "Server returned an invalid response");
-          setIsSubmitting(false);
-          return;
-        }
-        const result = await response.json();
-        if (result.success) { showToast("Success", "Meeting scheduled successfully!"); clearForm(); }
-        else showToast("Error", result.error || "Failed to schedule meeting");
-      }
     } catch (error) {
       console.error("Submit error:", error);
       showToast("Error", `Network error: ${error.message}`);
@@ -328,30 +286,53 @@ const EmployeeRequest = () => {
   };
 
   const getFinalStatus = (request) => {
-    const { team_head_status, management_status } = request;
+    const { team_head_status, management_status, status } = request;
 
-    if (isPHorSBU) {
-      if (management_status) {
-        return {
-          label: management_status === "approved" ? "Approved" : management_status === "rejected" ? "Rejected" : "On Hold",
-          color: management_status === "approved" ? "bg-green-100 text-green-800" : management_status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800",
-        };
-      }
-      return { label: "Pending", color: "bg-gray-100 text-gray-800" };
+    if (status === "approved" || team_head_status === "approved" || management_status === "approved") {
+      return { label: "Approved", color: "bg-green-100 text-green-800" };
     }
 
-    if (management_status) {
-      return {
-        label: management_status === "approved" ? "Approved" : management_status === "rejected" ? "Rejected" : "On Hold",
-        color: management_status === "approved" ? "bg-green-100 text-green-800" : management_status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800",
-      };
+    if (status === "rejected" || management_status === "rejected" || team_head_status === "rejected") {
+      return { label: "Rejected", color: "bg-red-100 text-red-800" };
     }
-    if (team_head_status) return { label: "Management Pending", color: "bg-blue-100 text-blue-800" };
+
+    if (status === "hold" || management_status === "hold" || team_head_status === "hold") {
+      return { label: "On Hold", color: "bg-yellow-100 text-yellow-800" };
+    }
+
+    if (team_head_status && team_head_status !== "pending") {
+      return { label: "Management Pending", color: "bg-blue-100 text-blue-800" };
+    }
+
     return { label: "Project Head Pending", color: "bg-gray-100 text-gray-800" };
   };
 
   const renderLeaveForm = () => (
     <div className="grid grid-cols-3 gap-[1vw]">
+      <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+          Employee Name
+        </label>
+        <input
+          type="text"
+          readOnly
+          value={currentEmployeeName || "-"}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50 text-gray-800 font-medium cursor-not-allowed"
+        />
+      </div>
+
+      <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+          Employee ID
+        </label>
+        <input
+          type="text"
+          readOnly
+          value={currentEmployeeId || "-"}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50 text-blue-700 font-semibold cursor-not-allowed"
+        />
+      </div>
+
       <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
           Leave Type <span className="text-red-500">*</span>
@@ -370,20 +351,24 @@ const EmployeeRequest = () => {
           <select name="leaveType" value={formData.leaveType} onChange={handleLeaveTypeChange}
             className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 cursor-pointer">
             <option value="">Select Leave Type</option>
-            <option value="Sick Leave">Sick Leave</option>
             <option value="Casual Leave">Casual Leave</option>
-            <option value="Annual Leave">Annual Leave</option>
+            <option value="Sick Leave">Sick Leave</option>
+            <option value="Planned Leave">Planned Leave</option>
+            <option value="Medical Leave">Medical Leave</option>
+            <option value="On-Duty">On-Duty</option>
             <option value="Maternity Leave">Maternity Leave</option>
             <option value="Paternity Leave">Paternity Leave</option>
             <option value="Other">Other</option>
           </select>
         )}
       </div>
+
       <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">From Date <span className="text-red-500">*</span></label>
         <input type="date" name="fromDate" value={formData.fromDate} onChange={handleInputChange}
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
       </div>
+
       <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
           To Date <span className="text-gray-400 text-[0.7vw]">(Optional for single day)</span>
@@ -392,28 +377,29 @@ const EmployeeRequest = () => {
           min={formData.fromDate} disabled={!formData.fromDate}
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 disabled:bg-gray-100" />
       </div>
-      <div className="flex flex-col">
-        <div className="col-span-2 flex flex-col mb-[0.5vw]">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Leave Duration <span className="text-red-500">*</span></label>
-          <div className="flex gap-[1vw]">
-            {[["full", "Full Day(s)"], ["morning", "Morning Half"], ["afternoon", "Afternoon Half"]].map(([val, label]) => (
-              <label key={val} className="flex items-center gap-[0.3vw] cursor-pointer">
-                <input type="radio" name="leaveDurationType" value={val}
-                  checked={formData.leaveDurationType === val} onChange={handleInputChange}
-                  className="w-[1vw] h-[1vw]" />
-                <span className="text-[0.85vw]">{label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
+
       <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Number of Days</label>
         <input type="text" readOnly
           value={formData.numberOfDays ? `${formData.numberOfDays} ${parseInt(formData.numberOfDays) === 1 ? "day" : "days"}` : ""}
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50" />
       </div>
-      <div className="col-span-2 flex flex-col">
+
+      <div className="col-span-3 flex flex-col mb-[0.2vw]">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Leave Duration <span className="text-red-500">*</span></label>
+        <div className="flex gap-[1vw]">
+          {[["full", "Full Day(s)"], ["morning", "Morning Half"], ["afternoon", "Afternoon Half"]].map(([val, label]) => (
+            <label key={val} className="flex items-center gap-[0.3vw] cursor-pointer">
+              <input type="radio" name="leaveDurationType" value={val}
+                checked={formData.leaveDurationType === val} onChange={handleInputChange}
+                className="w-[1vw] h-[1vw]" />
+              <span className="text-[0.85vw]">{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="col-span-3 flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Reason for Leave <span className="text-red-500">*</span></label>
         <textarea name="reasonForLeave" value={formData.reasonForLeave} onChange={handleInputChange} rows="4"
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 resize-none"
@@ -425,20 +411,35 @@ const EmployeeRequest = () => {
   const renderPermissionForm = () => (
     <div className="grid grid-cols-2 gap-[1vw]">
       <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+          Employee Name
+        </label>
+        <input
+          type="text"
+          readOnly
+          value={currentEmployeeName || "-"}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50 text-gray-800 font-medium cursor-not-allowed"
+        />
+      </div>
+
+      <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+          Employee ID
+        </label>
+        <input
+          type="text"
+          readOnly
+          value={currentEmployeeId || "-"}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50 text-blue-700 font-semibold cursor-not-allowed"
+        />
+      </div>
+
+      <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Date <span className="text-red-500">*</span></label>
         <input type="date" name="permissionDate" value={formData.permissionDate} onChange={handleInputChange}
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
       </div>
-      <div className="flex flex-col">
-        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">From Time <span className="text-red-500">*</span></label>
-        <input type="time" name="fromTime" value={formData.fromTime} onChange={handleInputChange}
-          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
-      </div>
-      <div className="flex flex-col">
-        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">To Time <span className="text-red-500">*</span></label>
-        <input type="time" name="toTime" value={formData.toTime} onChange={handleInputChange}
-          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
-      </div>
+
       <div className="flex flex-col">
         <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Permission Duration</label>
         <input type="text" readOnly
@@ -449,6 +450,18 @@ const EmployeeRequest = () => {
               : "border-gray-300 bg-gray-50"
           }`}
         />
+      </div>
+
+      <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">From Time <span className="text-red-500">*</span></label>
+        <input type="time" name="fromTime" value={formData.fromTime} onChange={handleInputChange}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
+      </div>
+
+      <div className="flex flex-col">
+        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">To Time <span className="text-red-500">*</span></label>
+        <input type="time" name="toTime" value={formData.toTime} onChange={handleInputChange}
+          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
       </div>
 
       {/* ✅ Live warning banner — appears instantly when duration crosses 3 hrs */}
@@ -480,87 +493,6 @@ const EmployeeRequest = () => {
         <textarea name="reasonPermission" value={formData.reasonPermission} onChange={handleInputChange} rows="4"
           className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 resize-none"
           placeholder="Enter reason for permission..." />
-      </div>
-    </div>
-  );
-
-  const renderMeetingForm = () => (
-    <div className="space-y-[1vw]">
-      <div className="flex flex-col">
-        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Meeting Title <span className="text-red-500">*</span></label>
-        <input type="text" name="meetingDetails" value={formData.meetingDetails} onChange={handleInputChange}
-          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500"
-          placeholder="Enter meeting title..." />
-      </div>
-      <div className="grid grid-cols-2 gap-[1vw]">
-        <div className="flex flex-col">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Meeting Date <span className="text-red-500">*</span></label>
-          <input type="date" name="meetingDate" value={formData.meetingDate} onChange={handleInputChange}
-            className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
-        </div>
-        <div className="flex flex-col">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Duration</label>
-          <input type="text" readOnly value={formData.meetingDuration ? `${formData.meetingDuration} mins` : ""}
-            className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg bg-gray-50" />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-[1vw]">
-        <div className="flex flex-col">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">From Time <span className="text-red-500">*</span></label>
-          <input type="time" name="meetingFromTime" value={formData.meetingFromTime} onChange={handleInputChange}
-            className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
-        </div>
-        <div className="flex flex-col">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">To Time <span className="text-red-500">*</span></label>
-          <input type="time" name="meetingToTime" value={formData.meetingToTime} onChange={handleInputChange}
-            className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500" />
-        </div>
-      </div>
-      <div className="flex flex-col">
-        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Attendees <span className="text-red-500">*</span></label>
-        <select onChange={(e) => {
-          const selectedId = e.target.value;
-          if (selectedId) {
-            const emp = employees.find((e) => e.employee_id === selectedId);
-            if (emp && !formData.attendees.find((a) => a.employee_id === selectedId)) toggleAttendee(emp);
-          }
-          e.target.value = "";
-        }} disabled={loadingEmployees}
-          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 cursor-pointer disabled:bg-gray-100">
-          <option value="">{loadingEmployees ? "Loading employees..." : "Select Employee"}</option>
-          {employees.filter((emp) => !formData.attendees.find((a) => a.employee_id === emp.employee_id))
-            .map((emp) => (
-              <option key={emp.employee_id} value={emp.employee_id}>
-                {emp.employee_name} ({emp.employee_id})
-              </option>
-            ))}
-        </select>
-        {formData.attendees.length > 0 && (
-          <div className="mt-[0.5vw] p-[0.5vw] border border-blue-200 rounded-lg bg-blue-50 max-h-[8vw] overflow-y-auto">
-            <div className="flex flex-wrap gap-[0.4vw]">
-              {formData.attendees.map((attendee) => (
-                <div key={attendee.employee_id}
-                  className="flex items-center gap-[0.3vw] bg-white border border-blue-200 rounded-lg px-[0.5vw] py-[0.25vw] text-[0.8vw] shadow-sm">
-                  <span className="text-gray-700 font-medium">{attendee.employee_name}</span>
-                  <span className="text-gray-400 text-[0.7vw]">({attendee.employee_id})</span>
-                  <button onClick={() => removeAttendee(attendee.employee_id)}
-                    className="ml-[0.2vw] text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-full p-[0.15vw] transition-all">
-                    <X size="0.8vw" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="mt-[0.3vw] text-[0.75vw] text-blue-600 font-medium">
-          {formData.attendees.length} {formData.attendees.length === 1 ? "employee" : "employees"} selected
-        </div>
-      </div>
-      <div className="flex flex-col">
-        <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">Meeting Description</label>
-        <textarea name="meetingDescription" value={formData.meetingDescription} onChange={handleInputChange} rows="4"
-          className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500 resize-none"
-          placeholder="Enter meeting description..." />
       </div>
     </div>
   );
@@ -617,13 +549,13 @@ const EmployeeRequest = () => {
           ) : (
             <div className="h-full border border-gray-300 rounded-xl overflow-auto">
               <table className="w-full border-collapse border border-gray-300">
-                <thead className="bg-[#E2EBFF] sticky top-0">
+                <thead className="sticky top-0 z-10 bg-[#E2EBFF]">
                   <tr>
                     {(isPHorSBU 
-                      ? ["S.NO","Submitted On","Leave Type","From","To","Duration","Reason","By Management","Final Status"]
-                      : ["S.NO","Submitted On","Leave Type","From","To","Duration","Reason","By Project Head","By Management","Final Status"]
+                      ? ["S.NO", "Employee", "Submitted On", "Leave Type", "From", "To", "Duration", "Reason", "By Management", "Final Status"]
+                      : ["S.NO", "Employee", "Submitted On", "Leave Type", "From", "To", "Duration", "Reason", "By Project Head", "By Management", "Final Status"]
                     ).map((h) => (
-                      <th key={h} className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">{h}</th>
+                      <th key={h} className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -631,6 +563,16 @@ const EmployeeRequest = () => {
                   {currentData.map((req, index) => (
                     <tr key={req.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">{(currentPage - 1) * RECORDS_PER_PAGE + index + 1}</td>
+                      <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                        <div>
+                          <div className="text-[0.86vw] font-semibold text-gray-900 leading-tight">
+                            {req.employee_name || req.employeeName || currentEmployeeName || req.employee_id}
+                          </div>
+                          <div className="text-[0.74vw] font-medium text-blue-700 leading-tight">
+                            {req.employee_id || req.employeeId || currentEmployeeId}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">{formatDateTime(req.created_at)}</td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">{req.leave_type}</td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">{formatDate(req.from_date)}</td>
@@ -678,10 +620,10 @@ const EmployeeRequest = () => {
           ) : (
             <div className="h-full border border-gray-300 rounded-xl overflow-auto">
               <table className="w-full border-collapse border border-gray-300">
-                <thead className="bg-[#E2EBFF] sticky top-0">
+                <thead className="sticky top-0 z-10 bg-[#E2EBFF]">
                   <tr>
-                    {["S.NO","Submitted On","Date","From","To","Duration","Reason","Status","Approved By"].map((h) => (
-                      <th key={h} className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">{h}</th>
+                    {["S.NO", "Employee", "Submitted On", "Date", "From", "To", "Duration", "Reason", "Status", "Approved By"].map((h) => (
+                      <th key={h} className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -689,6 +631,16 @@ const EmployeeRequest = () => {
                   {currentData.map((req, index) => (
                     <tr key={req.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">{(currentPage - 1) * RECORDS_PER_PAGE + index + 1}</td>
+                      <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                        <div>
+                          <div className="text-[0.86vw] font-semibold text-gray-900 leading-tight">
+                            {req.employee_name || req.employeeName || currentEmployeeName || req.employee_id}
+                          </div>
+                          <div className="text-[0.74vw] font-medium text-blue-700 leading-tight">
+                            {req.employee_id || req.employeeId || currentEmployeeId}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">{formatDateTime(req.created_at)}</td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">{formatDate(req.permission_date)}</td>
                       <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">{req.from_time}</td>
@@ -716,8 +668,6 @@ const EmployeeRequest = () => {
     } else if (mainTab === "requestPermission") {
       if (subTab === "permission") return renderPermissionForm();
       if (subTab === "permissionHistory") return renderPermissionHistory();
-    } else if (mainTab === "scheduleMeeting") {
-      return renderMeetingForm();
     }
     return null;
   };
@@ -735,7 +685,6 @@ const EmployeeRequest = () => {
             {[
               { id: "applyLeave", label: "Leave Request", sub: "leave" },
               { id: "requestPermission", label: "Permission Request", sub: "permission" },
-              { id: "scheduleMeeting", label: "Schedule Meeting", sub: null },
             ].map(({ id, label, sub }) => (
               <button key={id} onClick={() => { setMainTab(id); if (sub) setSubTab(sub); clearForm(); }}
                 className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${mainTab === id ? "border-b-2 border-black text-black" : "text-gray-600 hover:text-gray-900"}`}>
@@ -757,7 +706,7 @@ const EmployeeRequest = () => {
                       className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${subTab === "leave" ? "border-b-2 border-black text-black" : "text-gray-600 hover:text-gray-900"}`}>
                       Apply Leave
                     </button>
-                    <button onClick={() => setSubTab("leaveHistory")}
+                    <button onClick={() => { setSubTab("leaveHistory"); clearForm(); }}
                       className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${subTab === "leaveHistory" ? "border-b-2 border-black text-black" : "text-gray-600 hover:text-gray-900"}`}>
                       Leave History
                     </button>
@@ -767,9 +716,9 @@ const EmployeeRequest = () => {
                   <>
                     <button onClick={() => { setSubTab("permission"); clearForm(); }}
                       className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${subTab === "permission" ? "border-b-2 border-black text-black" : "text-gray-600 hover:text-gray-900"}`}>
-                      Apply Permission
+                      Request Permission
                     </button>
-                    <button onClick={() => setSubTab("permissionHistory")}
+                    <button onClick={() => { setSubTab("permissionHistory"); clearForm(); }}
                       className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${subTab === "permissionHistory" ? "border-b-2 border-black text-black" : "text-gray-600 hover:text-gray-900"}`}>
                       Permission History
                     </button>
@@ -786,7 +735,6 @@ const EmployeeRequest = () => {
               {mainTab === "applyLeave" && subTab === "leaveHistory" && "Leave History"}
               {mainTab === "requestPermission" && subTab === "permission" && "New Permission Request"}
               {mainTab === "requestPermission" && subTab === "permissionHistory" && "Permission History"}
-              {mainTab === "scheduleMeeting" && "Schedule New Meeting"}
             </h2>
           </div>
 
@@ -794,8 +742,7 @@ const EmployeeRequest = () => {
 
           {/* Submit buttons */}
           {((mainTab === "applyLeave" && subTab === "leave") ||
-            (mainTab === "requestPermission" && subTab === "permission") ||
-            mainTab === "scheduleMeeting") && (
+            (mainTab === "requestPermission" && subTab === "permission")) && (
             <div className="p-[1vw] border-t border-gray-200 bg-gray-50">
               <div className="flex gap-[0.8vw]">
                 <button onClick={handleSubmit} disabled={isSubmitting || isPermissionBlocked}

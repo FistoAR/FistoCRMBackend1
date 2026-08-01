@@ -3,25 +3,37 @@ import { User } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL1;
 
-export const renderEmployeeCell = (data, empId) => {
+export const renderEmployeeCell = (data, empId, allEmployees = []) => {
   const isObject = typeof data === "object" && data !== null;
-  const name = isObject
-    ? (data.employee_name || data.employeeName || data.employee_id || data.employeeId)
-    : data;
-  const id = isObject
+  const rawId = isObject
     ? (data.employee_id || data.employeeId)
     : empId;
-  const profileUrl = isObject ? data.profile_url : null;
+  
+  let rawName = isObject
+    ? (data.employee_name || data.employeeName)
+    : data;
+
+  // Fallback to employee list if rawName is missing or same as ID
+  if ((!rawName || rawName === rawId) && Array.isArray(allEmployees) && rawId) {
+    const foundEmp = allEmployees.find(
+      (e) => (e.employee_id || e.employeeId || e.userName) === rawId
+    );
+    if (foundEmp) {
+      rawName = foundEmp.employee_name || foundEmp.employeeName;
+    }
+  }
+
+  const name = rawName && rawName !== rawId ? rawName : (rawId || "-");
+  const id = rawId;
 
   return (
     <div className="flex items-center gap-[0.5vw]">
-   
       <div>
-        <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
-          {name || "-"}
+        <div className="text-[0.86vw] font-semibold text-gray-900 leading-tight">
+          {name}
         </div>
         {id && (
-          <div className="text-[0.72vw] text-gray-500 leading-tight">
+          <div className="text-[0.74vw] font-medium text-blue-700 leading-tight">
             {id}
           </div>
         )}

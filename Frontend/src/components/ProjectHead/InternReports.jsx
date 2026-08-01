@@ -983,7 +983,7 @@ const InternReports = () => {
 
                       // Helper to find the first attendance task index
                       const firstAttendanceIndex = tasks.findIndex(
-                        (t) => t.task_type !== "leave",
+                        (t) => t.task_type !== "leave" && t.task_type !== "on_duty",
                       );
 
                       return (
@@ -992,12 +992,13 @@ const InternReports = () => {
                         >
                           {hasTasks ? (
                             tasks.map((task, taskIndex) => {
-                              const isLeave = task.task_type === "leave";
+                              const isLeave = task.task_type === "leave" || task.task_type === "on_duty";
+                              const isOnDuty = task.task_type === "on_duty" || task.task_name === "On-Duty";
 
                               return (
                                 <tr
                                   key={`task_${taskIndex}`}
-                                  className={`border-b ${isLeave ? "bg-yellow-100 text-black" : "hover:bg-gray-50"}`}
+                                  className={`border-b ${isOnDuty ? "bg-blue-50 text-black" : isLeave ? "bg-yellow-100 text-black" : "hover:bg-gray-50"}`}
                                 >
                                   {/* Identity Columns: S.No, Employee, Date */}
                                   {taskIndex === 0 && (
@@ -1121,23 +1122,23 @@ const InternReports = () => {
                                       colSpan={
                                         reportType === "management" ? 7 : 10
                                       }
-                                      className="px-[1vw] py-[0.6vw] border border-gray-300 bg-yellow-50/30"
+                                      className={`px-[1vw] py-[0.6vw] border border-gray-300 ${isOnDuty ? "bg-blue-50/40" : "bg-yellow-50/30"}`}
                                     >
                                       <div className="flex items-center justify-between w-full">
                                         <div className="flex items-center gap-[1.5vw]">
                                           <div className="flex flex-col">
-                                            <span className="text-[0.85vw] font-medium text-[#b47c32] leading-none mb-[0.1vw]">
-                                              Leave type
+                                            <span className={`text-[0.85vw] font-medium leading-none mb-[0.1vw] ${isOnDuty ? "text-blue-700" : "text-[#b47c32]"}`}>
+                                              {isOnDuty ? "Request Type" : "Leave type"}
                                             </span>
                                             <span className=" text-gray-900 text-[0.9vw] whitespace-nowrap">
                                               {task.task_name}
                                             </span>
                                           </div>
 
-                                          <div className="h-[1.5vw] w-[1px] bg-yellow-200"></div>
+                                          <div className={`h-[1.5vw] w-[1px] ${isOnDuty ? "bg-blue-200" : "bg-yellow-200"}`}></div>
 
                                           <div className="flex flex-col">
-                                            <span className="text-[0.85vw] font-medium text-[#b47c32] leading-none mb-[0.1vw]">
+                                            <span className={`text-[0.85vw] font-medium leading-none mb-[0.1vw] ${isOnDuty ? "text-blue-700" : "text-[#b47c32]"}`}>
                                               Reason
                                             </span>
                                             <span className="text-gray-700 text-[0.85vw] font-medium italic">

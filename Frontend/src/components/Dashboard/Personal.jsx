@@ -795,6 +795,8 @@ const TodayTasksCard = ({
         return "Unscheduled";
       case "leave":
         return "Leave";
+      case "onDuty":
+        return "On-Duty";
       case "noTask":
         return "No Task";
       default:
@@ -867,22 +869,25 @@ const TodayTasksCard = ({
         if (!withReports.has(empId)) {
           const leaveInfo = approvedLeaveMap.get(empId);
           if (leaveInfo) {
+            const isOnDuty = leaveInfo.leave_type === "On-Duty";
             items.push({
               id: `leave-${empId}`,
-              type: "leave",
+              type: isOnDuty ? "onDuty" : "leave",
               priority: 0,
-              taskName: "On Leave",
+              taskName: isOnDuty ? "On-Duty" : "On Leave",
               activityName: null,
-              description: leaveInfo.reason
-                ? `Leave Approved: ${leaveInfo.reason}`
-                : `Leave Approved (${leaveInfo.leave_type || "Leave"})`,
+              description: isOnDuty
+                ? (leaveInfo.reason ? `On-Duty: ${leaveInfo.reason}` : `On-Duty Approved`)
+                : (leaveInfo.reason
+                    ? `Leave Approved: ${leaveInfo.reason}`
+                    : `Leave Approved (${leaveInfo.leave_type || "Leave"})`),
               employeeId: empId,
               projectName: "",
               startDate: leaveInfo.from_date || "",
               startTime: "",
               endDate: leaveInfo.to_date || new Date().toISOString().split("T")[0],
               endTime: "",
-              status: "Leave",
+              status: isOnDuty ? "On-Duty" : "Leave",
             });
           } else {
             items.push({
@@ -1004,11 +1009,11 @@ const TodayTasksCard = ({
         if (!hasTasksA && !hasTasksB) return 0;
 
         const timestampsA = itemsA
-          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .filter((it) => it.type !== "noTask" && it.type !== "leave" && it.type !== "onDuty")
           .map((it) => getItemTimestamp(it))
           .filter((t) => t > 0);
         const timestampsB = itemsB
-          .filter((it) => it.type !== "noTask" && it.type !== "leave")
+          .filter((it) => it.type !== "noTask" && it.type !== "leave" && it.type !== "onDuty")
           .map((it) => getItemTimestamp(it))
           .filter((t) => t > 0);
 
@@ -1170,7 +1175,8 @@ const TodayTasksCard = ({
       const showAvatar = item.avatar && !imageErrors[item.id];
       const isHov = tooltipItem?.id === item.id;
       const isLeave = item.type === "leave";
-      const isNone = item.type === "noTask" || isLeave;
+      const isOnDuty = item.type === "onDuty";
+      const isNone = item.type === "noTask" || isLeave || isOnDuty;
       return (
         <div
           key={item.id}
@@ -1249,8 +1255,8 @@ const TodayTasksCard = ({
                   fontSize: "0.6vw",
                   padding: "0.1vw 0.42vw",
                   borderRadius: "0.21vw",
-                  backgroundColor: isLeave ? "#FEF3C7" : item.type === "noTask" ? "#FEE2E2" : "#F3F4F6",
-                  color: isLeave ? "#D97706" : item.type === "noTask" ? "#DC2626" : "#6B7280",
+                  backgroundColor: isOnDuty ? "#E0F2FE" : isLeave ? "#FEF3C7" : item.type === "noTask" ? "#FEE2E2" : "#F3F4F6",
+                  color: isOnDuty ? "#0369A1" : isLeave ? "#D97706" : item.type === "noTask" ? "#DC2626" : "#6B7280",
                   fontWeight: "500",
                 }}
               >

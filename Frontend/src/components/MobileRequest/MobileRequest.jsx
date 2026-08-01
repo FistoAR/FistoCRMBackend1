@@ -281,6 +281,18 @@ const EmployeeRequest = () => {
               {!loadingEmployees && employees.length === 0 && (
                 <p className="text-xs md:text-sm text-red-500 mt-1">No employees found. Please refresh.</p>
               )}
+              {selectedEmp && (
+                <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs md:text-sm mt-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-500">Employee Name:</span>
+                    <span className="font-bold text-gray-900">{selectedEmp.employee_name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-500">Employee ID:</span>
+                    <span className="font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">{selectedEmp.employee_id}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Leave Type */}
@@ -310,12 +322,14 @@ const EmployeeRequest = () => {
                   name="leaveType"
                   value={formData.leaveType}
                   onChange={handleLeaveTypeChange}
-                  className="px-3 py-2.5 md:px-4 md:py-3 text-sm md:text-base border border-gray-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                  className="px-3 py-2.5 md:px-4 md:py-3 text-sm md:text-base border border-gray-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 cursor-pointer"
                 >
                   <option value="">Select Leave Type</option>
-                  <option value="Sick Leave">Sick Leave</option>
                   <option value="Casual Leave">Casual Leave</option>
-                  <option value="Annual Leave">Annual Leave</option>
+                  <option value="Sick Leave">Sick Leave</option>
+                  <option value="Planned Leave">Planned Leave</option>
+                  <option value="Medical Leave">Medical Leave</option>
+                  <option value="On-Duty">On-Duty</option>
                   <option value="Maternity Leave">Maternity Leave</option>
                   <option value="Paternity Leave">Paternity Leave</option>
                   <option value="Other">Other</option>

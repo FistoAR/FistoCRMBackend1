@@ -41,9 +41,11 @@ router.get("/leave-requests", async (req, res) => {
       LEFT JOIN employees_details ed ON lr.employee_id = ed.employee_id
       ORDER BY 
         CASE 
-          WHEN lr.management_status IS NULL AND lr.team_head_status IS NULL THEN 0
-          WHEN lr.management_status IS NULL AND lr.team_head_status IS NOT NULL THEN 1
-          WHEN lr.management_status IS NOT NULL THEN 2
+          WHEN (lr.management_status IS NULL OR lr.management_status = 'hold' OR lr.management_status = 'pending')
+               AND (lr.team_head_status IS NULL OR lr.team_head_status = 'hold' OR lr.team_head_status = 'pending') THEN 0
+          WHEN (lr.management_status IS NULL OR lr.management_status = 'hold' OR lr.management_status = 'pending')
+               AND lr.team_head_status IS NOT NULL AND lr.team_head_status NOT IN ('hold', 'pending') THEN 1
+          ELSE 2
         END ASC,
         lr.created_at DESC
     `;
@@ -132,7 +134,7 @@ router.patch("/leave-requests/:id/update-approval", async (req, res) => {
         WHERE id = ?
       `;
 
-      const overallStatus = action === "hold" ? "pending" : "pending";
+      const overallStatus = action === "approved" ? "approved" : action === "rejected" ? "rejected" : "pending";
       updateParams = [action, remark, updated_by, overallStatus, id];
     } else if (designation === "Admin") {
       updateQuery = `
@@ -288,7 +290,7 @@ router.get("/permission-requests", async (req, res) => {
       LEFT JOIN employees_details ed ON pr.employee_id = ed.employee_id
       ORDER BY 
         CASE 
-          WHEN pr.status = 'pending' THEN 0 
+          WHEN pr.status = 'pending' OR pr.status = 'hold' OR pr.status IS NULL THEN 0 
           WHEN pr.status = 'approved' THEN 1 
           WHEN pr.status = 'rejected' THEN 2 
         END ASC,
