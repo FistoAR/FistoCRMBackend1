@@ -24,6 +24,11 @@ function calculateSalaryBreakdown(basicSalary, month, year, totalLeaveDays, paid
   
   // Calculate unpaid leave deduction (supports 0.5 increments)
   const unpaidLeaveDays = Math.max(0, totalLeaveDays - paidLeaveDays);
+
+  if (unpaidLeaveDays > workingDays) {
+    throw new Error(`Unpaid leave (${unpaidLeaveDays}) cannot exceed working days in month (${workingDays})`);
+  }
+
   const totalDeductionAmount = perDaySalary * unpaidLeaveDays;
   
   return {
@@ -230,42 +235,78 @@ router.post("/save-salary", async (req, res) => {
       bonus,
       medical,
       other_allowance,
-      created_by
+      created_by,
+      updated_by
     } = req.body;
 
-    // Validate required fields
-    if (!employee_id || !month || !year || basic_salary === undefined) {
+    const createdBy = req.user?.userName || created_by || updated_by || 'admin';
+    const parsedBasicSalary = parseFloat(basic_salary);
+    const parsedMonth = parseInt(month);
+    const parsedYear = parseInt(year);
+
+    // Validate required fields and basic_salary
+    if (
+      !employee_id ||
+      !month ||
+      !year ||
+      basic_salary === undefined ||
+      isNaN(parsedBasicSalary) ||
+      parsedBasicSalary < 0
+    ) {
       return res.status(400).json({ 
         success: false, 
-        error: "Employee ID, month, year, and basic salary are required" 
+        error: "A valid, non-negative basic salary is required" 
       });
     }
 
-    // Validate leave days format (only 0.5 increments allowed)
+    // Validate month range (1-12)
+    if (isNaN(parsedMonth) || parsedMonth < 1 || parsedMonth > 12) {
+      return res.status(400).json({
+        success: false,
+        error: "Month must be between 1 and 12"
+      });
+    }
+
+    // Validate leave days format (only non-negative 0.5 increments allowed)
     const validateHalfIncrement = (value) => {
       const num = parseFloat(value);
-      return (num * 2) % 1 === 0; // Check if it's in 0.5 increments
+      return !isNaN(num) && num >= 0 && (num * 2) % 1 === 0;
     };
 
-    if (!validateHalfIncrement(total_leave_days) || !validateHalfIncrement(paid_leave_days)) {
+    if (
+      (total_leave_days !== undefined && !validateHalfIncrement(total_leave_days)) ||
+      (paid_leave_days !== undefined && !validateHalfIncrement(paid_leave_days))
+    ) {
       return res.status(400).json({ 
         success: false, 
         error: "Leave days must be in 0.5 increments (e.g., 1, 1.5, 2, 2.5)" 
       });
     }
 
+    if (parseFloat(paid_leave_days || 0) > parseFloat(total_leave_days || 0)) {
+      return res.status(400).json({
+        success: false,
+        error: "Paid leave days cannot exceed total leave days"
+      });
+    }
+
     // Calculate salary breakdown
-    const breakdown = calculateSalaryBreakdown(
-      parseFloat(basic_salary),
-      parseInt(month),
-      parseInt(year),
-      parseFloat(total_leave_days || 0),
-      parseFloat(paid_leave_days || 0)
-    );
+    let breakdown;
+    try {
+      breakdown = calculateSalaryBreakdown(
+        parsedBasicSalary,
+        parsedMonth,
+        parsedYear,
+        parseFloat(total_leave_days || 0),
+        parseFloat(paid_leave_days || 0)
+      );
+    } catch (calcErr) {
+      return res.status(400).json({ success: false, error: calcErr.message });
+    }
 
     // Calculate final total salary
     const totalSalary = 
-      parseFloat(basic_salary) - 
+      parsedBasicSalary - 
       breakdown.totalDeductionAmount + 
       parseFloat(incentive || 0) + 
       parseFloat(bonus || 0) + 
@@ -277,7 +318,7 @@ router.post("/save-salary", async (req, res) => {
       SELECT id FROM salary_calculation 
       WHERE employee_id = ? AND month = ? AND year = ?
     `;
-    const existing = await queryWithRetry(checkQuery, [employee_id, month, year]);
+    const existing = await queryWithRetry(checkQuery, [employee_id, parsedMonth, parsedYear]);
 
     let query;
     let params;
@@ -301,7 +342,7 @@ router.post("/save-salary", async (req, res) => {
         WHERE employee_id = ? AND month = ? AND year = ?
       `;
       params = [
-        basic_salary,
+        parsedBasicSalary,
         total_leave_days || 0,
         paid_leave_days || 0,
         breakdown.totalDeductionAmount,
@@ -311,12 +352,12 @@ router.post("/save-salary", async (req, res) => {
         medical || 0,
         other_allowance || 0,
         totalSalary,
-        created_by || 'admin',
+        createdBy,
         employee_id,
-        month,
-        year
+        parsedMonth,
+        parsedYear
       ];
-      console.log(`🔄 Updating salary for ${employee_id} - ${month}/${year} by ${created_by}`);
+      console.log(`🔄 Updating salary for ${employee_id} - ${parsedMonth}/${parsedYear} by ${createdBy}`);
     } else {
       // Insert new record
       query = `
@@ -329,9 +370,9 @@ router.post("/save-salary", async (req, res) => {
       `;
       params = [
         employee_id,
-        month,
-        year,
-        basic_salary,
+        parsedMonth,
+        parsedYear,
+        parsedBasicSalary,
         total_leave_days || 0,
         paid_leave_days || 0,
         breakdown.totalDeductionAmount,
@@ -341,9 +382,9 @@ router.post("/save-salary", async (req, res) => {
         medical || 0,
         other_allowance || 0,
         totalSalary,
-        created_by || 'admin'
+        createdBy
       ];
-      console.log(`➕ Creating new salary for ${employee_id} - ${month}/${year} by ${created_by}`);
+      console.log(`➕ Creating new salary for ${employee_id} - ${parsedMonth}/${parsedYear} by ${createdBy}`);
     }
 
     await queryWithRetry(query, params);
@@ -508,7 +549,7 @@ router.get("/summary/:month/:year", async (req, res) => {
 router.post("/update-leave", async (req, res) => {
   console.log("✅ UPDATE LEAVE HIT!");
   try {
-    const { employee_id, month, year, total_leave_days, paid_leave_days } = req.body;
+    const { employee_id, month, year, total_leave_days, paid_leave_days, updated_by, created_by } = req.body;
 
     if (!employee_id || !month || !year) {
       return res.status(400).json({
@@ -517,10 +558,20 @@ router.post("/update-leave", async (req, res) => {
       });
     }
 
-    // Validate 0.5 increments
+    const parsedMonth = parseInt(month);
+    const parsedYear = parseInt(year);
+
+    if (isNaN(parsedMonth) || parsedMonth < 1 || parsedMonth > 12) {
+      return res.status(400).json({
+        success: false,
+        error: "Month must be between 1 and 12",
+      });
+    }
+
+    // Validate 0.5 increments and non-negative values
     const validateHalfIncrement = (value) => {
       const num = parseFloat(value);
-      return (num * 2) % 1 === 0;
+      return !isNaN(num) && num >= 0 && (num * 2) % 1 === 0;
     };
 
     if (
@@ -545,26 +596,17 @@ router.post("/update-leave", async (req, res) => {
 
     // Check if salary record exists
     const checkQuery = `
-      SELECT id, basic_salary, incentive, bonus, medical, other_allowance 
+      SELECT id, basic_salary, total_leave_days, paid_leave_days, incentive, bonus, medical, other_allowance 
       FROM salary_calculation 
       WHERE employee_id = ? AND month = ? AND year = ?
     `;
     const existing = await queryWithRetry(checkQuery, [
       employee_id,
-      month,
-      year,
+      parsedMonth,
+      parsedYear,
     ]);
 
-    let userName = "admin";
-    try {
-      const userDataString = sessionStorage?.getItem?.("user");
-      if (userDataString) {
-        const userData = JSON.parse(userDataString);
-        userName = userData.userName || "admin";
-      }
-    } catch (error) {
-      console.log("Using default user 'admin'");
-    }
+    const userName = req.user?.userName || updated_by || created_by || "admin";
 
     if (existing.length === 0) {
       // 🆕 CREATE NEW RECORD if it doesn't exist
@@ -590,7 +632,22 @@ router.post("/update-leave", async (req, res) => {
       // Calculate unpaid leave
       const totalLeave = parseFloat(total_leave_days || 0);
       const paidLeave = parseFloat(paid_leave_days || 0);
-      const unpaidLeave = Math.max(0, totalLeave - paidLeave);
+
+      if (paidLeave > totalLeave) {
+        return res.status(400).json({
+          success: false,
+          error: "Paid leave days cannot exceed total leave days",
+        });
+      }
+
+      let breakdown;
+      try {
+        breakdown = calculateSalaryBreakdown(0, parsedMonth, parsedYear, totalLeave, paidLeave);
+      } catch (calcErr) {
+        return res.status(400).json({ success: false, error: calcErr.message });
+      }
+
+      const unpaidLeave = breakdown.unpaidLeaveDays;
 
       // Insert new record with default values for salary components
       const insertQuery = `
@@ -605,8 +662,8 @@ router.post("/update-leave", async (req, res) => {
 
       await queryWithRetry(insertQuery, [
         employee_id,
-        month,
-        year,
+        parsedMonth,
+        parsedYear,
         totalLeave,
         paidLeave,
         unpaidLeave,
@@ -655,18 +712,26 @@ router.post("/update-leave", async (req, res) => {
           ? parseFloat(paid_leave_days)
           : parseFloat(existing[0].paid_leave_days || 0);
 
-      // Calculate unpaid leave and deduction
-      const unpaidLeave = Math.max(0, currentTotal - currentPaid);
+      if (currentPaid > currentTotal) {
+        return res.status(400).json({
+          success: false,
+          error: "Paid leave days cannot exceed total leave days",
+        });
+      }
+
       const basicSalary = parseFloat(existing[0].basic_salary || 0);
 
-      let deductionAmount = 0;
-      if (basicSalary > 0) {
-        const totalDaysInMonth = new Date(year, month, 0).getDate();
-        const sundays = getSundaysInMonth(month, year);
-        const workingDays = totalDaysInMonth - sundays;
-        const perDaySalary = basicSalary / workingDays;
-        deductionAmount = perDaySalary * unpaidLeave;
+      let breakdown;
+      try {
+        breakdown = calculateSalaryBreakdown(basicSalary, parsedMonth, parsedYear, currentTotal, currentPaid);
+      } catch (calcErr) {
+        return res.status(400).json({ success: false, error: calcErr.message });
+      }
 
+      const unpaidLeave = breakdown.unpaidLeaveDays;
+      const deductionAmount = breakdown.totalDeductionAmount;
+
+      if (basicSalary > 0) {
         // Recalculate total salary
         const totalSalary =
           basicSalary -
@@ -686,8 +751,11 @@ router.post("/update-leave", async (req, res) => {
       updateFields.push("total_deduction_days = ?");
       updateValues.push(unpaidLeave);
 
+      updateFields.push("updated_by = ?");
+      updateValues.push(userName);
+
       updateFields.push("updated_at = CURRENT_TIMESTAMP");
-      updateValues.push(employee_id, month, year);
+      updateValues.push(employee_id, parsedMonth, parsedYear);
 
       const updateQuery = `
         UPDATE salary_calculation 

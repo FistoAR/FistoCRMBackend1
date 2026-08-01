@@ -590,8 +590,8 @@ const SalaryCalculationTab = ({
 
   // Handle leave input change for HR designation
   const handleLeaveInputChange = async (employeeId, field, value) => {
-    const numValue = parseFloat(value) || 0;
-    const roundedValue = Math.round(numValue * 2) / 2; // Support 0.5 increments
+    const rawVal = Math.max(0, parseFloat(value) || 0);
+    const roundedValue = Math.round(rawVal * 2) / 2; // Support 0.5 increments
 
     // Optimistically update UI first
     setEmployeeSalaries((prev) =>
@@ -969,6 +969,7 @@ const SalaryCalculationTab = ({
                                 <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
                                   <input
                                     type="number"
+                                    min="0"
                                     step="0.5"
                                     value={emp.salaryData?.totalLeaveDays || 0}
                                     onChange={(e) =>
@@ -986,6 +987,7 @@ const SalaryCalculationTab = ({
                                 <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
                                   <input
                                     type="number"
+                                    min="0"
                                     step="0.5"
                                     value={emp.salaryData?.paidLeaveDays || 0}
                                     onChange={(e) =>

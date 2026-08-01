@@ -94,22 +94,31 @@ const SalaryModal = ({
     const totalDaysInMonth = new Date(year, month, 0).getDate();
     const sundays = getSundaysInMonth(month, year);
     const workingDays = totalDaysInMonth - sundays;
-    const perDaySalary = workingDays > 0 ? (formData.basic_salary / workingDays) : 0;
+
+    const basicSalary = Math.max(0, parseFloat(formData.basic_salary) || 0);
+    const totalLeaveDays = Math.max(0, parseFloat(formData.total_leave_days) || 0);
+    const paidLeaveDays = Math.max(0, parseFloat(formData.paid_leave_days) || 0);
+    const incentive = Math.max(0, parseFloat(formData.incentive) || 0);
+    const bonus = Math.max(0, parseFloat(formData.bonus) || 0);
+    const medical = Math.max(0, parseFloat(formData.medical) || 0);
+    const otherAllowance = Math.max(0, parseFloat(formData.other_allowance) || 0);
+
+    const perDaySalary = workingDays > 0 ? (basicSalary / workingDays) : 0;
 
     const unpaidLeaveDays = Math.max(
       0,
-      formData.total_leave_days - formData.paid_leave_days
+      totalLeaveDays - paidLeaveDays
     );
 
     const totalDeductionAmount = perDaySalary * unpaidLeaveDays;
 
-    const salaryAfterDeduction = formData.basic_salary - totalDeductionAmount;
+    const salaryAfterDeduction = basicSalary - totalDeductionAmount;
     const total =
       salaryAfterDeduction +
-      formData.incentive +
-      formData.bonus +
-      formData.medical +
-      formData.other_allowance;
+      incentive +
+      bonus +
+      medical +
+      otherAllowance;
 
     setTotalSalary(total);
     setSalaryBreakdown({
@@ -123,7 +132,14 @@ const SalaryModal = ({
   };
 
   const handleLeaveInput = (field, value) => {
-    const numValue = parseFloat(value) || 0;
+    if (value === "") {
+      setFormData((prev) => ({
+        ...prev,
+        [field]: "",
+      }));
+      return;
+    }
+    const numValue = Math.max(0, parseFloat(value) || 0);
     const roundedValue = Math.round(numValue * 2) / 2;
     setFormData((prev) => ({
       ...prev,
@@ -132,9 +148,17 @@ const SalaryModal = ({
   };
 
   const handleInputChange = (field, value) => {
+    if (value === "") {
+      setFormData((prev) => ({
+        ...prev,
+        [field]: "",
+      }));
+      return;
+    }
+    const numValue = Math.max(0, parseFloat(value) || 0);
     setFormData((prev) => ({
       ...prev,
-      [field]: parseFloat(value) || 0,
+      [field]: numValue,
     }));
   };
 
@@ -320,6 +344,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   value={formData.basic_salary}
                   onChange={(e) =>
                     handleInputChange("basic_salary", e.target.value)
@@ -350,6 +375,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   step="0.5"
                   value={formData.total_leave_days}
                   onChange={(e) =>
@@ -365,6 +391,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   step="0.5"
                   value={formData.paid_leave_days}
                   onChange={(e) =>
@@ -414,6 +441,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   value={formData.incentive}
                   onChange={(e) =>
                     handleInputChange("incentive", e.target.value)
@@ -428,6 +456,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   value={formData.bonus}
                   onChange={(e) => handleInputChange("bonus", e.target.value)}
                   placeholder="₹ 0"
@@ -440,6 +469,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   value={formData.medical}
                   onChange={(e) => handleInputChange("medical", e.target.value)}
                   placeholder="₹ 0"
@@ -452,6 +482,7 @@ const SalaryModal = ({
                 </label>
                 <input
                   type="number"
+                  min="0"
                   value={formData.other_allowance}
                   onChange={(e) =>
                     handleInputChange("other_allowance", e.target.value)
