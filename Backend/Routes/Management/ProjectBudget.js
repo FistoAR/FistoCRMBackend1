@@ -103,14 +103,20 @@ router.get("/projects", (req, res) => {
       p.end_date         AS endDate,
       p.budget_status    AS budget_status,
       p.budget_status    AS budgetStatus,
+      p.onboard_status   AS onboardStatus,
+      p.onboard_status   AS onboard_status,
       p.created_at       AS createdAt,
+      p.updated_at       AS updatedAt,
+      p.updated_at       AS updated_at,
       pb.total_budget     AS totalBudget,
       pb.starting_date    AS budgetStartingDate,
-      pb.completion_date  AS budgetComplicationDate
+      pb.completion_date  AS budgetComplicationDate,
+      pb.updated_at       AS budgetUpdatedAt
     FROM projects p
     LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
     LEFT JOIN project_budgets pb ON pb.project_id = p.id
-    ORDER BY p.created_at DESC
+    WHERE LOWER(p.onboard_status) = 'onboarded'
+    ORDER BY COALESCE(pb.updated_at, p.updated_at, p.created_at) DESC
   `;
 
   db.pool.query(sql, (err, projects) => {
@@ -147,7 +153,6 @@ router.get("/projects/:id", (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   const { id } = req.params;
-  console.log(`GET /api/budget/projects/${id} called`);
 
   const projectQuery = `
     SELECT 
@@ -269,40 +274,49 @@ router.get("/projects/:id", (req, res) => {
         };
       }
 
-      const compName = projects[0].companyName || "";
-      const custName = projects[0].customerName || "";
+      const pId = projects[0].id || 0;
       const cId = projects[0].clientId || 0;
+      const compName = (projects[0].companyName || "").trim();
+      const custName = (projects[0].customerName || "").trim();
 
-      // Fetch proposal documents submitted during followups (Management & Marketing)
+      // Fetch quotation documents submitted during followups (Management & Marketing)
       const followupDocsQuery = `
-        SELECT mf.id AS followupId, mf.clientID, mf.marketing_client_id, mf.quotation, mf.purchaseOrder, mf.invoice,
+        SELECT mf.id AS followupId, mf.clientID, mf.marketing_client_id, mf.projectId,
+               mf.quotation_path, mf.created_at AS followupDate,
                c.company_name AS mgtCompany, c.customer_name AS mgtCustomer,
                mc.company_name AS mktCompany, mc.customer_name AS mktCustomer
-        FROM ManagementFollowups mf
+        FROM ManagementFollowup mf
         LEFT JOIN ClientsDataManagement c ON mf.clientID = c.id
         LEFT JOIN ClientsData mc ON mf.marketing_client_id = mc.id
-        WHERE ( ? > 0 AND mf.clientID = ? )
-           OR ( ? > 0 AND mf.marketing_client_id = ? )
-           OR ( c.company_name IS NOT NULL AND LOWER(TRIM(c.company_name)) = LOWER(TRIM(?)) )
-           OR ( mc.company_name IS NOT NULL AND LOWER(TRIM(mc.company_name)) = LOWER(TRIM(?)) )
-           OR ( c.customer_name IS NOT NULL AND LOWER(TRIM(c.customer_name)) = LOWER(TRIM(?)) )
-           OR ( mc.customer_name IS NOT NULL AND LOWER(TRIM(mc.customer_name)) = LOWER(TRIM(?)) )
+        WHERE ( ? > 0 AND (mf.clientID = ? OR mf.marketing_client_id = ? OR mf.projectId = ?) )
+           OR ( ? <> '' AND LOWER(TRIM(c.company_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(mc.company_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(c.customer_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(mc.customer_name)) = LOWER(TRIM(?)) )
+        ORDER BY mf.id DESC
       `;
 
       db.pool.query(
         followupDocsQuery,
-        [cId, cId, cId, cId, compName, compName, custName, custName],
+        [
+          cId, cId, cId, pId,
+          compName, compName,
+          compName, compName,
+          custName, custName,
+          custName, custName,
+        ],
         (followupErr, followupRows) => {
           let followupDocuments = [];
-          if (!followupErr && followupRows) {
+          if (followupErr) {
+            console.error("Error fetching followup quotation docs:", followupErr);
+          } else if (followupRows) {
             followupRows.forEach((row) => {
-              ["quotation", "purchaseOrder", "invoice"].forEach((field) => {
-                const val = row[field];
-                if (val) {
-                  let extractedDocs = [];
-                  try {
-                    const parsed = typeof val === "string" ? JSON.parse(val) : val;
-                    if (Array.isArray(parsed)) {
+              const val = row.quotation_path;
+              if (val) {
+                let extractedDocs = [];
+                try {
+                  const parsed = typeof val === "string" ? JSON.parse(val) : val;
+                  if (Array.isArray(parsed)) {
                       extractedDocs = parsed;
                     } else if (typeof parsed === "object" && parsed !== null) {
                       extractedDocs = [parsed];
@@ -316,35 +330,34 @@ router.get("/projects/:id", (req, res) => {
                   }
 
                   extractedDocs.forEach((doc) => {
-                    let relPath = doc.path || doc.filePath || (doc.filename ? `Images/Management/${field === 'quotation' ? 'Quotation' : field === 'purchaseOrder' ? 'PO' : 'Invoice'}/${doc.filename}` : null);
-                    if (relPath && !relPath.startsWith("/")) {
+                    let relPath = doc.path || doc.filePath || doc.previewUrl || doc.driveUrl || (doc.filename ? `Images/Management/Quotation/${doc.filename}` : null);
+                    if (relPath && !relPath.startsWith("http") && !relPath.startsWith("/")) {
                       relPath = `/${relPath}`;
                     }
+                    const docName = doc.originalName || doc.name || (relPath ? relPath.split("/").pop() : "Followup Quotation");
                     const docObj = {
                       followupId: row.followupId,
-                      docId: `followup-${row.followupId}-${doc.filename || doc.convertedName || doc.originalName || doc.name || Math.random()}`,
-                      name: doc.originalName || doc.name || (relPath ? relPath.split("/").pop() : "Followup Document"),
+                      docId: `followup-${row.followupId}-${doc.convertedName || doc.filename || docName}`,
+                      name: docName,
                       convertedName: doc.convertedName || doc.name || doc.originalName,
                       path: relPath,
                       size: doc.size || 0,
-                      uploadedAt: doc.uploadedAt || new Date().toISOString(),
-                      type: field,
+                      uploadedAt: doc.uploadedAt || row.followupDate || new Date().toISOString(),
+                      type: "quotation",
                       isFollowup: true,
                     };
-                    // Ensure deduplication in followupDocuments
                     const exists = followupDocuments.some(
-                      (d) => (d.path && relPath && d.path === relPath) || d.name === docObj.name
+                      (d) => (d.path && relPath && d.path === relPath) || (d.name && docName && d.name === docName)
                     );
                     if (!exists) {
                       followupDocuments.push(docObj);
                     }
                   });
                 }
-              });
             });
           }
 
-          // Keep modal-uploaded documents in documentsData, filter out any legacy stored management followup paths
+          // Keep modal-uploaded documents in documentsData
           const cleanDocumentsData = {
             po: (documentsData.po || []).filter(
               (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
@@ -357,17 +370,11 @@ router.get("/projects/:id", (req, res) => {
             ),
           };
 
-          // From all followup docs, pick the latest (highest followupId) for each type
-          const pickLatest = (type) => {
-            const matches = followupDocuments.filter((d) => d.type === type || (type === "purchaseOrder" && d.type === "po"));
-            if (!matches.length) return null;
-            return matches.reduce((prev, cur) => (cur.followupId > prev.followupId ? cur : prev), matches[0]);
-          };
-
           const latestFollowupDocuments = {
-            quotation: pickLatest("quotation"),
-            po: pickLatest("purchaseOrder"),
-            invoice: pickLatest("invoice"),
+            quotation: followupDocuments.length > 0 ? followupDocuments[0] : null,
+            po: null,
+            invoice: null,
+            quotations: followupDocuments,
           };
 
           res.status(200).json({
@@ -785,6 +792,155 @@ router.delete("/followup-document", (req, res) => {
         return res.status(500).json({ success: false, error: "Failed to update followup document" });
       }
       res.status(200).json({ success: true, message: "Document removed successfully" });
+    });
+  });
+});
+
+// GET - Overview summary statistics and recent entries
+router.get("/overview-summary", (req, res) => {
+  const monthFilter = req.query.month; // e.g. "2026-08"
+
+  const projectSql = `
+    SELECT 
+      p.id AS projectId,
+      COALESCE(c.customer_name, p.project_name) AS customerName,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      p.project_name AS projectName,
+      pb.total_budget AS totalBudget,
+      pb.payments AS paymentsJson,
+      DATE_FORMAT(pb.created_at, '%Y-%m') AS budgetMonth
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
+    LEFT JOIN project_budgets pb ON pb.project_id = p.id
+    WHERE LOWER(p.onboard_status) = 'onboarded'
+  `;
+
+  db.pool.query(projectSql, (err, projectRows) => {
+    if (err) {
+      console.error("Error fetching project overview:", err);
+      return res.status(500).json({ success: false, error: "Failed to fetch overview summary" });
+    }
+
+    let totalProjectBudget = 0;
+    let totalReceivedBudget = 0;
+    const allRecentPayments = [];
+    const projectBreakdownMap = {};
+
+    (projectRows || []).forEach((row) => {
+      const projId = row.projectId;
+      const projBudget = parseFloat(row.totalBudget) || 0;
+      // Only count project budget for the selected month (based on pb.created_at)
+      const budgetMonthMatch = !monthFilter || row.budgetMonth === monthFilter;
+
+      if (!projectBreakdownMap[projId]) {
+        projectBreakdownMap[projId] = {
+          projectId: projId,
+          projectName: row.projectName || "Unnamed Project",
+          customerName: row.customerName || "-",
+          companyName: row.companyName || "-",
+          totalBudget: budgetMonthMatch ? projBudget : 0,
+          receivedBudget: 0,
+        };
+      }
+
+      if (budgetMonthMatch) {
+        totalProjectBudget += projBudget;
+      }
+
+      let payments = [];
+      if (row.paymentsJson) {
+        try {
+          payments = typeof row.paymentsJson === "string" ? JSON.parse(row.paymentsJson) : row.paymentsJson;
+        } catch (e) {}
+      }
+
+      (payments || []).forEach((pmt) => {
+        const amt = parseFloat(pmt.receivedAmount || pmt.amount || pmt.received_amount || 0) || 0;
+        const pmtDateStr = pmt.date || pmt.paymentDate || "";
+        
+        let isMonthMatch = true;
+        if (monthFilter && pmtDateStr) {
+          isMonthMatch = pmtDateStr.startsWith(monthFilter);
+        }
+
+        if (isMonthMatch) {
+          totalReceivedBudget += amt;
+          projectBreakdownMap[projId].receivedBudget += amt;
+
+          if (amt > 0 || pmtDateStr) {
+            allRecentPayments.push({
+              customerName: row.customerName || "-",
+              companyName: row.companyName || "-",
+              projectName: row.projectName || "-",
+              amount: amt,
+              date: pmtDateStr || null,
+              paymentMode: pmt.paymentMode || pmt.mode || "Cash",
+            });
+          }
+        }
+      });
+    });
+
+    const projectBreakdown = Object.values(projectBreakdownMap);
+    allRecentPayments.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const recentPayments = allRecentPayments;
+
+    let companySql = `
+      SELECT 
+        cb.id,
+        DATE_FORMAT(cb.date, '%Y-%m-%d') AS date,
+        cb.payment_method AS paymentMethod,
+        cb.credited_amount AS creditedAmount,
+        cb.debited_amount AS debitedAmount,
+        COALESCE(gm.employee_name, cb.given_member) AS givenMemberName,
+        COALESCE(rm.employee_name, cb.received_member) AS receivedMemberName,
+        cb.reason
+      FROM company_budget cb
+      LEFT JOIN employees_details gm ON cb.given_member = gm.employee_id
+      LEFT JOIN employees_details rm ON cb.received_member = rm.employee_id
+    `;
+
+    const companyParams = [];
+    if (monthFilter) {
+      companySql += ` WHERE DATE_FORMAT(cb.date, '%Y-%m') = ? `;
+      companyParams.push(monthFilter);
+    }
+    companySql += ` ORDER BY cb.date DESC, cb.created_at DESC LIMIT 50 `;
+
+    db.pool.query(companySql, companyParams, (companyErr, companyRows) => {
+      if (companyErr) {
+        console.error("Error fetching company overview:", companyErr);
+        return res.status(500).json({ success: false, error: "Failed to fetch overview summary" });
+      }
+
+      let expenseSql = `
+        SELECT 
+          SUM(debited_amount) AS totalExpenses,
+          SUM(credited_amount) AS totalCredited
+        FROM company_budget
+      `;
+      const expenseParams = [];
+      if (monthFilter) {
+        expenseSql += ` WHERE DATE_FORMAT(date, '%Y-%m') = ? `;
+        expenseParams.push(monthFilter);
+      }
+
+      db.pool.query(expenseSql, expenseParams, (expenseErr, expenseStats) => {
+        const companyTotalCredited = parseFloat(expenseStats?.[0]?.totalCredited) || 0;
+        const companyTotalDebited = parseFloat(expenseStats?.[0]?.totalExpenses) || 0;
+
+        res.status(200).json({
+          success: true,
+          totalProjectBudget,
+          totalReceivedBudget,
+          companyTotalExpenses: companyTotalCredited,
+          companyTotalCredited,
+          companyTotalDebited,
+          projectBreakdown,
+          recentPayments,
+          recentCompanyEntries: companyRows || [],
+        });
+      });
     });
   });
 });

@@ -143,6 +143,12 @@ const ALL_SYSTEM_TABS = [
     desc: "Role & Permission Settings",
     path: "/roleAccess",
   },
+  {
+    group: "Management",
+    label: "Generate PDF",
+    desc: "Generate Official HR & Finance PDF Documents",
+    path: "/generatePdf",
+  },
 
   // ─── General Section ───
   {

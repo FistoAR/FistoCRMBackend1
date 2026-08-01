@@ -117,7 +117,31 @@ router.post(
         });
       }
 
-      // Process uploaded Quotation files to Google Drive (Folder: Management Resource -> Quotation)
+      // Resolve company name for Google Drive folder organization
+      let companyName = (req.body.company_name || req.body.companyName || "").trim();
+      if (!companyName && clientID) {
+        try {
+          const clientRows = await queryWithRetry(
+            `SELECT company_name FROM ClientsDataManagement WHERE id = ?`,
+            [clientID]
+          );
+          if (clientRows && clientRows.length > 0 && clientRows[0].company_name) {
+            companyName = clientRows[0].company_name.trim();
+          } else {
+            const mktClientRows = await queryWithRetry(
+              `SELECT company_name FROM ClientsData WHERE id = ?`,
+              [clientID]
+            );
+            if (mktClientRows && mktClientRows.length > 0 && mktClientRows[0].company_name) {
+              companyName = mktClientRows[0].company_name.trim();
+            }
+          }
+        } catch (e) {
+          console.error("Error fetching company name for Drive upload:", e);
+        }
+      }
+
+      // Process uploaded Quotation files to Google Drive (Folder: Management Resource -> [CompanyName] -> Quotation)
       const quotationFilesData = [];
       if (req.files && req.files.quotation) {
         for (const file of req.files.quotation) {
@@ -126,6 +150,7 @@ router.post(
             originalname: file.originalname,
             mimetype: file.mimetype,
             subfolderName: "Quotation",
+            companyName,
           });
 
           if (driveResult.success) {

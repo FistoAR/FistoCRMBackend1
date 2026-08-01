@@ -16,9 +16,6 @@ import Sidebar from "./components/sidePannel";
 import NavBar from "./components/NavBar";
 
 // Page Components
-import Marketing from "./pages/Marketing/marketing";
-import ProjectHead from "./pages/ProjectHead/ProjectHead";
-import Management from "./pages/management/management";
 import Dashboard from "./pages/Dashboard";
 import Analytics from "./pages/Analytics";
 import Projects from "./layouts/Projects";
@@ -46,13 +43,14 @@ import PHworkdone from "./components/ProjectHead/Workdone";
 
 // Admin / Management Components
 import MarketingAnalytic from "./components/Management/MarketingAnalytics";
-import AdminManagement from "./components/Management/Management";
+import AdminManagement from "./components/Management/Budgets";
 import AdminFollowup from "./components/Management/Followup";
 import ClientMaster from "./components/Management/ClientMaster";
 import MarketingLeeds from "./components/Management/MarketingLeeds";
 import ManagementAnalytics from "./components/Management/ManagementAnalytics";
 import AdminReport from "./components/Management/Report";
 import AdminCalendar from "./components/Management/Calendar";
+import GeneratePDF from "./components/Management/GeneratePDF";
 import RoleAccessManagement from "./components/Management/RoleAccessManagement";
 
 // HR Components (Loaded Directly)
@@ -79,42 +77,7 @@ import { NotificationProvider } from "./components/NotificationContext";
 import { ConfirmProvider } from "./components/ConfirmContext";
 import { usePageTitle } from "./components/PageTitleNav";
 
-// ============ REUSABLE ROUTE COMPONENTS ============
 
-/** Common Project Routes - used by multiple role types */
-// const ProjectRoutes = () => (
-//   <Route path="projects" element={<Projects />}>
-//     <Route path="newProject" element={<NewProject />} />
-//     <Route path="projectOverview" element={<ProjectOverview />}>
-//       <Route path="overview" element={<Overview />} />
-//       <Route path="resources" element={<Resource />} />
-//     </Route>
-//     <Route path="dayTask" element={<DayTask />} />
-//   </Route>
-// );
-
-// /** Common Employee Routes - used by developers, interns, etc. */
-// const CommonEmployeeRoutes = () => (
-//   <>
-//     <Route path="taskCalendar" element={<EmployeeCalendar />} />
-//     <Route path="employeeReports" element={<PHinternReports />} />
-//     <Route path="employeeRequest" element={<MarketingEmployeeRequest />} />
-//   </>
-// );
-
-// /** Developer Routes Template - for Software Developer, Designer, 3D */
-// const DeveloperRouteTemplate = ({ basePath }) => (
-//   <Route path={basePath}>
-//     <Route index element={<Navigate to="dashboard" replace />} />
-//     <Route path="dashboard" element={<Dashboard />} />
-//     <Route path="analytics" element={<Analytics />} />
-//     <Route path="unscheduledTask" element={<UnscheduledTask />} />
-//     {ProjectRoutes()}
-//     {CommonEmployeeRoutes()}
-//   </Route>
-// );
-
-// ============ NAVBAR WITH TITLE ============
 
 function NavBarWithTitle({ socketData }) {
   const pageTitle = usePageTitle();
@@ -178,6 +141,7 @@ function AppContent() {
                 <Route path="budgets" element={<AdminManagement />} />
                 <Route path="clientsData" element={<ClientMaster />} />
                 <Route path="followup" element={<AdminFollowup />} />
+                <Route path="generatePdf" element={<GeneratePDF />} />
                 <Route path="marketingLeeds" element={<MarketingLeeds />} />
                 <Route path="roleAccess" element={<RoleAccessManagement />} />
                 <Route path="report" element={<AdminReport />} />

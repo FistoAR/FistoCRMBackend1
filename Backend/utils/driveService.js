@@ -688,7 +688,13 @@ async function uploadEmployeeDocToDrive({ filePath, originalname, mimetype, docC
  * under 'Management Resource' -> [subfolderName] (e.g. 'Quotation').
  * Returns preview path containing Google Drive file ID (/api/drive/preview/${fileId}).
  */
-async function uploadManagementResourceToDrive({ filePath, originalname, mimetype, subfolderName = "Quotation" }) {
+async function uploadManagementResourceToDrive({
+  filePath,
+  originalname,
+  mimetype,
+  subfolderName = "Quotation",
+  companyName = "",
+}) {
   const hasTokens = loadTokens();
   if (!hasTokens) {
     console.warn("⚠️ Drive Service: No Drive tokens loaded, falling back.");
@@ -699,10 +705,18 @@ async function uploadManagementResourceToDrive({ filePath, originalname, mimetyp
     // 1. Get or create master parent folder "Management Resource" under ROOT_FOLDER_ID
     let mainFolderId = await getOrCreateSubfolder("Management Resource", ROOT_FOLDER_ID);
 
-    // 2. Get or create subfolder (e.g., 'Quotation') inside "Management Resource"
-    let targetFolderId = await getOrCreateSubfolder(subfolderName, mainFolderId);
+    // 2. If companyName is specified, create/get company folder inside "Management Resource"
+    let targetFolderId = mainFolderId;
+    if (companyName && companyName.trim()) {
+      targetFolderId = await getOrCreateSubfolder(companyName.trim(), mainFolderId);
+    }
 
-    // 3. Upload file to Drive under target folder
+    // 3. Get or create subfolder (e.g., 'Quotation') inside target company folder
+    if (subfolderName && subfolderName.trim()) {
+      targetFolderId = await getOrCreateSubfolder(subfolderName.trim(), targetFolderId);
+    }
+
+    // 4. Upload file to Drive under target folder
     let fileRes;
     try {
       fileRes = await drive.files.create({
@@ -719,11 +733,14 @@ async function uploadManagementResourceToDrive({ filePath, originalname, mimetyp
       });
     } catch (createErr) {
       console.warn("⚠️ Drive upload target folder failed, re-creating missing folder structure...", createErr.message);
-      delete folderCache[`${ROOT_FOLDER_ID}_Management Resource`];
-      delete folderCache[`${mainFolderId}_${subfolderName}`];
-
       mainFolderId = await getOrCreateSubfolder("Management Resource", ROOT_FOLDER_ID);
-      targetFolderId = await getOrCreateSubfolder(subfolderName, mainFolderId);
+      targetFolderId = mainFolderId;
+      if (companyName && companyName.trim()) {
+        targetFolderId = await getOrCreateSubfolder(companyName.trim(), mainFolderId);
+      }
+      if (subfolderName && subfolderName.trim()) {
+        targetFolderId = await getOrCreateSubfolder(subfolderName.trim(), targetFolderId);
+      }
 
       fileRes = await drive.files.create({
         resource: {
@@ -742,7 +759,6 @@ async function uploadManagementResourceToDrive({ filePath, originalname, mimetyp
     const fileId = fileRes.data.id;
     const previewUrl = `/api/drive/preview/${fileId}`;
 
-    // Clean up local temp file after upload
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);

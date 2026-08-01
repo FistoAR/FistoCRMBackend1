@@ -15,6 +15,10 @@ import {
   Download 
 } from "lucide-react";
 
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import fistoLogo from "../../../assets/Fisto Logo.png";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const API_BASE_URL1 = import.meta.env.VITE_API_BASE_URL1;
 
@@ -104,10 +108,10 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
 
   const fetchProposedClients = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/ManagementFollowups?status=proposed`);
+      const res = await fetch(`${API_BASE_URL}/ManagementFollowups?status=quotation`);
       const data = await res.json();
-      if (data.success) {
-        setProposedClients(data.data || []);
+      if (data.success || Array.isArray(data)) {
+        setProposedClients(Array.isArray(data) ? data : data.data || []);
       }
     } catch (err) {
       console.error("Error fetching proposed clients:", err);
@@ -119,40 +123,38 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     return !projects.some(p => p.companyName?.toLowerCase() === company?.toLowerCase());
   });
 
-  const fetchOnboardedProjects = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/ManagementFollowups/onboarded-projects`);
-      const data = await res.json();
-      console.log("Onboarded Projects API Response:", data);
-      if (data.success) {
-        setOnboardedProjects(data.data || []);
-      }
-    } catch (err) {
-      console.error("Error fetching onboarded projects:", err);
-    }
-  };
-
-  const pendingOnboardedProjects = onboardedProjects.filter(p => p.budget_status === "pending");
-
   useEffect(() => {
-    // Fire all 3 startup fetches in parallel — no sequential blocking
-    Promise.all([fetchProjects(), fetchProposedClients(), fetchOnboardedProjects()]);
+    Promise.all([fetchProjects(), fetchProposedClients()]);
   }, []);
 
 
-  // Auto-open create modal when navigated from onboard confirmation
+  // Auto-open project budget update modal when navigated from onboard confirmation
   useEffect(() => {
     if (prefillProject) {
-      setCreateFormData({
-        companyName: prefillProject.companyName || "",
-        customerName: prefillProject.customerName || "",
-        projectName: prefillProject.projectName || "",
-        projectCategory: prefillProject.projectCategory || "",
-      });
-      setShowCreateModal(true);
+      const match = projects.find(
+        (p) =>
+          p.projectName?.toLowerCase() === prefillProject.projectName?.toLowerCase() ||
+          p.companyName?.toLowerCase() === prefillProject.companyName?.toLowerCase()
+      );
+
+      if (match) {
+        openAddModal(match);
+      } else {
+        setFormData({
+          projectId: prefillProject.id || "",
+          companyName: prefillProject.companyName || "",
+          customerName: prefillProject.customerName || "",
+          projectName: prefillProject.projectName || "",
+          projectCategory: prefillProject.projectCategory || "",
+          totalBudget: "",
+          startingDate: "",
+          complicationDate: "",
+        });
+        setShowModal(true);
+      }
       if (onPrefillConsumed) onPrefillConsumed();
     }
-  }, [prefillProject]);
+  }, [prefillProject, projects]);
 
   useEffect(() => {
     if (
@@ -235,6 +237,13 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       });
     }
 
+    // Sort by updated_at DESC
+    result.sort((a, b) => {
+      const dateA = new Date(a.budgetUpdatedAt || a.updatedAt || a.updated_at || a.createdAt || a.created_at || 0).getTime();
+      const dateB = new Date(b.budgetUpdatedAt || b.updatedAt || b.updated_at || b.createdAt || b.created_at || 0).getTime();
+      return dateB - dateA;
+    });
+
     setFilteredProjects(result);
   }, [searchTerm, statusFilter, filterCreatedAt, filterStartDate, filterEndDate, projects]);
 
@@ -265,9 +274,12 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       const res = await fetch(`${API_BASE_URL}/budget/projects`);
       const data = await res.json();
       if (data.success) {
-        // Backend now JOINs project_budgets — no per-project calls needed
-        setProjects(data.projects || []);
-        setFilteredProjects(data.projects || []);
+        // Backend now JOINs project_budgets — filter for onboarded status
+        const onboardedOnly = (data.projects || []).filter(
+          (p) => (p.onboard_status || p.onboardStatus || "").toLowerCase() === "onboarded"
+        );
+        setProjects(onboardedOnly);
+        setFilteredProjects(onboardedOnly);
       } else {
         showToast("Error", data.error || "Failed to load projects");
       }
@@ -331,7 +343,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     return totalReceived > totalBudget + 0.01;
   };
 
-  const disabledPayments = isBudgetFullyPaid();
+  const disabledPayments = false;
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -391,10 +403,20 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
 
   const viewDocument = (docPath, docName) => {
     if (!docPath) return;
+    if (docPath.startsWith("http://") || docPath.startsWith("https://")) {
+      window.open(docPath, "_blank");
+      return;
+    }
     const url = `${API_BASE_URL1}${docPath}`;
-    const ext = docPath.split(".").pop().toLowerCase();
-    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(ext);
-    const isPdf = ext === "pdf";
+    
+    // Check file extension from docName first, then docPath
+    const nameExt = (docName || "").split(".").pop().toLowerCase();
+    const pathExt = (docPath || "").split(".").pop().toLowerCase();
+    
+    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(nameExt) ||
+                    ["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(pathExt);
+    const isPdf = nameExt === "pdf" || pathExt === "pdf";
+
     setDocViewer({
       open: true,
       url,
@@ -405,6 +427,10 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
 
   const downloadDocument = async (docPath, docName) => {
     if (!docPath) return;
+    if (docPath.startsWith("http://") || docPath.startsWith("https://")) {
+      window.open(docPath, "_blank");
+      return;
+    }
     try {
       const url = `${API_BASE_URL1}${docPath}`;
       const response = await fetch(url);
@@ -421,6 +447,201 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     } catch (err) {
       showToast("Error", "Failed to download document");
+    }
+  };
+
+  const getFormattedCurrentDateTimeIST = () => {
+    const d = new Date();
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds} IST`;
+  };
+
+  const loadImageAsBase64 = (src) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.src = src;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => resolve(null);
+    });
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth(); // ~210mm
+
+      // Load Fisto Logo
+      let logoData = null;
+      try {
+        logoData = await loadImageAsBase64(fistoLogo);
+      } catch (e) {}
+
+      // Top Left: Logo & Generated Date/Time
+      if (logoData) {
+        doc.addImage(logoData, "PNG", 14, 10, 36, 12);
+      } else {
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 64, 175);
+        doc.text("FISTO", 14, 18);
+      }
+
+      const generatedTime = getFormattedCurrentDateTimeIST();
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139); // Slate-500
+      doc.text(`Generated: ${generatedTime}`, 14, 27);
+
+      // Top Right: Document Title
+      doc.setFontSize(14);
+      // Top Right: Document Title
+      doc.setFontSize(15);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(15, 23, 42); // Slate-900
+      doc.text("PROJECT PAYMENT REPORT", pageWidth - 14, 19, { align: "right" });
+
+      // Horizontal Line Divider
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(14, 30, pageWidth - 14, 30);
+
+      // Details Card Box (Company & Client Details + Budget Overview)
+      const startY = 35;
+      doc.setFillColor(248, 250, 252); // Slate-50
+      doc.roundedRect(14, startY, pageWidth - 28, 35, 2, 2, "F");
+      doc.setDrawColor(203, 213, 225); // Slate-300
+      doc.roundedRect(14, startY, pageWidth - 28, 35, 2, 2, "S");
+
+      // Column 1: Client & Company Information
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("COMPANY & CLIENT DETAILS", 18, startY + 7);
+
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(71, 85, 105);
+      doc.text("Company Name:", 18, startY + 14);
+      doc.text("Customer Name:", 18, startY + 20);
+      doc.text("Project Name:", 18, startY + 26);
+      doc.text("Project Category:", 18, startY + 31);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(formData.companyName || "N/A"), 48, startY + 14);
+      doc.text(String(formData.customerName || "N/A"), 48, startY + 20);
+      doc.text(String(formData.projectName || "N/A"), 48, startY + 26);
+      doc.text(String(formData.projectCategory || "N/A"), 48, startY + 31);
+
+      // Column 2: Budget Details Overview
+      const col2X = 112;
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("BUDGET OVERVIEW", col2X, startY + 7);
+
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(71, 85, 105);
+      doc.text("Total Budget:", col2X, startY + 14);
+      doc.text("Starting Date:", col2X, startY + 20);
+      doc.text("Completion Date:", col2X, startY + 26);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(`INR ${formData.totalBudget ? Number(formData.totalBudget).toLocaleString("en-IN") : "0"}`, col2X + 32, startY + 14);
+      doc.text(formatDateDDMMYYYY(formData.startingDate), col2X + 32, startY + 20);
+      doc.text(formatDateDDMMYYYY(formData.complicationDate), col2X + 32, startY + 26);
+
+      // Table Header Section
+      const tableStartY = startY + 42;
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("PAYMENT BREAKDOWN", 14, tableStartY);
+
+      // Build Payment Table
+      const tableHeaders = [
+        ["#", "Payment Date", "Payment Mode", "Received Amount", "Percentage", "Balance Amount"]
+      ];
+
+      const tableBody = payments.map((p, idx) => [
+        idx + 1,
+        formatDateDDMMYYYY(p.date),
+        p.paymentMode || "-",
+        `INR ${Number(p.receivedAmount || 0).toLocaleString("en-IN")}`,
+        `${p.percentage || 0}%`,
+        `INR ${Number(p.balanceAmount || 0).toLocaleString("en-IN")}`,
+      ]);
+
+      // Calculate totals for summary row
+      const totalRec = payments.reduce((acc, curr) => acc + (parseFloat(curr.receivedAmount) || 0), 0);
+      const totalPct = payments.reduce((acc, curr) => acc + (parseFloat(curr.percentage) || 0), 0);
+      const finalBal = payments.length > 0
+        ? parseFloat(payments[payments.length - 1].balanceAmount) || 0
+        : (parseFloat(formData.totalBudget) || 0);
+
+      tableBody.push([
+        { content: "Total", colSpan: 3, styles: { fontStyle: "bold", halign: "right", fillColor: [241, 245, 249] } },
+        { content: `INR ${totalRec.toLocaleString("en-IN")}`, styles: { fontStyle: "bold", halign: "right", fillColor: [241, 245, 249] } },
+        { content: `${totalPct.toFixed(2)}%`, styles: { fontStyle: "bold", halign: "center", fillColor: [241, 245, 249] } },
+        { content: `INR ${finalBal.toLocaleString("en-IN")}`, styles: { fontStyle: "bold", halign: "right", fillColor: [241, 245, 249] } },
+      ]);
+
+      autoTable(doc, {
+        startY: tableStartY + 3,
+        head: tableHeaders,
+        body: tableBody,
+        theme: "grid",
+        headStyles: {
+          fillColor: [30, 58, 138], // Indigo-900 / Deep Blue
+          textColor: [255, 255, 255],
+          fontSize: 8.5,
+          fontStyle: "bold",
+          halign: "center",
+        },
+        bodyStyles: {
+          fontSize: 8,
+          textColor: [30, 41, 59],
+        },
+        columnStyles: {
+          0: { halign: "center", cellWidth: 10 },
+          1: { halign: "center", cellWidth: 32 },
+          2: { halign: "center", cellWidth: 32 },
+          3: { halign: "right", cellWidth: 38 },
+          4: { halign: "center", cellWidth: 28 },
+          5: { halign: "right", cellWidth: 42 },
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+        margin: { left: 14, right: 14 },
+      });
+
+      // Save output PDF file
+      const cleanCompName = (formData.companyName || "Project").replace(/[^a-zA-Z0-9]/g, "_");
+      doc.save(`Payment_Report_${cleanCompName}_${new Date().getTime()}.pdf`);
+      showToast("Success", "Payment report exported successfully as PDF");
+    } catch (err) {
+      console.error("PDF Export Error:", err);
+      showToast("Error", "Failed to export PDF report");
     }
   };
 
@@ -503,14 +724,6 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   };
 
   const addPaymentRow = () => {
-    if (disabledPayments) {
-      showToast(
-        "Info",
-        "Total budget is already fully received. You cannot add more payments."
-      );
-      return;
-    }
-
     setPayments((prev) => [
       ...prev,
       {
@@ -554,12 +767,8 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
   };
 
   const handleSubmit = async () => {
-    if (
-      !formData.totalBudget ||
-      !formData.startingDate ||
-      !formData.complicationDate
-    ) {
-      showToast("Error", "Please fill in all required budget fields");
+    if (!formData.totalBudget) {
+      showToast("Error", "Please enter Total Budget");
       return;
     }
 
@@ -568,12 +777,15 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       return;
     }
 
+    const startingDate = formData.startingDate || toDateInputValue(currentProject?.startDate || new Date());
+    const complicationDate = formData.complicationDate || toDateInputValue(currentProject?.endDate || startingDate);
+
     const formDataToSend = new FormData();
 
     formDataToSend.append("projectId", formData.projectId);
     formDataToSend.append("totalBudget", parseFloat(formData.totalBudget));
-    formDataToSend.append("startingDate", formData.startingDate);
-    formDataToSend.append("complicationDate", formData.complicationDate);
+    formDataToSend.append("startingDate", startingDate);
+    formDataToSend.append("complicationDate", complicationDate);
 
     const validPayments = payments.filter(
       (p) => p.date && p.percentage && p.receivedAmount
@@ -747,11 +959,44 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
     <div className="h-full flex flex-col">
       <div className="flex-1 min-h-0">
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
+          <div className="h-full">
+            <div className="bg-white rounded-xl shadow-sm h-full flex flex-col">
+              {/* Skeleton toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-[0.8vw] p-[0.8vw] border-b border-gray-100 flex-shrink-0">
+                <div className="h-[2vw] w-[18vw] bg-gray-200 rounded-lg animate-pulse" />
+                <div className="flex items-center gap-[0.6vw]">
+                  {[1,2,3,4].map((n) => (
+                    <div key={n} className="h-[2vw] w-[8vw] bg-gray-200 rounded-lg animate-pulse" />
+                  ))}
+                </div>
+              </div>
+              {/* Skeleton table */}
+              <div className="flex-1 min-h-0 mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
+                <table className="w-full border-collapse border border-gray-300">
+                  <thead className="bg-[#E2EBFF] sticky top-0 z-[5]">
+                    <tr>
+                      {["S.No","Date","Company Name","Project Name","Start Date","End Date","Status","Action"].map((col) => (
+                        <th key={col} className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i} className="border-b border-gray-200">
+                        {Array.from({ length: 8 }).map((__, j) => (
+                          <td key={j} className="px-[0.7vw] py-[0.56vw] border border-gray-200">
+                            <div className="h-[1.4vw] bg-gray-200 rounded animate-pulse" />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         ) : (
-          <div className="h-full px-[0.8vw] pb-[0.8vw] pt-[0.8vw]">
+          <div className="h-full ">
             {/* Card wrapper like Resource */}
             <div className="bg-white rounded-xl shadow-sm h-full flex flex-col">
               {/* Top toolbar */}
@@ -938,7 +1183,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                               ? "text-red-700 font-semibold" 
                               : "text-gray-700";
 
-                          const createdDate = project.createdAt || project.created_at;
+                          const updatedDate = project.budgetUpdatedAt || project.updatedAt || project.updated_at || project.createdAt || project.created_at;
                           const startDate = project.budget?.startingDate || project.startDate || project.start_date || project.starting_date;
                           const endDate = project.budget?.complicationDate || project.endDate || project.end_date || project.completion_date;
 
@@ -951,7 +1196,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                 {String(startIndex + index + 1).padStart(2, "0")}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
-                                {formatDateDDMMYYYY(createdDate)}
+                                {formatDateDDMMYYYY(updatedDate)}
                               </td>
                               <td className={`px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300 text-center ${textColorClass}`}>
                                 {project.companyName}
@@ -1024,7 +1269,7 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
       {showModal && (
         <div className="fixed inset-0 bg-white/30 backdrop-blur-[.2vw] flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-[80vw] h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-[1.2vw] border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center justify-between px-[1vw] py-[1vw] border-b border-gray-200 flex-shrink-0">
               <h2 className="text-[1.2vw] font-semibold text-gray-900">
                 {currentProject
                   ? "Update Project Budget"
@@ -1133,67 +1378,6 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                         Upload New Quotation
                       </button>
 
-                      {documents.quotation && documents.quotation.filter(isExistingDocument).length > 0 && (
-                        <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
-                            📁 Saved Quotation
-                          </div>
-                          <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
-                            {documents.quotation
-                              .filter(isExistingDocument)
-                              .map((doc, idx) => (
-                                <div
-                                  key={doc.docId || `quotation-saved-${idx}`}
-                                  className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
-                                >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
-                                    {doc.name}
-                                  </span>
-                                  <div className="flex items-center gap-[0.3vw]">
-                                    {doc.path && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => viewDocument(doc.path)}
-                                          className="text-green-600 hover:text-green-800 p-[0.2vw] hover:bg-green-100 rounded cursor-pointer"
-                                          title="View"
-                                        >
-                                          <Eye size={18} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            downloadDocument(doc.path, doc.name)
-                                          }
-                                          className="text-blue-600 hover:text-blue-800 p-[0.2vw] hover:bg-blue-100 rounded cursor-pointer"
-                                          title="Download"
-                                        >
-                                          <Download  size={18} />
-                                        </button>
-                                      </>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeDocument(
-                                          "quotation",
-                                          documents.quotation.findIndex(
-                                            (d) => d.docId === doc.docId
-                                          )
-                                        )
-                                      }
-                                      className="text-red-500 hover:text-red-700 p-[0.2vw] hover:bg-red-100 rounded cursor-pointer"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={18} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-
                       {documents.quotation && documents.quotation.filter(isNewDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
                           <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
@@ -1255,67 +1439,6 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                         <Upload size={16} />
                         Upload New PO
                       </button>
-
-                      {documents.po.filter(isExistingDocument).length > 0 && (
-                        <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
-                            📁 Saved PO
-                          </div>
-                          <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
-                            {documents.po
-                              .filter(isExistingDocument)
-                              .map((doc, idx) => (
-                                <div
-                                  key={doc.docId || `po-saved-${idx}`}
-                                  className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
-                                >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
-                                    {doc.name}
-                                  </span>
-                                  <div className="flex items-center gap-[0.3vw]">
-                                    {doc.path && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => viewDocument(doc.path)}
-                                          className="text-green-600 hover:text-green-800 p-[0.2vw] hover:bg-green-100 rounded cursor-pointer"
-                                          title="View"
-                                        >
-                                          <Eye size={18} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            downloadDocument(doc.path, doc.name)
-                                          }
-                                          className="text-blue-600 hover:text-blue-800 p-[0.2vw] hover:bg-blue-100 rounded cursor-pointer"
-                                          title="Download"
-                                        >
-                                          <Download  size={18} />
-                                        </button>
-                                      </>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeDocument(
-                                          "po",
-                                          documents.po.findIndex(
-                                            (d) => d.docId === doc.docId
-                                          )
-                                        )
-                                      }
-                                      className="text-red-500 hover:text-red-700 p-[0.2vw] hover:bg-red-100 rounded cursor-pointer"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={18} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
 
                       {documents.po.filter(isNewDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
@@ -1379,67 +1502,6 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                         Upload New Invoice
                       </button>
 
-                      {documents.invoice.filter(isExistingDocument).length > 0 && (
-                        <div className="mt-[0.8vw]">
-                          <div className="text-[0.75vw] font-semibold text-gray-700 mb-[0.3vw]">
-                            📁 Saved Invoice
-                          </div>
-                          <div className="space-y-[0.3vw] max-h-[12vh] overflow-y-auto">
-                            {documents.invoice
-                              .filter(isExistingDocument)
-                              .map((doc, idx) => (
-                                <div
-                                  key={doc.docId || `invoice-saved-${idx}`}
-                                  className="flex items-center justify-between p-[0.5vw] bg-green-50 rounded border border-green-200"
-                                >
-                                  <span className="text-[0.8vw] text-green-800 truncate flex-1 font-medium" title={doc.name}>
-                                    {doc.name}
-                                  </span>
-                                  <div className="flex items-center gap-[0.3vw]">
-                                    {doc.path && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => viewDocument(doc.path)}
-                                          className="text-green-600 hover:text-green-800 p-[0.2vw] hover:bg-green-100 rounded cursor-pointer"
-                                          title="View"
-                                        >
-                                          <Eye size={18} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            downloadDocument(doc.path, doc.name)
-                                          }
-                                          className="text-blue-600 hover:text-blue-800 p-[0.2vw] hover:bg-blue-100 rounded cursor-pointer"
-                                          title="Download"
-                                        >
-                                          <Download  size={18} />
-                                        </button>
-                                      </>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeDocument(
-                                          "invoice",
-                                          documents.invoice.findIndex(
-                                            (d) => d.docId === doc.docId
-                                          )
-                                        )
-                                      }
-                                      className="text-red-500 hover:text-red-700 p-[0.2vw] hover:bg-red-100 rounded cursor-pointer"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={18} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-
                       {documents.invoice.filter(isNewDocument).length > 0 && (
                         <div className="mt-[0.8vw]">
                           <div className="text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
@@ -1478,127 +1540,273 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                   </div>
                 </div>
 
-                {/* Payment Proposal Card - Latest followup docs */}
-                {followupDocuments && (followupDocuments.quotation || followupDocuments.po || followupDocuments.invoice) && (
-                  <div className="mt-[1vw] border border-amber-200 bg-amber-50 rounded-xl px-[1vw] py-[0.8vw]">
-                    <div className="flex items-center gap-[0.5vw] mb-[0.8vw]">
-                      <span className="text-[0.9vw]">📎</span>
-                      <h4 className="text-[0.9vw] font-semibold text-amber-900">Payment Proposal</h4>
-                      <span className="ml-auto text-[0.7vw] text-amber-600 bg-amber-100 border border-amber-300 rounded-full px-[0.5vw] py-[0.1vw] font-medium">
-                        Latest from Followups
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-[1vw]">
-                      {/* Latest Quotation */}
-                      <div>
-                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Quotation</div>
-                        {followupDocuments.quotation ? (
-                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
-                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.quotation.name}>
-                              {followupDocuments.quotation.name}
-                            </span>
-                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
-                              {followupDocuments.quotation.path && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => viewDocument(followupDocuments.quotation.path)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="View"
-                                  >
-                                    <Eye size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadDocument(followupDocuments.quotation.path, followupDocuments.quotation.name)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="Download"
-                                  >
-                                    <Download size={16} />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-[0.75vw] text-gray-400 italic">No quotation found</p>
-                        )}
+                {/* Finalized Documents Container (Green Background) */}
+                {(() => {
+                  const savedQuotations = (documents.quotation || []).filter(isExistingDocument);
+                  const latestBudgetQuotation = savedQuotations.length > 0 ? savedQuotations[savedQuotations.length - 1] : null;
+                  const latestFollowupQuotation = followupDocuments?.quotation ||
+                    (Array.isArray(followupDocuments?.quotations) && followupDocuments.quotations.length > 0
+                      ? followupDocuments.quotations[0]
+                      : null);
+
+                  const finalizedQuotation = latestBudgetQuotation || latestFollowupQuotation;
+
+                  const savedPOs = (documents.po || []).filter(isExistingDocument);
+                  const finalizedPO = savedPOs.length > 0 ? savedPOs[savedPOs.length - 1] : null;
+
+                  const savedInvoices = (documents.invoice || []).filter(isExistingDocument);
+                  const finalizedInvoice = savedInvoices.length > 0 ? savedInvoices[savedInvoices.length - 1] : null;
+
+                  return (
+                    <div className="mt-[1vw] border border-emerald-300 bg-emerald-50/70 rounded-xl p-[1vw]">
+                      <div className="flex items-center justify-between mb-[0.8vw]">
+                        <div className="flex items-center gap-[0.5vw]">
+                          <h4 className="text-[0.9vw] font-semibold text-emerald-900">
+                            Finalized Documents
+                          </h4>
+                        </div>
+                        <span className="text-[0.7vw] bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-full px-[0.6vw] py-[0.15vw] font-medium">
+                          Finalized
+                        </span>
                       </div>
 
-                      {/* Latest PO */}
-                      <div>
-                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Purchase Order (PO)</div>
-                        {followupDocuments.po ? (
-                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
-                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.po.name}>
-                              {followupDocuments.po.name}
-                            </span>
-                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
-                              {followupDocuments.po.path && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => viewDocument(followupDocuments.po.path)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="View"
-                                  >
-                                    <Eye size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadDocument(followupDocuments.po.path, followupDocuments.po.name)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="Download"
-                                  >
-                                    <Download size={16} />
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                      <div className="grid grid-cols-3 gap-[1vw]">
+                        {/* Finalized Quotation */}
+                        <div>
+                          <div className="text-[0.75vw] font-semibold text-emerald-800 mb-[0.4vw]">
+                            Quotation
                           </div>
-                        ) : (
-                          <p className="text-[0.75vw] text-gray-400 italic">No PO found</p>
-                        )}
-                      </div>
+                          {finalizedQuotation ? (
+                            <div className="flex items-center justify-between p-[0.6vw] bg-white rounded-lg border border-emerald-200 shadow-sm">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[0.8vw] text-gray-800 truncate font-medium" title={finalizedQuotation.name}>
+                                  {finalizedQuotation.name}
+                                </p>
+                                <p className="text-[0.7vw] text-emerald-700 font-medium">
+                                {formatDateDDMMYYYY(finalizedQuotation.uploadedAt)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                                {finalizedQuotation.path && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => viewDocument(finalizedQuotation.path, finalizedQuotation.name)}
+                                      className="text-emerald-600 hover:text-emerald-800 p-[0.3vw] hover:bg-emerald-100 rounded cursor-pointer transition"
+                                      title="View"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadDocument(finalizedQuotation.path, finalizedQuotation.name)}
+                                      className="text-blue-600 hover:text-blue-800 p-[0.3vw] hover:bg-blue-100 rounded cursor-pointer transition"
+                                      title="Download"
+                                    >
+                                      <Download size={16} />
+                                    </button>
+                                  </>
+                                )}
+                                {latestBudgetQuotation && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      removeDocument(
+                                        "quotation",
+                                        documents.quotation.findIndex((d) => d.docId === latestBudgetQuotation.docId)
+                                      )
+                                    }
+                                    className="text-red-500 hover:text-red-700 p-[0.3vw] hover:bg-red-100 rounded cursor-pointer transition"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[0.75vw] text-gray-400 italic">No quotation found</p>
+                          )}
+                        </div>
 
-                      {/* Latest Invoice */}
-                      <div>
-                        <div className="text-[0.75vw] font-semibold text-amber-800 mb-[0.4vw]">Invoice</div>
-                        {followupDocuments.invoice ? (
-                          <div className="flex items-center justify-between p-[0.5vw] bg-white rounded-lg border border-amber-200">
-                            <span className="text-[0.8vw] text-gray-800 truncate flex-1 font-medium" title={followupDocuments.invoice.name}>
-                              {followupDocuments.invoice.name}
-                            </span>
-                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
-                              {followupDocuments.invoice.path && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => viewDocument(followupDocuments.invoice.path)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="View"
-                                  >
-                                    <Eye size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadDocument(followupDocuments.invoice.path, followupDocuments.invoice.name)}
-                                    className="text-amber-600 hover:text-amber-800 p-[0.2vw] hover:bg-amber-100 rounded cursor-pointer"
-                                    title="Download"
-                                  >
-                                    <Download size={16} />
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                        {/* Finalized PO */}
+                        <div>
+                          <div className="text-[0.75vw] font-semibold text-emerald-800 mb-[0.4vw]">
+                            Purchase Order (PO)
                           </div>
-                        ) : (
-                          <p className="text-[0.75vw] text-gray-400 italic">No invoice found</p>
-                        )}
+                          {finalizedPO ? (
+                            <div className="flex items-center justify-between p-[0.6vw] bg-white rounded-lg border border-emerald-200 shadow-sm">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[0.8vw] text-gray-800 truncate font-medium" title={finalizedPO.name}>
+                                  {finalizedPO.name}
+                                </p>
+                                <p className="text-[0.7vw] text-emerald-700 font-medium">
+                                  {formatDateDDMMYYYY(finalizedPO.uploadedAt)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                                {finalizedPO.path && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => viewDocument(finalizedPO.path, finalizedPO.name)}
+                                      className="text-emerald-600 hover:text-emerald-800 p-[0.3vw] hover:bg-emerald-100 rounded cursor-pointer transition"
+                                      title="View"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadDocument(finalizedPO.path, finalizedPO.name)}
+                                      className="text-blue-600 hover:text-blue-800 p-[0.3vw] hover:bg-blue-100 rounded cursor-pointer transition"
+                                      title="Download"
+                                    >
+                                      <Download size={16} />
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    removeDocument(
+                                      "po",
+                                      documents.po.findIndex((d) => d.docId === finalizedPO.docId)
+                                    )
+                                  }
+                                  className="text-red-500 hover:text-red-700 p-[0.3vw] hover:bg-red-100 rounded cursor-pointer transition"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[0.75vw] text-gray-400 italic">No PO found</p>
+                          )}
+                        </div>
+
+                        {/* Finalized Invoice */}
+                        <div>
+                          <div className="text-[0.75vw] font-semibold text-emerald-800 mb-[0.4vw]">
+                            Invoice
+                          </div>
+                          {finalizedInvoice ? (
+                            <div className="flex items-center justify-between p-[0.6vw] bg-white rounded-lg border border-emerald-200 shadow-sm">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[0.8vw] text-gray-800 truncate font-medium" title={finalizedInvoice.name}>
+                                  {finalizedInvoice.name}
+                                </p>
+                                <p className="text-[0.7vw] text-emerald-700 font-medium">
+                                  {formatDateDDMMYYYY(finalizedInvoice.uploadedAt)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-[0.3vw] ml-[0.3vw]">
+                                {finalizedInvoice.path && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => viewDocument(finalizedInvoice.path, finalizedInvoice.name)}
+                                      className="text-emerald-600 hover:text-emerald-800 p-[0.3vw] hover:bg-emerald-100 rounded cursor-pointer transition"
+                                      title="View"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadDocument(finalizedInvoice.path, finalizedInvoice.name)}
+                                      className="text-blue-600 hover:text-blue-800 p-[0.3vw] hover:bg-emerald-100 rounded cursor-pointer transition"
+                                      title="Download"
+                                    >
+                                      <Download size={16} />
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    removeDocument(
+                                      "invoice",
+                                      documents.invoice.findIndex((d) => d.docId === finalizedInvoice.docId)
+                                    )
+                                  }
+                                  className="text-red-500 hover:text-red-700 p-[0.3vw] hover:bg-red-100 rounded cursor-pointer transition"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[0.75vw] text-gray-400 italic">No invoice found</p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
+
+                {/* Full-Width Followup Quotations Card */}
+                {(() => {
+                  const fQuotations = Array.isArray(followupDocuments?.quotations) && followupDocuments.quotations.length > 0
+                    ? followupDocuments.quotations
+                    : (followupDocuments?.quotation ? [followupDocuments.quotation] : []);
+                  if (fQuotations.length === 0) return null;
+                  return (
+                    <div className="mt-[1vw] border border-amber-200 bg-amber-50/70 rounded-xl p-[1vw]">
+                      <div className="flex items-center justify-between mb-[0.8vw]">
+                        <div className="flex items-center gap-[0.5vw]">
+                          <h4 className="text-[0.9vw] font-semibold text-amber-900">
+                            Followup Quotations
+                          </h4>
+                        </div>
+                        <span className="text-[0.7vw] bg-amber-100 border border-amber-300 text-amber-800 rounded-full px-[0.6vw] py-[0.15vw] font-medium">
+                          From Followups ({fQuotations.length})
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-[1vw] max-h-[26vh] overflow-y-auto pr-[0.2vw]">
+                        {fQuotations.map((doc, idx) => (
+                          <div
+                            key={doc.docId || `followup-q-${idx}`}
+                            className="flex items-center justify-between p-[0.6vw] bg-white rounded-lg border border-amber-200 hover:border-amber-300 transition shadow-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[0.8vw] font-medium text-gray-800 truncate" title={doc.name}>
+                                {doc.name}
+                              </p>
+                              <p className="text-[0.7vw] text-amber-700 font-medium mt-[0.1vw]">
+                                {formatDateDDMMYYYY(doc.uploadedAt)}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-[0.3vw] ml-[0.3vw] flex-shrink-0">
+                              {doc.path && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => viewDocument(doc.path, doc.name)}
+                                    className="text-amber-600 hover:text-amber-800 p-[0.3vw] hover:bg-amber-100 rounded cursor-pointer transition"
+                                    title="View"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadDocument(doc.path, doc.name)}
+                                    className="text-blue-600 hover:text-blue-800 p-[0.3vw] hover:bg-blue-100 rounded cursor-pointer transition"
+                                    title="Download"
+                                  >
+                                    <Download size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                
               </div>
 
               {/* Budget */}
@@ -1751,7 +1959,8 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                                 className="w-full px-[0.5vw] py-[0.3vw] border border-gray-300 rounded text-[0.8vw]"
                               >
                                 <option value="Cash">Cash</option>
-                                <option value="Account">Account</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="UPI">UPI</option>
                               </select>
                             </td>
                             <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
@@ -1808,22 +2017,33 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                     </tbody>
                   </table>
                 </div>
-                <div>
-                  {!disabledPayments && (
-                    <button
-                      type="button"
-                      onClick={addPaymentRow}
-                      className="flex items-center gap-[0.5vw] px-[1vw] py-[0.5vw] rounded-lg text-[0.85vw] bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer"
-                    >
-                      <Plus size={16} />
-                      Add
-                    </button>
-                  )}
-                  {disabledPayments && (
-                    <div className="text-[0.8vw] text-green-700 font-medium mt-[0.3vw]">
-                      Total budget completed.
-                    </div>
-                  )}
+                <div className="flex items-center justify-between mt-[0.5vw]">
+                  <div>
+                    {!disabledPayments && (
+                      <button
+                        type="button"
+                        onClick={addPaymentRow}
+                        className="flex items-center gap-[0.5vw] px-[1vw] py-[0.5vw] rounded-lg text-[0.85vw] bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer"
+                      >
+                        <Plus size={16} />
+                        Add
+                      </button>
+                    )}
+                    {disabledPayments && (
+                      <div className="text-[0.8vw] text-green-700 font-medium">
+                        Total budget completed.
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-[0.5vw] px-[1vw] py-[0.5vw] rounded-lg text-[0.85vw] bg-red-600 text-white hover:bg-red-700 transition cursor-pointer font-medium shadow-sm"
+                  >
+                    <FileText size={16} />
+                    Export PDF
+                  </button>
                 </div>
               </div>
             </div>
@@ -1836,8 +2056,14 @@ const ProjectBudget = ({ showToast, prefillProject, onPrefillConsumed }) => {
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSubmit}
-                className="px-[1.5vw] py-[0.5vw] text-[0.9vw] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition cursor-pointer"
+                disabled={!formData.totalBudget}
+                className={`px-[1.5vw] py-[0.5vw] text-[0.9vw] text-white rounded-lg transition ${
+                  formData.totalBudget
+                    ? "bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-sm"
+                    : "bg-blue-300 cursor-not-allowed opacity-70"
+                }`}
               >
                 {currentProject ? "Update Budget" : "Save Budget"}
               </button>

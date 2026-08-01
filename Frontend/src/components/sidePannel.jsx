@@ -316,6 +316,7 @@ const getMenuConfig = () => ({
     { path: "/budgets", icon: AddReportIcon, label: "Budget's" },
     { path: "/marketingLeeds", icon: CallsIcon, label: "Marketing Leeds" },
     { path: "/roleAccess", icon: hrActivityIcon, label: "Role Access" },
+    { path: "/generatePdf", icon: AddReportIcon, label: "Generate PDF" },
   ],
   project: [
     { path: "/projectAnalytics", icon: AnalyticsIcon, label: "Analytics" },
