@@ -188,37 +188,98 @@ async function processAttendanceRecord(attendance) {
   };
 }
 
+// ✅ Helper: Calculate overall approval status
+function calculateOverallStatus(teamHeadStatus, managementStatus, overallDbStatus) {
+  const th = (teamHeadStatus || "").toLowerCase();
+  const mg = (managementStatus || "").toLowerCase();
+  const st = (overallDbStatus || "").toLowerCase();
+
+  if (th === "rejected" || mg === "rejected" || st === "rejected") {
+    return "Rejected";
+  }
+  if (th === "approved" || mg === "approved" || st === "approved") {
+    return "Approved";
+  }
+  return "Pending";
+}
+
+// ✅ Helper: Expand a permission request into daily records
+function expandPermissionToDays(permission, startDate, endDate) {
+  const days = [];
+  const permDateStr = getISTDateString(permission.permission_date);
+  if (!permDateStr) return days;
+
+  const current = new Date(permDateStr);
+  const filterStart = startDate ? new Date(startDate) : new Date(0);
+  const todayStr = getISTDateString(new Date());
+  const maxAllowedStr = (endDate && endDate < todayStr) ? endDate : todayStr;
+  const filterEnd = new Date(maxAllowedStr);
+
+  if (current >= filterStart && current <= filterEnd && current.getUTCDay() !== 0) {
+    const phStatus = permission.team_head_status || "Pending";
+    const mgmtStatus = permission.management_status || permission.status || "Pending";
+    const overallStatus = calculateOverallStatus(phStatus, mgmtStatus, permission.status);
+
+    days.push({
+      employee_id: permission.employee_id,
+      employee_name: permission.employee_name,
+      report_date: permDateStr,
+      designation: permission.designation || "",
+      is_leave: true,
+      morning_in: null,
+      morning_out: null,
+      afternoon_in: null,
+      afternoon_out: null,
+      total_hours: "PERMISSION",
+      tasks: [
+        {
+          project_name: "PERMISSION",
+          task_name: "Permission",
+          outcome: permission.reason || `Permission (${permission.from_time || ''} - ${permission.to_time || ''})`,
+          status: overallStatus,
+          overall_status: overallStatus,
+          team_head_status: phStatus,
+          management_status: mgmtStatus,
+          from_date: permDateStr,
+          to_date: permDateStr,
+          from_time: permission.from_time,
+          to_time: permission.to_time,
+          duration_minutes: permission.duration_minutes,
+          reason: permission.reason || "",
+          task_type: "permission",
+          percentage: 0
+        },
+      ],
+    });
+  }
+  return days;
+}
+
 // ✅ Helper: Expand a leave request into daily records
 function expandLeaveToDays(leave, startDate, endDate) {
   const days = [];
 
-  // Parse date strings as local time (not UTC) to avoid timezone shifts
-  // "2026-04-24" -> new Date("2026-04-24") is UTC midnight, shifts to April 23 in IST
-  // Fix: parse manually as local midnight
-  const parseLocalDate = (dateStr) => {
-    if (!dateStr) return null;
-    const str = typeof dateStr === 'string' ? dateStr.slice(0, 10) : getISTDateString(dateStr);
-    const [y, m, d] = str.split('-').map(Number);
-    const dt = new Date(y, m - 1, d, 0, 0, 0, 0); // Local midnight
-    return dt;
-  };
   const leaveStartStr = getISTDateString(leave.from_date);
-  const leaveEndStr = getISTDateString(leave.to_date);
+  const leaveEndStr = getISTDateString(leave.to_date || leave.from_date);
   
   console.log(`Expanding Leave ID ${leave.id}: ${leaveStartStr} to ${leaveEndStr}`);
 
-  // Parse to UTC-based dates to avoid local DST/Timezone issues
   let current = new Date(leaveStartStr);
   let end = new Date(leaveEndStr);
 
   const filterStart = startDate ? new Date(startDate) : new Date(0);
-  const filterEnd = endDate ? new Date(endDate) : new Date("9999-12-31");
+  const todayStr = getISTDateString(new Date());
+  const maxAllowedStr = (endDate && endDate < todayStr) ? endDate : todayStr;
+  const filterEnd = new Date(maxAllowedStr);
 
   const phStatus = leave.team_head_status || "Pending";
   const mgmtStatus = leave.management_status || leave.status || "Pending";
+  const overallStatus = calculateOverallStatus(phStatus, mgmtStatus, leave.status);
+
+  const leaveTypeStr = leave.leave_type || "Leave";
+  const isOD = leaveTypeStr === "On-Duty";
 
   while (current <= end) {
-    // Only include if within filter range and NOT a Sunday (0)
     if (current >= filterStart && current <= filterEnd && current.getUTCDay() !== 0) {
       const reportDateStr = current.toISOString().slice(0, 10);
       
@@ -232,19 +293,20 @@ function expandLeaveToDays(leave, startDate, endDate) {
         morning_out: null,
         afternoon_in: null,
         afternoon_out: null,
-        total_hours: leave.leave_type === "On-Duty" ? "ON-DUTY" : "LEAVE",
+        total_hours: isOD ? "ON-DUTY" : "LEAVE",
         tasks: [
           {
-            project_name: leave.leave_type === "On-Duty" ? "ON-DUTY" : "LEAVE",
-            task_name: leave.leave_type || "Planned Leave",
-            outcome: leave.reason || (leave.leave_type === "On-Duty" ? "Official Work" : "Personal Leave"),
-            status: leave.status || "Pending",
+            project_name: isOD ? "ON-DUTY" : "LEAVE",
+            task_name: leaveTypeStr,
+            outcome: leave.reason || (isOD ? "Official Work" : "Personal Leave"),
+            status: overallStatus,
+            overall_status: overallStatus,
             team_head_status: phStatus,
             management_status: mgmtStatus,
             from_date: leaveStartStr,
             to_date: leaveEndStr,
             reason: leave.reason || "",
-            task_type: leave.leave_type === "On-Duty" ? "on_duty" : "leave",
+            task_type: isOD ? "on_duty" : "leave",
             percentage: 0
           },
         ],
@@ -329,9 +391,9 @@ router.get("/all-reports", async (req, res) => {
 
     // 2. Fetch Leave Records
     let leaveQuery = `
-      SELECT lr.*, ed.employee_name, ed.designation 
+      SELECT lr.*, COALESCE(ed.employee_name, lr.employee_id) AS employee_name, COALESCE(ed.designation, '') AS designation 
       FROM leave_requests lr
-      JOIN employees_details ed ON lr.employee_id = ed.employee_id
+      LEFT JOIN employees_details ed ON lr.employee_id = ed.employee_id
       WHERE 1=1
     `;
     const leaveParams = [];
@@ -341,11 +403,10 @@ router.get("/all-reports", async (req, res) => {
       leaveFilterClause += ` AND lr.employee_id = ?`;
       leaveParams.push(employee_id);
     } else {
-      // Exclude management roles when viewing all
       leaveFilterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
-                             AND ed.designation NOT LIKE '%SBU%' 
-                             AND ed.designation NOT LIKE '%HR%' 
-                             AND ed.designation NOT LIKE '%Marketing%')`;
+                         AND ed.designation NOT LIKE '%SBU%' 
+                         AND ed.designation NOT LIKE '%HR%' 
+                         AND ed.designation NOT LIKE '%Marketing%')`;
 
       if (isTeamHead === "true" && designation) {
         leaveFilterClause += ` AND ed.designation = ?`;
@@ -357,7 +418,7 @@ router.get("/all-reports", async (req, res) => {
     }
 
     if (start_date) {
-      leaveFilterClause += ` AND lr.to_date >= ?`;
+      leaveFilterClause += ` AND COALESCE(NULLIF(lr.to_date, ''), lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -365,27 +426,62 @@ router.get("/all-reports", async (req, res) => {
       leaveParams.push(end_date);
     }
     if (search) {
-      leaveFilterClause += ` AND ed.employee_name LIKE ?`;
-      leaveParams.push(`%${search}%`);
+      leaveFilterClause += ` AND (ed.employee_name LIKE ? OR lr.employee_id LIKE ?)`;
+      leaveParams.push(`%${search}%`, `%${search}%`);
     }
 
     leaveQuery += leaveFilterClause;
     const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
-    console.log("Raw Leave Requests from DB:", leaveRequests.length, "records found");
-    if (leaveRequests.length > 0) {
-      console.log("First Leave Request ID:", leaveRequests[0].id, "for", leaveRequests[0].employee_name);
+
+    // 2b. Fetch Permission Records
+    let permQuery = `
+      SELECT pr.*, COALESCE(ed.employee_name, pr.employee_id) AS employee_name, COALESCE(ed.designation, '') AS designation 
+      FROM permission_requests pr
+      LEFT JOIN employees_details ed ON pr.employee_id = ed.employee_id
+      WHERE 1=1
+    `;
+    const permParams = [];
+    let permFilterClause = "";
+
+    if (employee_id && employee_id !== "all") {
+      permFilterClause += ` AND pr.employee_id = ?`;
+      permParams.push(employee_id);
+    } else {
+      permFilterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
+                        AND ed.designation NOT LIKE '%SBU%' 
+                        AND ed.designation NOT LIKE '%HR%' 
+                        AND ed.designation NOT LIKE '%Marketing%')`;
+
+      if (isTeamHead === "true" && designation) {
+        permFilterClause += ` AND ed.designation = ?`;
+        permParams.push(designation);
+      } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
+        permFilterClause += ` AND ed.designation = ?`;
+        permParams.push(designation);
+      }
     }
 
-    // 3. Expand leaves and combine
-    const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
-    console.log("Expanded Leave Days:", leaveDays.length, "total days generated");
-    if (leaveDays.length > 0) {
-      console.log("Sample Leave Day:", {
-        name: leaveDays[0].employee_name,
-        date: leaveDays[0].report_date,
-        tasks_count: leaveDays[0].tasks.length
-      });
+    if (start_date) {
+      permFilterClause += ` AND pr.permission_date >= ?`;
+      permParams.push(start_date);
     }
+    if (end_date) {
+      permFilterClause += ` AND pr.permission_date <= ?`;
+      permParams.push(end_date);
+    }
+    if (search) {
+      permFilterClause += ` AND (ed.employee_name LIKE ? OR pr.employee_id LIKE ?)`;
+      permParams.push(`%${search}%`, `%${search}%`);
+    }
+
+    permQuery += permFilterClause;
+    const permRequests = await queryWithRetry(permQuery, permParams);
+
+    // 3. Expand leaves/permissions and combine
+    const leaveDays = [
+      ...leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date)),
+      ...permRequests.flatMap(perm => expandPermissionToDays(perm, start_date, end_date))
+    ];
 
     // Combine records, prioritizing attendance if both exist for same day/employee
     const attendanceMap = new Map();
@@ -403,7 +499,6 @@ router.get("/all-reports", async (req, res) => {
     leaveDays.forEach(leaveDay => {
       const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
       if (!attendanceMap.has(key)) {
-        console.log(`Adding Standalone Leave for ${leaveDay.employee_name} on ${leaveDay.report_date}`);
         combinedReports.push(leaveDay);
       } else {
         const att = attendanceMap.get(key);
@@ -414,7 +509,7 @@ router.get("/all-reports", async (req, res) => {
       }
     });
 
-    // 4. Final Filtering (Hide future records)
+    // 4. Final Filtering (Attendance bounded by today, leave/permission requests retained regardless of date)
     const now = new Date();
     const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
     const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
@@ -582,7 +677,7 @@ router.get("/management-reports", async (req, res) => {
       leaveParams.push(employee_id);
     }
     if (start_date) {
-      leaveQuery += ` AND lr.to_date >= ?`;
+      leaveQuery += ` AND COALESCE(NULLIF(lr.to_date, ''), lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -591,7 +686,39 @@ router.get("/management-reports", async (req, res) => {
     }
 
     const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
-    const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
+
+    // Fetch Permission Records for Management
+    let permQuery = `
+      SELECT pr.*, ed.employee_name, ed.designation 
+      FROM permission_requests pr
+      JOIN employees_details ed ON pr.employee_id = ed.employee_id
+      WHERE 1=1
+      AND (ed.designation LIKE '%Project Head%' 
+          OR ed.designation LIKE '%SBU%' 
+          OR ed.designation LIKE '%HR%' 
+          OR ed.designation LIKE '%Marketing%')
+    `;
+    const permParams = [];
+
+    if (employee_id && employee_id !== "all") {
+      permQuery += ` AND pr.employee_id = ?`;
+      permParams.push(employee_id);
+    }
+    if (start_date) {
+      permQuery += ` AND pr.permission_date >= ?`;
+      permParams.push(start_date);
+    }
+    if (end_date) {
+      permQuery += ` AND pr.permission_date <= ?`;
+      permParams.push(end_date);
+    }
+
+    const permRequests = await queryWithRetry(permQuery, permParams);
+
+    const leaveDays = [
+      ...leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date)),
+      ...permRequests.flatMap(perm => expandPermissionToDays(perm, start_date, end_date))
+    ];
 
     // Combine reports
     const reportMap = new Map();
@@ -658,7 +785,7 @@ router.get("/management-reports", async (req, res) => {
       }
     });
 
-    // Final Filtering (Hide future records)
+    // Final Filtering (Attendance bounded by today, leave/permission requests retained regardless of date)
     const now = new Date();
     const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
     const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
@@ -725,15 +852,15 @@ router.get("/reports/:employee_id", async (req, res) => {
 
     // 2. Fetch Leaves
     let leaveQuery = `
-      SELECT lr.*, ed.employee_name, ed.designation 
+      SELECT lr.*, COALESCE(ed.employee_name, lr.employee_id) AS employee_name, COALESCE(ed.designation, '') AS designation 
       FROM leave_requests lr
-      JOIN employees_details ed ON lr.employee_id = ed.employee_id
+      LEFT JOIN employees_details ed ON lr.employee_id = ed.employee_id
       WHERE lr.employee_id = ?
     `;
     const leaveParams = [employee_id];
 
     if (start_date) {
-      leaveQuery += ` AND lr.to_date >= ?`;
+      leaveQuery += ` AND COALESCE(NULLIF(lr.to_date, ''), lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -742,9 +869,32 @@ router.get("/reports/:employee_id", async (req, res) => {
     }
 
     const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
+
+    // 2b. Fetch Permission Requests
+    let permQuery = `
+      SELECT pr.*, COALESCE(ed.employee_name, pr.employee_id) AS employee_name, COALESCE(ed.designation, '') AS designation 
+      FROM permission_requests pr
+      LEFT JOIN employees_details ed ON pr.employee_id = ed.employee_id
+      WHERE pr.employee_id = ?
+    `;
+    const permParams = [employee_id];
+
+    if (start_date) {
+      permQuery += ` AND pr.permission_date >= ?`;
+      permParams.push(start_date);
+    }
+    if (end_date) {
+      permQuery += ` AND pr.permission_date <= ?`;
+      permParams.push(end_date);
+    }
+
+    const permRequests = await queryWithRetry(permQuery, permParams);
     
     // 3. Expand leaves and combine
-    const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
+    const leaveDays = [
+      ...leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date)),
+      ...permRequests.flatMap(perm => expandPermissionToDays(perm, start_date, end_date))
+    ];
 
     const attendanceMap = new Map();
     const normalizeKey = (date) => {

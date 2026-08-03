@@ -62,8 +62,8 @@ const SalaryModal = ({
         job_role: currentEmployee.jobRole || currentEmployee.job_role || "",
         basic_salary: currentEmployee.salaryData?.basicSalary || currentEmployee.basic_salary || 0,
         month: selectedMonthYear?.month || new Date().getMonth() + 1,
-        // Fetch leave days from salaryData
-        total_leave_days: currentEmployee.salaryData?.totalLeaveDays || currentEmployee.total_leave_days || 0,
+        // Fetch leave days from salaryData (defaults to approved leave count)
+        total_leave_days: currentEmployee.salaryData?.totalLeaveDays ?? currentEmployee.approvedLeaveDays ?? currentEmployee.total_leave_days ?? 0,
         paid_leave_days: currentEmployee.salaryData?.paidLeaveDays || currentEmployee.paid_leave_days || 0,
         incentive: currentEmployee.salaryData?.incentive || currentEmployee.incentive || 0,
         bonus: currentEmployee.salaryData?.bonus || currentEmployee.bonus || 0,
@@ -371,7 +371,7 @@ const SalaryModal = ({
               </div>
               <div>
                 <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.3vw]">
-                  Total Leave Days
+                  Total Leave Days (Approved)
                 </label>
                 <input
                   type="number"

@@ -928,6 +928,9 @@ const RequestsTab = ({
                           By Management
                         </th>
                         <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
+                          Overall Status
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 bg-[#E2EBFF]">
                           Action
                         </th>
                       </>
@@ -1015,30 +1018,15 @@ const RequestsTab = ({
                                 return "-";
                               }
                               return req.team_head_status ? (
-                                <div
-                                  className="flex flex-col items-center gap-[0.2vw]"
-                                  title={req.team_head_remark || "No remark"}
-                                >
-                                  <span
-                                    className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
-                                      req.team_head_status === "approved"
-                                        ? "bg-green-100 text-green-800"
-                                        : req.team_head_status === "rejected"
-                                          ? "bg-red-100 text-red-800"
-                                          : "bg-yellow-100 text-yellow-800"
-                                    }`}
-                                  >
-                                    {req.team_head_status.charAt(0).toUpperCase() +
-                                      req.team_head_status.slice(1)}
+                                <div className="flex flex-col items-center gap-[0.2vw]" title={req.team_head_remark || "No remark"}>
+                                  <span className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
+                                    req.team_head_status === "approved" ? "bg-green-100 text-green-800" : req.team_head_status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"
+                                  }`}>
+                                    {req.team_head_status.charAt(0).toUpperCase() + req.team_head_status.slice(1)}
                                   </span>
-                                  {req.team_head_updated_by && (
-                                    <span className="text-[0.7vw] text-gray-500"></span>
-                                  )}
                                 </div>
                               ) : (
-                                <span className="text-[0.8vw] text-gray-400">
-                                  Pending
-                                </span>
+                                <span className="text-[0.8vw] text-gray-400">Pending</span>
                               );
                             })()}
                           </td>
@@ -1046,32 +1034,45 @@ const RequestsTab = ({
                           {/* BY MANAGEMENT COLUMN */}
                           <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
                             {req.management_status ? (
-                              <div
-                                className="flex flex-col items-center gap-[0.2vw]"
-                                title={req.management_remark || "No remark"}
-                              >
-                                <span
-                                  className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
-                                    req.management_status === "approved"
-                                      ? "bg-green-100 text-green-800"
-                                      : req.management_status === "rejected"
-                                        ? "bg-red-100 text-red-800"
-                                        : "bg-yellow-100 text-yellow-800"
-                                  }`}
-                                >
-                                  {req.management_status.charAt(0).toUpperCase() +
-                                    req.management_status.slice(1)}
+                              <div className="flex flex-col items-center gap-[0.2vw]" title={req.management_remark || "No remark"}>
+                                <span className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
+                                  req.management_status === "approved" ? "bg-green-100 text-green-800" : req.management_status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"
+                                }`}>
+                                  {req.management_status.charAt(0).toUpperCase() + req.management_status.slice(1)}
                                 </span>
-                                {req.management_updated_by && (
-                                  <span className="text-[0.7vw] text-gray-500">
-                                  </span>
-                                )}
                               </div>
                             ) : (
-                              <span className="text-[0.8vw] text-gray-400">
-                                Pending
-                              </span>
+                              <span className="text-[0.8vw] text-gray-400">Pending</span>
                             )}
+                          </td>
+
+                          {/* OVERALL STATUS COLUMN */}
+                          <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
+                            {(() => {
+                              const phLower = (req.team_head_status || "pending").toLowerCase();
+                              const mgmtLower = (req.management_status || "pending").toLowerCase();
+                              const statusLower = (req.status || "pending").toLowerCase();
+
+                              if (phLower === "rejected" || mgmtLower === "rejected" || statusLower === "rejected") {
+                                return (
+                                  <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-red-100 text-red-800 border border-red-200">
+                                    🔴 Rejected
+                                  </span>
+                                );
+                              }
+                              if (phLower === "approved" || mgmtLower === "approved" || statusLower === "approved") {
+                                return (
+                                  <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-green-100 text-green-800 border border-green-200">
+                                    🟢 Approved
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200">
+                                  🟡 Pending
+                                </span>
+                              );
+                            })()}
                           </td>
 
                           {/* ACTION COLUMN */}
@@ -1087,9 +1088,7 @@ const RequestsTab = ({
                                     <Edit size={"0.8vw"} />
                                   </button>
                                   <button
-                                    onClick={() =>
-                                      openDeleteModal(req.id, "leave")
-                                    }
+                                    onClick={() => openDeleteModal(req.id, "leave")}
                                     disabled={deleting}
                                     className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                     title="Delete Request"
@@ -1098,18 +1097,14 @@ const RequestsTab = ({
                                   </button>
                                 </>
                               ) : (
-                                <>
-                                  <button
-                                    onClick={() =>
-                                      openDeleteModal(req.id, "leave")
-                                    }
-                                    disabled={deleting}
-                                    className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Delete Request"
-                                  >
-                                    <Trash2 size={"0.8vw"} />
-                                  </button>
-                                </>
+                                <button
+                                  onClick={() => openDeleteModal(req.id, "leave")}
+                                  disabled={deleting}
+                                  className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Delete Request"
+                                >
+                                  <Trash2 size={"0.8vw"} />
+                                </button>
                               )}
                             </div>
                           </td>
@@ -1186,7 +1181,7 @@ const RequestsTab = ({
                               </div>
                             )}
                           </td>
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-700 border border-gray-300 text-center">
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
                             {req.approved_by || "-"}
                           </td>
                         </>

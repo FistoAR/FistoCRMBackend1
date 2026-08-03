@@ -329,6 +329,7 @@ const EmployeeRequest = () => {
                   <option value="Sick Leave">Sick Leave</option>
                   <option value="Planned Leave">Planned Leave</option>
                   <option value="Medical Leave">Medical Leave</option>
+                  <option value="Work From Home">Work From Home</option>
                   <option value="On-Duty">On-Duty</option>
                   <option value="Maternity Leave">Maternity Leave</option>
                   <option value="Paternity Leave">Paternity Leave</option>

@@ -108,36 +108,51 @@ class ExportInternReportPDF {
                     );
                   }
                 } else {
-                  // Split leave row into 3 parts with metadata for custom drawing
+                  // Split leave row into 3 balanced cells (Leave Type, Reason, Status)
                   const isMgmt = reportType === "management";
+                  const leaveTypeStr = task.task_name || "Leave";
+                  const reasonStr = task.reason || task.outcome || "-";
+                  const phStr = task.team_head_status || "Pending";
+                  const mgmtStr = task.management_status || "Pending";
+                  const overallStr = task.status || "Pending";
+
                   row.push(
                     { 
-                      content: `Leave type\n${task.task_name}`,
-                      isLeaveCell: true,
-                      label: "Leave type",
-                      value: task.task_name,
-                      labelColor: [180, 124, 50],
-                      valueColor: [17, 24, 39],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, fontSize: 6.5, textColor: [254, 249, 195] } 
+                      content: `Leave type: ${leaveTypeStr}`,
+                      colSpan: 2,
+                      styles: { 
+                        fillColor: [254, 249, 195], 
+                        fontSize: 6.5, 
+                        fontStyle: "bold",
+                        textColor: [150, 90, 15],
+                        valign: "middle",
+                        cellPadding: 2.5
+                      } 
                     },
                     { 
-                      content: `Reason\n${task.reason || task.outcome || "-"}`,
-                      isLeaveCell: true,
-                      label: "Reason",
-                      value: task.reason || task.outcome || "-",
-                      labelColor: [180, 124, 50],
-                      valueColor: [60, 60, 60],
-                      colSpan: isMgmt ? 5 : 8,
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "left", fontSize: 6.5, textColor: [254, 249, 195] } 
+                      content: `Reason: ${reasonStr}`,
+                      colSpan: isMgmt ? 3 : 5,
+                      styles: { 
+                        fillColor: [254, 249, 195], 
+                        fontSize: 6.5, 
+                        textColor: [50, 50, 50], 
+                        halign: "left", 
+                        valign: "middle",
+                        cellPadding: 2.5
+                      } 
                     },
                     { 
-                      content: `Status\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
-                      isLeaveCell: true,
-                      label: "Status",
-                      value: `PH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
-                      labelColor: [180, 124, 50],
-                      valueColor: [60, 60, 60],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "center", fontSize: 6.5, textColor: [254, 249, 195] } 
+                      content: `Status: PH: ${phStr} | Mgmt: ${mgmtStr} | Overall: ${overallStr}`,
+                      colSpan: isMgmt ? 2 : 3,
+                      styles: { 
+                        fillColor: [254, 249, 195], 
+                        fontSize: 6, 
+                        fontStyle: "bold",
+                        textColor: [40, 40, 40], 
+                        halign: "center", 
+                        valign: "middle",
+                        cellPadding: 2.5
+                      } 
                     }
                   );
                 }
@@ -243,31 +258,6 @@ class ExportInternReportPDF {
             pageBreak: "auto",
             
             didDrawCell: function (data) {
-              // Custom drawing for leave cells to differentiate label and value colors
-              if (data.cell.raw && data.cell.raw.isLeaveCell) {
-                const { label, value, labelColor, valueColor } = data.cell.raw;
-                const { doc } = data;
-                const { x, y, width } = data.cell;
-                const padding = 2;
-
-                // Labels in Gold
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(7);
-                doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-                doc.text(label, x + padding, y + padding + 3);
-
-                // Values in Black/Dark Gray
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(7.5);
-                doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-                
-                // Handle multi-line value with splitTextToSize
-                const splitValue = doc.splitTextToSize(value, width - (padding * 2));
-                doc.text(splitValue, x + padding, y + padding + 7);
-                
-                return false; // Prevents default text drawing
-              }
-
               // Handle continuation of identity on new pages
               if (data.row.section === 'body' && data.column.index < 8) {
                 const pageRows = data.table.pageRows || [];
@@ -294,13 +284,17 @@ class ExportInternReportPDF {
               }
             },
             
-            didDrawPage: function (dataCell) {
-              const pageCount = doc.internal.getNumberOfPages();
-              doc.setFontSize(8);
-              doc.setTextColor(102, 102, 102);
-              doc.text(`Page ${dataCell.pageNumber} of ${pageCount}`, dataCell.settings.margin.left, doc.internal.pageSize.height - 10);
-            },
           });
+
+          // Add correct total page count to all pages after table generation completes
+          const totalPages = doc.internal.getNumberOfPages();
+          for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(102, 102, 102);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Page ${i} of ${totalPages}`, 10, doc.internal.pageSize.height - 5);
+          }
 
           doc.save(`${empName.replace(/\s+/g, "_")}_Report.pdf`);
           resolve();

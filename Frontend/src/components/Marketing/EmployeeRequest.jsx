@@ -355,6 +355,7 @@ const EmployeeRequest = () => {
             <option value="Sick Leave">Sick Leave</option>
             <option value="Planned Leave">Planned Leave</option>
             <option value="Medical Leave">Medical Leave</option>
+            <option value="Work From Home">Work From Home</option>
             <option value="On-Duty">On-Duty</option>
             <option value="Maternity Leave">Maternity Leave</option>
             <option value="Paternity Leave">Paternity Leave</option>
@@ -588,7 +589,31 @@ const EmployeeRequest = () => {
                         {req.management_status ? renderStatusBadge(req.management_status) : <span className="text-[0.8vw] text-gray-400">Pending</span>}
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                        {(() => { const s = getFinalStatus(req); return <span className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.75vw] font-medium ${s.color}`}>{s.label}</span>; })()}
+                        {(() => {
+                          const phLower = (req.team_head_status || "pending").toLowerCase();
+                          const mgmtLower = (req.management_status || "pending").toLowerCase();
+                          const statusLower = (req.status || "pending").toLowerCase();
+
+                          if (phLower === "rejected" || mgmtLower === "rejected" || statusLower === "rejected") {
+                            return (
+                              <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-red-100 text-red-800 border border-red-200">
+                                🔴 Rejected
+                              </span>
+                            );
+                          }
+                          if (phLower === "approved" || mgmtLower === "approved" || statusLower === "approved") {
+                            return (
+                              <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-green-100 text-green-800 border border-green-200">
+                                🟢 Approved
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200">
+                              🟡 Pending
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}

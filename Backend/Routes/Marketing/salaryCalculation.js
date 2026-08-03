@@ -28,7 +28,7 @@ function calculateSalaryBreakdown(basicSalary, month, year, totalLeaveDays, paid
   if (unpaidLeaveDays > workingDays) {
     throw new Error(`Unpaid leave (${unpaidLeaveDays}) cannot exceed working days in month (${workingDays})`);
   }
-
+                                                                                                                                                                                                                                     
   const totalDeductionAmount = perDaySalary * unpaidLeaveDays;
   
   return {
@@ -39,6 +39,87 @@ function calculateSalaryBreakdown(basicSalary, month, year, totalLeaveDays, paid
     unpaidLeaveDays,
     totalDeductionAmount
   };
+}
+
+// ========== HELPER FUNCTION: Get Approved Leave Days Map for Month ==========
+function getISTDateStr(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return typeof date === "string" ? date.slice(0, 10) : "";
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+async function getApprovedLeaveDaysMap(month, year) {
+  const parsedMonth = parseInt(month);
+  const parsedYear = parseInt(year);
+
+  const monthStartStr = `${parsedYear}-${String(parsedMonth).padStart(2, '0')}-01`;
+  const lastDay = new Date(parsedYear, parsedMonth, 0).getDate();
+  const monthEndStr = `${parsedYear}-${String(parsedMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  const query = `
+    SELECT 
+      employee_id,
+      from_date,
+      to_date,
+      number_of_days,
+      duration_type,
+      team_head_status,
+      management_status,
+      status
+    FROM leave_requests
+    WHERE (
+      LOWER(COALESCE(status, '')) = 'approved' 
+      OR LOWER(COALESCE(management_status, '')) = 'approved'
+      OR LOWER(COALESCE(team_head_status, '')) = 'approved'
+    )
+    AND LOWER(COALESCE(team_head_status, '')) != 'rejected'
+    AND LOWER(COALESCE(management_status, '')) != 'rejected'
+    AND LOWER(COALESCE(status, '')) != 'rejected'
+    AND from_date <= ?
+    AND COALESCE(NULLIF(to_date, ''), from_date) >= ?
+  `;
+
+  try {
+    const rows = await queryWithRetry(query, [monthEndStr, monthStartStr]);
+    const leaveMap = new Map();
+
+    rows.forEach((leave) => {
+      const empId = leave.employee_id;
+      if (!empId) return;
+
+      const fromStr = getISTDateStr(leave.from_date);
+      const toStr = getISTDateStr(leave.to_date || leave.from_date);
+
+      const startStr = fromStr > monthStartStr ? fromStr : monthStartStr;
+      const endStr = toStr < monthEndStr ? toStr : monthEndStr;
+
+      let daysCount = 0;
+      let curr = new Date(startStr + "T00:00:00Z");
+      const endUtc = new Date(endStr + "T00:00:00Z");
+
+      const durType = (leave.duration_type || "").toLowerCase();
+      const isHalfDay = durType.includes("half") || 
+                        durType.includes("morning") || 
+                        durType.includes("afternoon") || 
+                        parseFloat(leave.number_of_days) === 0.5;
+
+      while (curr <= endUtc) {
+        if (curr.getUTCDay() !== 0) { // Exclude Sundays
+          daysCount += isHalfDay ? 0.5 : 1;
+        }
+        curr.setUTCDate(curr.getUTCDate() + 1);
+      }
+
+      const currentTotal = leaveMap.get(empId) || 0;
+      leaveMap.set(empId, currentTotal + daysCount);
+    });
+
+    return leaveMap;
+  } catch (err) {
+    console.error("Error fetching approved leave days map:", err);
+    return new Map();
+  }
 }
 
 // ========== GET ALL MONTHS OF CURRENT YEAR ==========
@@ -107,29 +188,45 @@ router.get("/employees/:month/:year", async (req, res) => {
     `;
 
     const results = await queryWithRetry(query, [month, year]);
+    const approvedLeaveMap = await getApprovedLeaveDaysMap(month, year);
 
-    const employees = results.map((row) => ({
-      employeeId: row.employee_id,
-      employeeName: row.employee_name,
-      profile_url: row.profile_url || null,
-      designation: row.designation,
-      jobRole: row.employment_type || 'On Role',
-      hasSalary: row.salary_id ? true : false,
-      date: row.salary_date ? new Date(row.salary_date).toLocaleDateString('en-IN') : '-',
-      salaryData: row.salary_id ? {
-        id: row.salary_id,
-        basicSalary: parseFloat(row.basic_salary),
-        totalLeaveDays: row.total_leave_days,
-        paidLeaveDays: row.paid_leave_days,
-        deductionAmount: parseFloat(row.deduction_amount),
-        totalDeductionDays: row.total_deduction_days,
-        incentive: parseFloat(row.incentive),
-        bonus: parseFloat(row.bonus),
-        medical: parseFloat(row.medical),
-        otherAllowance: parseFloat(row.other_allowance),
-        totalSalary: parseFloat(row.total_salary)
-      } : null
-    }));
+    const employees = results.map((row) => {
+      const approvedLeaves = approvedLeaveMap.get(row.employee_id) || 0;
+      // If approvedLeaves > 0, prefer live approved leaves to ensure up-to-date calculation.
+      // Otherwise, fall back to saved sc.total_leave_days or 0.
+      const totalLeaveDays = approvedLeaves > 0
+        ? approvedLeaves
+        : (row.salary_id && row.total_leave_days !== null && row.total_leave_days !== undefined
+            ? parseFloat(row.total_leave_days)
+            : 0);
+
+      return {
+        employeeId: row.employee_id,
+        employeeName: row.employee_name,
+        profile_url: row.profile_url || null,
+        designation: row.designation,
+        jobRole: row.employment_type || 'On Role',
+        hasSalary: row.salary_id ? true : false,
+        approvedLeaveDays: approvedLeaves,
+        date: row.salary_date ? new Date(row.salary_date).toLocaleDateString('en-IN') : '-',
+        salaryData: row.salary_id ? {
+          id: row.salary_id,
+          basicSalary: parseFloat(row.basic_salary),
+          totalLeaveDays: totalLeaveDays,
+          paidLeaveDays: parseFloat(row.paid_leave_days || 0),
+          deductionAmount: parseFloat(row.deduction_amount),
+          totalDeductionDays: row.total_deduction_days,
+          incentive: parseFloat(row.incentive),
+          bonus: parseFloat(row.bonus),
+          medical: parseFloat(row.medical),
+          otherAllowance: parseFloat(row.other_allowance),
+          totalSalary: parseFloat(row.total_salary)
+        } : {
+          totalLeaveDays: approvedLeaves,
+          paidLeaveDays: 0
+        }
+      };
+    });
 
     console.log(`✅ Found ${employees.length} employees for ${month}/${year}`);
     res.json({ success: true, employees });
@@ -788,26 +885,38 @@ router.get("/reports", async (req, res) => {
   try {
     const { employeeId, fromMonth, fromYear, toMonth, toYear, status } = req.query;
 
-    let joinOnConditions = [];
-    let joinQueryParams = [];
+    let targetFromYear = fromYear ? parseInt(fromYear) : null;
+    let targetFromMonth = fromMonth ? parseInt(fromMonth) : null;
+    let targetToYear = toYear ? parseInt(toYear) : targetFromYear;
+    let targetToMonth = toMonth ? parseInt(toMonth) : targetFromMonth;
 
-    if (fromYear && fromMonth && toYear && toMonth) {
-      joinOnConditions.push("(sc.year > ? OR (sc.year = ? AND sc.month >= ?))");
-      joinQueryParams.push(parseInt(fromYear), parseInt(fromYear), parseInt(fromMonth));
-
-      joinOnConditions.push("(sc.year < ? OR (sc.year = ? AND sc.month <= ?))");
-      joinQueryParams.push(parseInt(toYear), parseInt(toYear), parseInt(toMonth));
-    } else if (fromYear && fromMonth) {
-      joinOnConditions.push("sc.year = ? AND sc.month = ?");
-      joinQueryParams.push(parseInt(fromYear), parseInt(fromMonth));
-    } else if (toYear && toMonth) {
-      joinOnConditions.push("(sc.year < ? OR (sc.year = ? AND sc.month <= ?))");
-      joinQueryParams.push(parseInt(toYear), parseInt(toYear), parseInt(toMonth));
+    // Default to previous completed month if no month filter passed
+    if (!targetFromYear || !targetFromMonth) {
+      const now = new Date();
+      let prevMonth = now.getMonth();
+      let prevYear = now.getFullYear();
+      if (prevMonth === 0) {
+        prevMonth = 12;
+        prevYear -= 1;
+      }
+      targetFromYear = prevYear;
+      targetFromMonth = prevMonth;
+      targetToYear = prevYear;
+      targetToMonth = prevMonth;
     }
 
-    const joinClause = joinOnConditions.length > 0 
-      ? `AND ${joinOnConditions.join(" AND ")}` 
-      : "";
+    const monthPairs = [];
+    let curY = targetFromYear;
+    let curM = targetFromMonth;
+
+    while (curY < targetToYear || (curY === targetToYear && curM <= targetToMonth)) {
+      monthPairs.push({ month: curM, year: curY });
+      curM++;
+      if (curM > 12) {
+        curM = 1;
+        curY++;
+      }
+    }
 
     let whereClause = "WHERE 1=1";
     if (status === "Inactive") {
@@ -815,73 +924,99 @@ router.get("/reports", async (req, res) => {
     } else if (status === "all") {
       // No working_status filter
     } else {
-      // Default: Active
       whereClause += " AND ed.working_status = 'Active'";
     }
 
     let whereQueryParams = [];
-
     if (employeeId && employeeId !== "all") {
       whereClause += " AND ed.employee_id = ?";
       whereQueryParams.push(employeeId);
     }
 
-    const query = `
-      SELECT 
-        ed.employee_id,
-        ed.employee_name,
-        ed.profile_url,
-        ed.designation,
-        ed.employment_type,
-        sc.id as salary_id,
-        sc.month,
-        sc.year,
-        sc.basic_salary,
-        sc.total_leave_days,
-        sc.paid_leave_days,
-        sc.deduction_amount,
-        sc.total_deduction_days,
-        sc.incentive,
-        sc.bonus,
-        sc.medical,
-        sc.other_allowance,
-        sc.total_salary,
-        sc.created_at as salary_date
-      FROM employees_details ed
-      INNER JOIN salary_calculation sc ON ed.employee_id = sc.employee_id ${joinClause}
-      ${whereClause}
-      ORDER BY sc.year DESC, sc.month DESC, ed.employee_name ASC
-    `;
+    let allReports = [];
 
-    const allParams = [...joinQueryParams, ...whereQueryParams];
-    const results = await queryWithRetry(query, allParams);
+    for (const pair of monthPairs) {
+      const query = `
+        SELECT 
+          ed.employee_id,
+          ed.employee_name,
+          ed.profile_url,
+          ed.designation,
+          ed.employment_type,
+          sc.id as salary_id,
+          sc.basic_salary,
+          sc.total_leave_days,
+          sc.paid_leave_days,
+          sc.deduction_amount,
+          sc.total_deduction_days,
+          sc.incentive,
+          sc.bonus,
+          sc.medical,
+          sc.other_allowance,
+          sc.total_salary,
+          sc.created_at as salary_date
+        FROM employees_details ed
+        LEFT JOIN salary_calculation sc 
+          ON ed.employee_id = sc.employee_id 
+          AND sc.month = ? 
+          AND sc.year = ?
+        ${whereClause}
+        ORDER BY ed.employee_name ASC
+      `;
 
-    const reports = results.map((row) => ({
-      employeeId: row.employee_id,
-      employeeName: row.employee_name,
-      profile_url: row.profile_url || null,
-      designation: row.designation,
-      jobRole: row.employment_type || 'On Role',
-      month: row.month || null,
-      year: row.year || null,
-      hasSalary: row.salary_id ? true : false,
-      salaryData: row.salary_id ? {
-        id: row.salary_id,
-        basicSalary: parseFloat(row.basic_salary || 0),
-        totalLeaveDays: row.total_leave_days !== null ? parseFloat(row.total_leave_days) : 0,
-        paidLeaveDays: row.paid_leave_days !== null ? parseFloat(row.paid_leave_days) : 0,
-        deductionAmount: parseFloat(row.deduction_amount || 0),
-        totalDeductionDays: row.total_deduction_days || 0,
-        incentive: parseFloat(row.incentive || 0),
-        bonus: parseFloat(row.bonus || 0),
-        medical: parseFloat(row.medical || 0),
-        otherAllowance: parseFloat(row.other_allowance || 0),
-        totalSalary: parseFloat(row.total_salary || 0)
-      } : null
-    }));
+      const params = [pair.month, pair.year, ...whereQueryParams];
+      const results = await queryWithRetry(query, params);
+      const approvedLeaveMap = await getApprovedLeaveDaysMap(pair.month, pair.year);
 
-    console.log(`✅ Reports fetched: ${reports.length} records`);
-    res.json({ success: true, reports });
+      results.forEach((row) => {
+        const approvedLeaves = approvedLeaveMap.get(row.employee_id) || 0;
+        const totalLeaveDays = approvedLeaves > 0
+          ? approvedLeaves
+          : (row.salary_id && row.total_leave_days !== null && row.total_leave_days !== undefined
+              ? parseFloat(row.total_leave_days)
+              : 0);
+
+        allReports.push({
+          employeeId: row.employee_id,
+          employeeName: row.employee_name,
+          profile_url: row.profile_url || null,
+          designation: row.designation,
+          jobRole: row.employment_type || 'On Role',
+          month: pair.month,
+          year: pair.year,
+          hasSalary: row.salary_id ? true : false,
+          approvedLeaveDays: approvedLeaves,
+          salaryData: row.salary_id ? {
+            id: row.salary_id,
+            basicSalary: parseFloat(row.basic_salary || 0),
+            totalLeaveDays: totalLeaveDays,
+            paidLeaveDays: parseFloat(row.paid_leave_days || 0),
+            deductionAmount: parseFloat(row.deduction_amount || 0),
+            totalDeductionDays: row.total_deduction_days || 0,
+            incentive: parseFloat(row.incentive || 0),
+            bonus: parseFloat(row.bonus || 0),
+            medical: parseFloat(row.medical || 0),
+            otherAllowance: parseFloat(row.other_allowance || 0),
+            totalSalary: parseFloat(row.total_salary || 0)
+          } : {
+            totalLeaveDays: approvedLeaves,
+            paidLeaveDays: 0,
+            basicSalary: 0,
+            totalSalary: 0
+          }
+        });
+      });
+    }
+
+    // Sort by Year DESC, Month DESC, Employee Name ASC
+    allReports.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      if (a.month !== b.month) return b.month - a.month;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
+
+    console.log(`✅ Reports fetched: ${allReports.length} records`);
+    res.json({ success: true, reports: allReports });
   } catch (err) {
     console.error("Get reports error:", err);
     res.status(500).json({ success: false, error: "Failed to fetch salary reports" });

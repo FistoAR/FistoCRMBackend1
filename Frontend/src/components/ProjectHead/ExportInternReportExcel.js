@@ -37,7 +37,7 @@ class ExportInternReportExcel {
       
       if (tasks.length > 0) {
         tasks.forEach((task, taskIndex) => {
-          const isLeave = task.task_type === "leave";
+          const isLeave = task.task_type === "leave" || task.task_type === "on_duty" || task.task_type === "permission" || report.is_leave;
           const rowData = {};
 
           if (isAllEmployees) rowData["Employee"] = report.employee_name || "-";
@@ -45,16 +45,17 @@ class ExportInternReportExcel {
           rowData["Day"] = dayOfWeek;
 
           if (isLeave) {
-            rowData["Morning In"] = "LEAVE";
-            rowData["Morning Out"] = "LEAVE";
-            rowData["Afternoon In"] = "LEAVE";
-            rowData["Afternoon Out"] = "LEAVE";
-            rowData["Hours"] = "0";
-            rowData["Project"] = "LEAVE";
-            rowData["Task"] = task.task_name;
+            const labelStr = (task.task_name || "LEAVE").toUpperCase();
+            rowData["Morning In"] = labelStr;
+            rowData["Morning Out"] = labelStr;
+            rowData["Afternoon In"] = labelStr;
+            rowData["Afternoon Out"] = labelStr;
+            rowData["Hours"] = report.total_hours || "LEAVE";
+            rowData["Project"] = labelStr;
+            rowData["Task"] = task.task_name || "Leave";
             rowData["Progress"] = "-";
-            rowData["Status"] = task.status;
-            rowData["Outcome"] = task.outcome;
+            rowData["Status"] = `Project Head: ${task.team_head_status || 'Pending'}, Management: ${task.management_status || 'Pending'}, Overall: ${task.status || 'Pending'}`;
+            rowData["Outcome"] = task.outcome || task.reason || "-";
           } else {
             // Only show attendance times for the first attendance task row to avoid redundancy in Excel
             // but for Excel specifically, it's often better to repeat them or leave them blank

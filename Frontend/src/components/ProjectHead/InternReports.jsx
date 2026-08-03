@@ -969,12 +969,16 @@ const InternReports = () => {
                       displayedReports.map((report, reportIndex) => {
                       const tasks = report.tasks || [];
                       const hasTasks = tasks.length > 0;
-                      const attendanceTasks = tasks.filter(
-                        (t) => t.task_type !== "leave",
-                      );
-                      const leaveTasks = tasks.filter(
-                        (t) => t.task_type === "leave",
-                      );
+
+                      const isLeaveTask = (t) => 
+                        t.task_type === "leave" || 
+                        t.task_type === "on_duty" || 
+                        t.task_type === "permission" || 
+                        t.is_leave === true || 
+                        report.is_leave === true;
+
+                      const attendanceTasks = tasks.filter((t) => !isLeaveTask(t));
+                      const leaveTasks = tasks.filter((t) => isLeaveTask(t));
 
                       // For a specific day (report), identity columns span all tasks
                       const identityRowSpan = Math.max(1, tasks.length);
@@ -982,9 +986,7 @@ const InternReports = () => {
                       const timesRowSpan = Math.max(1, attendanceTasks.length);
 
                       // Helper to find the first attendance task index
-                      const firstAttendanceIndex = tasks.findIndex(
-                        (t) => t.task_type !== "leave" && t.task_type !== "on_duty",
-                      );
+                      const firstAttendanceIndex = tasks.findIndex((t) => !isLeaveTask(t));
 
                       return (
                         <React.Fragment
@@ -992,7 +994,7 @@ const InternReports = () => {
                         >
                           {hasTasks ? (
                             tasks.map((task, taskIndex) => {
-                              const isLeave = task.task_type === "leave" || task.task_type === "on_duty";
+                              const isLeave = isLeaveTask(task);
                               const isOnDuty = task.task_type === "on_duty" || task.task_name === "On-Duty";
 
                               return (
@@ -1147,31 +1149,56 @@ const InternReports = () => {
                                           </div>
                                         </div>
                                         
-                                        {/* Split Status Display */}
-                                        <div className="flex items-center gap-[0.8vw] bg-white px-[0.6vw] py-[0.3vw] rounded border border-yellow-100 shadow-sm">
-                                          <div className="flex items-center gap-[0.4vw] border-r border-gray-100 pr-[0.8vw]">
-                                            <span className="text-[0.65vw] text-gray-400 font-medium">Project head:</span>
-                                            <span className={`px-[0.5vw] py-[0.05vw] rounded-full text-[0.7vw] font-bold ${
-                                              (task.team_head_status || "").toLowerCase() === "approved" 
-                                                ? "text-green-600 bg-green-50" 
-                                                : "text-orange-600 bg-orange-50"
-                                            }`}>
-                                              {task.team_head_status || "Pending"}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-[0.4vw]">
-                                            <span className="text-[0.65vw] text-gray-400 font-medium">Management:</span>
-                                            <span className={`px-[0.5vw] py-[0.05vw] rounded-full text-[0.7vw] font-bold ${
-                                              (task.management_status || "").toLowerCase() === "approved" 
-                                                ? "text-green-600 bg-green-50" 
-                                                : "text-orange-600 bg-orange-50"
-                                            }`}>
-                                              {task.management_status || "Pending"}
-                                            </span>
-                                          </div>
+                                        {(() => {
+                                           const phRaw = (task.team_head_status || "Pending").trim();
+                                           const mgmtRaw = (task.management_status || "Pending").trim();
+                                           
+                                           const phLower = phRaw.toLowerCase();
+                                           const mgmtLower = mgmtRaw.toLowerCase();
+                                           
+                                           let overallBadge = "🟡 Pending";
+                                           let overallColor = "text-amber-700 bg-amber-50 border-amber-200";
+
+                                           if (phLower === "rejected" || mgmtLower === "rejected" || (task.status || "").toLowerCase() === "rejected") {
+                                             overallBadge = "🔴 Rejected";
+                                             overallColor = "text-red-700 bg-red-50 border-red-200";
+                                           } else if (phLower === "approved" || mgmtLower === "approved" || (task.status || "").toLowerCase() === "approved") {
+                                             overallBadge = "🟢 Approved";
+                                             overallColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+                                           }
+
+                                           const getStageBadgeClass = (statusStr) => {
+                                             const s = (statusStr || "").toLowerCase();
+                                             if (s === "approved") return "text-emerald-700 bg-emerald-50 font-bold";
+                                             if (s === "rejected") return "text-red-700 bg-red-50 font-bold";
+                                             return "text-amber-700 bg-amber-50 font-semibold";
+                                           };
+
+                                           return (
+                                             <div className="flex items-center gap-[0.8vw] bg-white px-[0.6vw] py-[0.3vw] rounded border border-gray-200 shadow-sm">
+                                               <div className="flex items-center gap-[0.4vw] border-r border-gray-200 pr-[0.6vw]">
+                                                 <span className="text-[0.65vw] text-gray-500 font-medium">Project Head:</span>
+                                                 <span className={`px-[0.4vw] py-[0.1vw] rounded text-[0.7vw] ${getStageBadgeClass(phRaw)}`}>
+                                                   {phRaw.charAt(0).toUpperCase() + phRaw.slice(1)}
+                                                 </span>
+                                               </div>
+                                               <div className="flex items-center gap-[0.4vw] border-r border-gray-200 pr-[0.6vw]">
+                                                 <span className="text-[0.65vw] text-gray-500 font-medium">Management:</span>
+                                                 <span className={`px-[0.4vw] py-[0.1vw] rounded text-[0.7vw] ${getStageBadgeClass(mgmtRaw)}`}>
+                                                   {mgmtRaw.charAt(0).toUpperCase() + mgmtRaw.slice(1)}
+                                                 </span>
+                                               </div>
+                                               <div className="flex items-center gap-[0.4vw]">
+                                                 <span className="text-[0.65vw] text-gray-500 font-medium">Overall Status:</span>
+                                                 <span className={`px-[0.5vw] py-[0.1vw] rounded-full text-[0.7vw] font-bold border ${overallColor}`}>
+                                                   {overallBadge}
+                                                 </span>
+                                               </div>
+                                             </div>
+                                            );
+                                          })()}
                                         </div>
-                                      </div>
-                                    </td>
+                                      </td>
                                   )}
                                 </tr>
                               );

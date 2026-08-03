@@ -228,16 +228,6 @@ class ExportMaidReportPDF {
             dataCell.cell.styles.fontStyle = "bold";
           }
         },
-        didDrawPage: function (dataCell) {
-          const pageCount = doc.internal.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.setTextColor(102, 102, 102);
-          doc.text(
-            `Page ${dataCell.pageNumber} of ${pageCount}`,
-            dataCell.settings.margin.left,
-            doc.internal.pageSize.height - 10
-          );
-        },
       });
 
       // Add summary at the end
@@ -301,8 +291,18 @@ class ExportMaidReportPDF {
         doc.text("Half Day Leave", 210, legendY + 6);
       }
 
-      const fileName = `Maid_Attendance_${monthYear.replace(/\s+/g, "_")}.pdf`;
-      doc.save(fileName);
+      // Add total page count to all pages
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(102, 102, 102);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Page ${i} of ${totalPages}`, 14, doc.internal.pageSize.height - 5);
+      }
+
+        const fileName = `Maid_Attendance_${monthYear.replace(/\s+/g, "_")}.pdf`;
+        doc.save(fileName);
     };
 
     // Fallback if image fails to load
