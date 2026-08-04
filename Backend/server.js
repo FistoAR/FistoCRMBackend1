@@ -433,6 +433,7 @@ app.use("/api/drive", driveRoutes);
 app.use("/api/drive/access", driveAccess);
 app.use("/api/notes", OthersResource);
 app.use("/api/role-access", require("./Routes/RoleAccess"));
+app.use("/api/documents", require("./Routes/Management/pdfDocuments"));
 
 
 

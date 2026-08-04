@@ -5,77 +5,79 @@ import {
   Navigate,
 } from "react-router-dom";
 
+import React, { lazy, Suspense } from "react";
+
 // Services
 import Worker from "./Service/useWorker";
 import useSocketNotifications from "./Service/useSocketNotifications";
 import useAttendanceWorker from "./Service/Attendance/useAttendanceWorker";
+
+// Error Boundary & Context
+import ErrorBoundary from "./components/ErrorBoundary";
+import { NotificationProvider } from "./components/NotificationContext";
+import { ConfirmProvider } from "./components/ConfirmContext";
+import { usePageTitle } from "./components/PageTitleNav";
 
 // Layout Components
 import Login from "./components/EmployeeManagement/Login";
 import Sidebar from "./components/sidePannel";
 import NavBar from "./components/NavBar";
 
-// Page Components
-import Dashboard from "./pages/Dashboard";
-import Analytics from "./pages/Analytics";
-import Projects from "./layouts/Projects";
-import ProjectOverview from "./layouts/ProjectOverview";
-import Notes from "./pages/StickyNotes";
-import EmployeeCalendar from "./pages/EmployeeCalendar";
-import UnscheduledTask from "./pages/UnscheduledTask";
-import MasterResource from "./pages/MasterResorce";
-import CreateAttendance from "./pages/CreateAttendance";
-import WelcomeNewEmployee from "./components/Dashboard/WelcomeNewEmployee";
+// Lazy Loaded Page Components
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const Projects = lazy(() => import("./layouts/Projects"));
+const ProjectOverview = lazy(() => import("./layouts/ProjectOverview"));
+const Notes = lazy(() => import("./pages/StickyNotes"));
+const EmployeeCalendar = lazy(() => import("./pages/EmployeeCalendar"));
+const UnscheduledTask = lazy(() => import("./pages/UnscheduledTask"));
+const MasterResource = lazy(() => import("./pages/MasterResorce"));
+const CreateAttendance = lazy(() => import("./pages/CreateAttendance"));
+const WelcomeNewEmployee = lazy(() => import("./components/Dashboard/WelcomeNewEmployee"));
 
-// Marketing Components
-import MarketingAnalytics from "./components/Analytics/Analytics";
-import MarketingCalls from "./components/Marketing/Calls";
-import MarketingResourse from "./components/Marketing/Resource";
-import MarketingSEO from "./components/Marketing/SEO";
-import MarketingTaskUpdate from "./components/Marketing/TaskUpdate";
-import MarketingEmployeeRequest from "./components/Marketing/EmployeeRequest";
-import MarketingCalendar from "./components/Marketing/Calendar";
+// Lazy Loaded Marketing Components
+const MarketingCalls = lazy(() => import("./components/Marketing/Calls"));
+const MarketingResourse = lazy(() => import("./components/Marketing/Resource"));
+const MarketingSEO = lazy(() => import("./components/Marketing/SEO"));
+const MarketingTaskUpdate = lazy(() => import("./components/Marketing/TaskUpdate"));
+const MarketingEmployeeRequest = lazy(() => import("./components/Marketing/EmployeeRequest"));
+const MarketingCalendar = lazy(() => import("./components/Marketing/Calendar"));
 
-// Project Head Components
-import PHAssignTask from "./components/ProjectHead/MarketingTaskAssign";
-import PHinternReports from "./components/ProjectHead/InternReports";
-import PHworkdone from "./components/ProjectHead/Workdone";
+// Lazy Loaded Project Head Components
+const PHAssignTask = lazy(() => import("./components/ProjectHead/MarketingTaskAssign"));
+const PHinternReports = lazy(() => import("./components/ProjectHead/InternReports"));
+const PHworkdone = lazy(() => import("./components/ProjectHead/Workdone"));
 
-// Admin / Management Components
-import MarketingAnalytic from "./components/Management/MarketingAnalytics";
-import AdminManagement from "./components/Management/Budgets";
-import AdminFollowup from "./components/Management/Followup";
-import ClientMaster from "./components/Management/ClientMaster";
-import MarketingLeeds from "./components/Management/MarketingLeeds";
-import ManagementAnalytics from "./components/Management/ManagementAnalytics";
-import AdminReport from "./components/Management/Report";
-import AdminCalendar from "./components/Management/Calendar";
-import GeneratePDF from "./components/Management/GeneratePDF";
-import RoleAccessManagement from "./components/Management/RoleAccessManagement";
+// Lazy Loaded Admin / Management Components
+const MarketingAnalytic = lazy(() => import("./components/Management/MarketingAnalytics"));
+const AdminManagement = lazy(() => import("./components/Management/Budgets"));
+const AdminFollowup = lazy(() => import("./components/Management/Followup"));
+const ClientMaster = lazy(() => import("./components/Management/ClientMaster"));
+const MarketingLeeds = lazy(() => import("./components/Management/MarketingLeeds"));
+const ManagementAnalytics = lazy(() => import("./components/Management/ManagementAnalytics"));
+const AdminReport = lazy(() => import("./components/Management/Report"));
+const AdminCalendar = lazy(() => import("./components/Management/Calendar"));
+const RoleAccessManagement = lazy(() => import("./components/Management/RoleAccessManagement"));
+const GeneratePDF = lazy(() => import("./components/Management/GeneratePDF"));
 
-// HR Components (Loaded Directly)
-import HREmployeeDetails from "./components/Marketing/HR/EmployeeDetails";
-import HRAddDesignation from "./components/Marketing/HR/AddDesignation";
-import HRRequests from "./components/Marketing/HR/RequestsTab";
-import HRSalaryCalculation from "./components/Marketing/HR/SalaryCalculationTab";
-import HRInterviewSchedules from "./components/Marketing/HR/Interview";
-import HRQuotes from "./components/Marketing/HR/Quotes";
-import HRMaid from "./components/Marketing/HR/Maid";
+// Lazy Loaded HR Components
+const HREmployeeDetails = lazy(() => import("./components/Marketing/HR/EmployeeDetails"));
+const HRAddDesignation = lazy(() => import("./components/Marketing/HR/AddDesignation"));
+const HRRequests = lazy(() => import("./components/Marketing/HR/RequestsTab"));
+const HRSalaryCalculation = lazy(() => import("./components/Marketing/HR/SalaryCalculationTab"));
+const HRInterviewSchedules = lazy(() => import("./components/Marketing/HR/Interview"));
+const HRQuotes = lazy(() => import("./components/Marketing/HR/Quotes"));
+const HRMaid = lazy(() => import("./components/Marketing/HR/Maid"));
 
-// Project Module Components
-import NewProject from "./components/ProjectModule/NewProject";
-import Overview from "./components/ProjectModule/Overview";
-import Resource from "./components/ProjectModule/Resource";
-import DayTask from "./components/ProjectModule/DayTask";
+// Lazy Loaded Project Module Components
+const NewProject = lazy(() => import("./components/ProjectModule/NewProject"));
+const Overview = lazy(() => import("./components/ProjectModule/Overview"));
+const Resource = lazy(() => import("./components/ProjectModule/Resource"));
+const DayTask = lazy(() => import("./components/ProjectModule/DayTask"));
 
-// Other Components
-import DailyReportIntern from "./components/Intern/DailyReport";
-import MobileRequest from "./components/MobileRequest/MobileRequest";
-
-// Context & Hooks
-import { NotificationProvider } from "./components/NotificationContext";
-import { ConfirmProvider } from "./components/ConfirmContext";
-import { usePageTitle } from "./components/PageTitleNav";
+// Lazy Loaded Other Components
+const DailyReportIntern = lazy(() => import("./components/Intern/DailyReport"));
+const MobileRequest = lazy(() => import("./components/MobileRequest/MobileRequest"));
 
 
 
@@ -108,16 +110,28 @@ function AppContent() {
 
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/mobileRequest" element={<MobileRequest />} />
-        <Route path="/welcome" element={<WelcomeNewEmployee />} />
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/mobileRequest" element={<MobileRequest />} />
+          <Route path="/welcome" element={<WelcomeNewEmployee />} />
 
-        <Route
-          path="/*"
-          element={
-            <MainLayout socketData={socketData}>
-              <Routes>
+          <Route
+            path="/*"
+            element={
+              <MainLayout socketData={socketData}>
+                <ErrorBoundary>
+                  <Suspense
+                    fallback={
+                      <div className="flex-1 bg-slate-50 flex items-center justify-center p-6">
+                        <div className="flex flex-col items-center space-y-3">
+                          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          <p className="text-xs font-semibold text-slate-500">Loading Module...</p>
+                        </div>
+                      </div>
+                    }
+                  >
+                    <Routes>
                 {/* ========== DIRECT UNPREFIXED ROUTES ========== */}
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard />} />
@@ -247,11 +261,14 @@ function AppContent() {
 
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
-            </MainLayout>
-          }
-        />
-      </Routes>
-    </Router>
+            </Suspense>
+          </ErrorBoundary>
+        </MainLayout>
+        }
+      />
+    </Routes>
+  </ErrorBoundary>
+</Router>
   );
 }
 

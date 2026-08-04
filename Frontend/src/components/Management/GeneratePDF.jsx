@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback, lazy, Suspense } from "react";
 import {
   FileText,
   Award,
@@ -7,112 +7,257 @@ import {
   BookOpen,
   Download,
   RefreshCw,
+  Save,
+  ArrowLeft,
   Plus,
-  Trash2,
-  Building2,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-import fistoLogo from "../../assets/Fisto Logo.png";
 
-// Sample Signature Component
-const ManagingDirectorSignature = () => (
-  <div className="flex flex-col items-end text-right">
-    <div className="font-serif italic text-lg font-bold text-gray-800 tracking-wider mb-1">
-      Nijamudeen
-    </div>
-    <div className="font-bold text-[12px] text-gray-900">Mr. NIJAMUDEEN</div>
-    <div className="text-[11px] text-gray-600 font-medium">Managing Director</div>
-    <div className="text-[11px] font-bold text-gray-800 tracking-tight">
-      FISTO TECH PRIVATE LIMITED
-    </div>
-  </div>
-);
+// Lazy Loaded Modular Sub-components for true O(1) Code-Splitting
+const DocHomeHub = lazy(() => import("./DocEditor/DocHomeHub"));
+const DocSideFormPanel = lazy(() => import("./DocEditor/DocSideFormPanel"));
+const DocEditorCanvas = lazy(() => import("./DocEditor/DocEditorCanvas"));
+const DocSaveModal = lazy(() => import("./DocEditor/DocSaveModal"));
 
-// Top Letterhead Header Component
-const FistoLetterHeader = ({ refNumber, date }) => (
-  <div className="w-full flex justify-between items-start border-b border-gray-200 pb-3 mb-6">
-    <div className="text-left">
-      {refNumber && (
-        <div className="text-[12px] font-bold text-gray-900 tracking-wide">
-          REF: {refNumber}
-        </div>
-      )}
-      {date && (
-        <div className="text-[11px] font-medium text-gray-600 mt-0.5">
-          {date}
-        </div>
-      )}
-    </div>
-    <div className="text-right flex flex-col items-end">
-      <img src={fistoLogo} alt="FISTO-O TECH" className="h-9 object-contain mb-1" />
-      <div className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">
-        TECH PVT LTD
-      </div>
-    </div>
-  </div>
-);
+import {
+  STYLES,
+  buildDocHTML,
+  buildLedgerRowsHTML,
+  syncDrawerToDoc,
+} from "./DocEditor/templates/docTemplates";
 
-// Letter Footer Component
-const FistoLetterFooter = () => (
-  <div className="w-full border-t border-lime-500 pt-2 mt-auto text-left">
-    <div className="font-bold text-[11px] text-gray-900 uppercase tracking-wide">
-      FISTO TECH PRIVATE LIMITED
-    </div>
-    <div className="text-[10px] text-gray-600 leading-tight">
-      11/12, Sundaram Brothers Layout, Ramanathapuram, Coimbatore, Tamil Nadu - 641045
-    </div>
-    <div className="text-[10px] text-gray-600 leading-tight">
-      P : +91 99944 25147, +91 75300 25147 &nbsp;|&nbsp; E : info@fist-o.com &nbsp;|&nbsp; W : www.fist-o.com
-    </div>
-  </div>
-);
+let ledgerIdCounter = 100;
+const genId = () => ++ledgerIdCounter;
 
 export default function GeneratePDF() {
   const [activeTab, setActiveTab] = useState("offer");
   const [exporting, setExporting] = useState(false);
   const printRef = useRef(null);
 
-  // 1. Offer Letter State
+  // Undo / Redo History Stack
+  const historyStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const savedSelectionRef = useRef(null);
+
+  const saveHistorySnapshot = useCallback(() => {
+    if (!printRef.current) return;
+    const currentHTML = printRef.current.innerHTML;
+    if (
+      historyStackRef.current.length === 0 ||
+      historyStackRef.current[historyStackRef.current.length - 1] !== currentHTML
+    ) {
+      historyStackRef.current.push(currentHTML);
+      if (historyStackRef.current.length > 50) historyStackRef.current.shift();
+      redoStackRef.current = [];
+    }
+  }, []);
+
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const preserveSelection = () => {
+    saveSelection();
+  };
+
+  const restoreSelection = () => {
+    if (savedSelectionRef.current) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelectionRef.current);
+    }
+  };
+
+  const execCmd = (command, value = null) => {
+    if (!printRef.current) return;
+    printRef.current.focus();
+    restoreSelection();
+    saveHistorySnapshot();
+    document.execCommand(command, false, value);
+    saveSelection();
+    saveHistorySnapshot();
+  };
+
+  const handleUndo = () => {
+    if (!printRef.current || historyStackRef.current.length <= 1) return;
+    const current = historyStackRef.current.pop();
+    redoStackRef.current.push(current);
+    const prev = historyStackRef.current[historyStackRef.current.length - 1];
+    if (prev !== undefined) printRef.current.innerHTML = prev;
+  };
+
+  const handleRedo = () => {
+    if (!printRef.current || redoStackRef.current.length === 0) return;
+    const next = redoStackRef.current.pop();
+    historyStackRef.current.push(next);
+    printRef.current.innerHTML = next;
+  };
+
+  // Color Pickers & Formatting Toolbar State
+  const [textColor, setTextColor] = useState("#111827");
+  const [bgColor, setBgColor] = useState("#ffff00");
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [showBgColorPicker, setShowBgColorPicker] = useState(false);
+  const [showTableGridPicker, setShowTableGridPicker] = useState(false);
+  const [hoverGrid, setHoverGrid] = useState({ rows: 0, cols: 0 });
+  const [rulerHeightMm, setRulerHeightMm] = useState(297);
+
+  const handleInsertGridTable = (rows, cols) => {
+    if (rows <= 0 || cols <= 0) return;
+    saveHistorySnapshot();
+    let rowsHtml = "";
+    for (let r = 0; r < rows; r++) {
+      let colsHtml = "";
+      for (let c = 0; c < cols; c++) {
+        colsHtml += `<td style="border:1px solid #cbd5e1; padding:6px 8px; min-width:24px;">&nbsp;</td>`;
+      }
+      rowsHtml += `<tr>${colsHtml}</tr>`;
+    }
+    const tableHtml = `<table style="width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #cbd5e1; margin:12px 0;"><tbody>${rowsHtml}</tbody></table>`;
+    execCmd("insertHTML", tableHtml);
+    setShowTableGridPicker(false);
+  };
+
+  // Indent / Outdent Logic
+  const handleIndent = () => {
+    saveHistorySnapshot();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    let node = sel.anchorNode;
+    while (node && node !== printRef.current && !["P", "LI", "TD", "TH"].includes(node.nodeName)) {
+      node = node.parentNode;
+    }
+    if (node && node !== printRef.current) {
+      const currentMargin = parseInt(node.style.marginLeft || "0", 10);
+      node.style.marginLeft = `${currentMargin + 24}px`;
+    } else {
+      execCmd("indent");
+    }
+    saveHistorySnapshot();
+  };
+
+  const handleOutdent = () => {
+    saveHistorySnapshot();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    let node = sel.anchorNode;
+    while (node && node !== printRef.current && !["P", "LI", "TD", "TH"].includes(node.nodeName)) {
+      node = node.parentNode;
+    }
+    if (node && node !== printRef.current) {
+      const currentMargin = parseInt(node.style.marginLeft || "0", 10);
+      if (currentMargin >= 24) {
+        node.style.marginLeft = `${currentMargin - 24}px`;
+      } else {
+        node.style.marginLeft = "0px";
+      }
+    } else {
+      execCmd("outdent");
+    }
+    saveHistorySnapshot();
+  };
+
+  const handleClearCanvas = () => {
+    if (window.confirm("Are you sure you want to clear the entire document content?")) {
+      saveHistorySnapshot();
+      if (printRef.current) {
+        printRef.current.innerHTML = '<p style="margin:0 0 12px 0; min-height:1.4em;"><br></p>';
+        saveSelection();
+        saveHistorySnapshot();
+      }
+    }
+  };
+
+  // Margin State (in mm)
+  const [margins, setMargins] = useState({ top: 18, bottom: 18, left: 18, right: 18 });
+  const [draggingMargin, setDraggingMargin] = useState(null);
+
+  const handleRulerMouseDown = (type) => (e) => {
+    e.preventDefault();
+    setDraggingMargin(type);
+  };
+
+  useEffect(() => {
+    if (!draggingMargin) return;
+    const handleMouseMove = (e) => {
+      if (!printRef.current) return;
+      const rect = printRef.current.getBoundingClientRect();
+      const pxToMm = 210 / rect.width;
+
+      if (draggingMargin === "left") {
+        setMargins((prev) => ({
+          ...prev,
+          left: Math.max(5, Math.min(60, Math.round((e.clientX - rect.left) * pxToMm))),
+        }));
+      } else if (draggingMargin === "right") {
+        setMargins((prev) => ({
+          ...prev,
+          right: Math.max(5, Math.min(60, Math.round((rect.right - e.clientX) * pxToMm))),
+        }));
+      } else if (draggingMargin === "top") {
+        setMargins((prev) => ({
+          ...prev,
+          top: Math.max(5, Math.min(60, Math.round((e.clientY - rect.top) * pxToMm))),
+        }));
+      } else if (draggingMargin === "bottom") {
+        setMargins((prev) => ({
+          ...prev,
+          bottom: Math.max(5, Math.min(60, Math.round((rect.bottom - e.clientY) * pxToMm))),
+        }));
+      }
+    };
+
+    const handleMouseUp = () => setDraggingMargin(null);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [draggingMargin]);
+
+  // Document Forms Data State
   const [offerData, setOfferData] = useState({
     refNumber: "3FO/3105/FST02025",
-    date: "1, NOV 2025",
+    date: "2025-11-01",
     candidateName: "PRAVEENKUMAR K",
     address: "5/300, Periyar Nagar (ext), Harur, Dharmapuri, Tamil Nadu - 636903",
     designation: "JUNIOR DEVELOPER",
-    joiningDate: "1ST NOV 2025",
+    joiningDate: "2025-11-01",
     salary: "12,000",
     salaryWords: "Twelve Thousand Only",
     probationMonths: "3",
     noticePeriod: "45 to 60 days",
   });
 
-  // 2. Experience Letter State
   const [expData, setExpData] = useState({
     refNumber: "3FO/3105/FST00124",
-    date: "09, AUGUST 2025",
+    date: "2025-08-09",
     candidateName: "AJAY PRINCE R",
+    gender: "Male",
     workPosition: "TEAM LEAD - UI / UX DESIGNER",
-    dateOfJoining: "01st MAY 2024",
-    dateOfRelieving: "09th AUGUST 2025",
+    dateOfJoining: "2024-05-01",
+    dateOfRelieving: "2025-08-09",
     experience: "1 Year 3 months",
     basicPay: "15,000",
   });
 
-  // 3. Increment Letter State
   const [incData, setIncData] = useState({
     refNumber: "3FO/3105/FST00124",
-    date: "07, JULY 2025",
+    date: "2025-07-07",
     candidateName: "AJAY PRINCE",
     designation: "UI/UX Designer - Team Lead",
     address: "8/805, Vigneshwara nagar, Pooluvapatti, Tiruppur-641602",
-    effectiveDate: "07/07/2025",
+    effectiveDate: "2025-07-07",
     currentSalary: "12,000",
     revisedSalary: "15,000",
     revisedCtc: "1,80,000",
   });
 
-  // 4. Payslip State
   const [payslipData, setPayslipData] = useState({
     financialYear: "2026-2027",
     monthYear: "January 2026",
@@ -136,791 +281,458 @@ export default function GeneratePDF() {
     leaveDeduction: "0",
   });
 
-  // 5. Ledger State
   const [ledgerData, setLedgerData] = useState({
     financialYear: "2026-2027",
     ledgerName: "Cash Account",
-    accountCode: "1001",
-    preparedBy: "Accounts Team",
-    reviewedBy: "Finance Head",
-    date: "31/07/2026",
+    accountType: "Asset",
+    date: "2026-01-31",
+    preparedBy: "Accounts Dept",
+    reviewedBy: "Manager",
     pageNo: "1",
     items: [
-      { date: "01/07/2026", voucher: "VCH-001", particulars: "Opening Balance", debit: "50000", credit: "0", balance: "50000" },
-      { date: "05/07/2026", voucher: "VCH-002", particulars: "Client Payment Received", debit: "25000", credit: "0", balance: "75000" },
-      { date: "10/07/2026", voucher: "VCH-003", particulars: "Office Supplies Purchase", debit: "0", credit: "3500", balance: "71500" },
+      { id: 1, date: "2026-01-05", voucher: "VCH-001", particulars: "Opening Balance", debit: "50000", credit: "0", balance: "50000" },
+      { id: 2, date: "2026-01-12", voucher: "VCH-002", particulars: "Office Supplies", debit: "0", credit: "3500", balance: "46500" },
     ],
   });
 
-  const handleAddLedgerItem = () => {
-    setLedgerData({
-      ...ledgerData,
+  const handleAddLedgerItem = () =>
+    setLedgerData((p) => ({
+      ...p,
       items: [
-        ...ledgerData.items,
-        { date: "", voucher: "", particulars: "", debit: "0", credit: "0", balance: "0" },
+        ...p.items,
+        { id: genId(), date: "", voucher: "", particulars: "", debit: "0", credit: "0", balance: "0" },
       ],
+    }));
+
+  const handleRemoveLedgerItem = (id) =>
+    setLedgerData((p) => ({ ...p, items: p.items.filter((i) => i.id !== id) }));
+
+  const handleLedgerItemChange = (id, field, value) =>
+    setLedgerData((p) => ({
+      ...p,
+      items: p.items.map((i) => (i.id === id ? { ...i, [field]: value } : i)),
+    }));
+
+  // Hub, Save Modal & Backend DB Persistence State
+  const [viewMode, setViewMode] = useState("hub"); // 'hub' | 'editor'
+  const [editorType, setEditorType] = useState("template"); // 'blank' | 'template'
+  const [savedDocs, setSavedDocs] = useState({
+    offer_letter: [],
+    experience: [],
+    increment: [],
+    pay_slip: [],
+    ledger: [],
+  });
+  const [employeesList, setEmployeesList] = useState({ active: [], inactive: [] });
+  const [loadingDocs, setLoadingDocs] = useState(true);
+
+  // Save Modal State
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveDocName, setSaveDocName] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [savingDoc, setSavingDoc] = useState(false);
+  const [currentDocId, setCurrentDocId] = useState(null);
+
+  // Fetch saved documents from DB with skeleton state
+  const fetchSavedDocs = useCallback(async () => {
+    setLoadingDocs(true);
+    try {
+      const res = await fetch("/api/documents");
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSavedDocs({
+          offer_letter: json.data.offer_letter || json.data.offer || [],
+          experience: json.data.experience || [],
+          increment: json.data.increment || [],
+          pay_slip: json.data.pay_slip || json.data.payslip || [],
+          ledger: json.data.ledger || [],
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching saved documents:", err);
+    } finally {
+      setTimeout(() => setLoadingDocs(false), 300);
+    }
+  }, []);
+
+  // Fetch employees list from DB
+  const fetchEmployees = useCallback(async () => {
+    try {
+      const res = await fetch("/api/employeeRegister");
+      const json = await res.json();
+      const list = Array.isArray(json) ? json : json.data || [];
+      const active = [];
+      const inactive = [];
+
+      list.forEach((emp) => {
+        const item = {
+          id: emp.employee_id || emp.id,
+          name: emp.employee_name || emp.name,
+          designation: emp.designation || "",
+          status: emp.working_status || "Active",
+        };
+        if (item.status === "Active" || item.status === "Probation" || item.status === "Notice Period") {
+          active.push(item);
+        } else {
+          inactive.push(item);
+        }
+      });
+
+      setEmployeesList({ active, inactive });
+    } catch (err) {
+      console.error("Error fetching employees list:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSavedDocs();
+    fetchEmployees();
+  }, [fetchSavedDocs, fetchEmployees]);
+
+  // Handle Save Document to DB
+  const handleSaveDocument = async () => {
+    if (!saveDocName.trim() || !printRef.current) {
+      alert("Please enter a valid document name.");
+      return;
+    }
+    setSavingDoc(true);
+
+    const empObj =
+      [...employeesList.active, ...employeesList.inactive].find(
+        (e) => String(e.id) === String(selectedEmployeeId),
+      ) || null;
+
+    const payload = {
+      id: currentDocId,
+      category: activeTab === "offer" ? "offer_letter" : activeTab === "payslip" ? "pay_slip" : activeTab,
+      docName: saveDocName.trim(),
+      employeeId: empObj ? empObj.id : null,
+      employeeName: empObj ? empObj.name : null,
+      contentHtml: printRef.current.innerHTML,
+      docData: { margins, offerData, expData, incData, payslipData, ledgerData },
+    };
+
+    try {
+      const res = await fetch("/api/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.success) {
+        if (json.docId) setCurrentDocId(json.docId);
+        setSaveModalOpen(false);
+        fetchSavedDocs();
+        alert("Document saved successfully!");
+      } else {
+        alert(json.message || "Failed to save document.");
+      }
+    } catch (err) {
+      console.error("Error saving document:", err);
+      alert("Network error while saving document.");
+    } finally {
+      setSavingDoc(false);
+    }
+  };
+
+  // Open saved document into editor
+  const handleOpenSavedDocument = (doc) => {
+    setCurrentDocId(doc.id);
+    setSaveDocName(doc.docName);
+    setEditorType("template");
+    if (doc.employeeId) setSelectedEmployeeId(doc.employeeId);
+    if (doc.docData) {
+      if (doc.docData.margins) setMargins(doc.docData.margins);
+      if (doc.docData.offerData) setOfferData(doc.docData.offerData);
+      if (doc.docData.expData) setExpData(doc.docData.expData);
+      if (doc.docData.incData) setIncData(doc.docData.incData);
+      if (doc.docData.payslipData) setPayslipData(doc.docData.payslipData);
+      if (doc.docData.ledgerData) setLedgerData(doc.docData.ledgerData);
+    }
+    setViewMode("editor");
+    setTimeout(() => {
+      if (printRef.current && doc.contentHtml) {
+        printRef.current.innerHTML = doc.contentHtml;
+      }
+    }, 50);
+  };
+
+  // Render document HTML when tab or viewMode changes
+  useEffect(() => {
+    if (!printRef.current || viewMode !== "editor") return;
+    if (editorType === "blank" && !currentDocId) {
+      printRef.current.innerHTML = '<p style="margin:0 0 12px 0; min-height:1.4em;"><br></p>';
+    } else if (!currentDocId) {
+      printRef.current.innerHTML = buildDocHTML(activeTab, {
+        offerData,
+        expData,
+        incData,
+        payslipData,
+        ledgerData,
+      });
+    }
+  }, [activeTab, currentDocId, editorType, viewMode]);
+
+  // Sync drawer state changes to document DOM
+  useEffect(() => {
+    if (!printRef.current || viewMode !== "editor") return;
+    syncDrawerToDoc(printRef.current, activeTab, {
+      offerData,
+      expData,
+      incData,
+      payslipData,
+      ledgerData,
     });
-  };
+  }, [activeTab, offerData, expData, incData, payslipData, ledgerData, viewMode]);
 
-  const handleRemoveLedgerItem = (idx) => {
-    const updated = ledgerData.items.filter((_, i) => i !== idx);
-    setLedgerData({ ...ledgerData, items: updated });
-  };
+  // Regenerate ledger tbody when rows are added/removed
+  useEffect(() => {
+    if (!printRef.current || activeTab !== "ledger" || viewMode !== "editor") return;
+    const tbody = printRef.current.querySelector(".ledger-table tbody");
+    if (tbody) tbody.innerHTML = buildLedgerRowsHTML(ledgerData.items);
+  }, [ledgerData.items, activeTab, viewMode]);
 
-  // PDF Export Handler
+  // Multi-page PDF export
   const handleExportPDF = async () => {
     if (!printRef.current) return;
     setExporting(true);
+    const element = printRef.current;
+    element.classList.add("pdf-exporting");
 
     try {
-      const element = printRef.current;
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: document.documentElement.offsetWidth,
+        windowHeight: document.documentElement.offsetHeight,
       });
 
-      const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`FISTO_${activeTab.toUpperCase()}_DOCUMENT.pdf`);
+      const imgData = canvas.toDataURL("image/png", 1.0);
+      pdf.addImage(imgData, "PNG", 0, 0, imgWidth, imgHeight);
+
+      const filename = `${activeTabLabel.toLowerCase().replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      pdf.save(filename);
     } catch (err) {
-      console.error("Error generating PDF:", err);
+      console.error("PDF export error:", err);
+      alert("Export failed. Please try again.");
     } finally {
+      if (element) element.classList.remove("pdf-exporting");
       setExporting(false);
     }
   };
 
+  const tabs = [
+    { id: "offer", label: "Offer Letter", icon: FileText },
+    { id: "experience", label: "Experience", icon: Award },
+    { id: "increment", label: "Increment", icon: TrendingUp },
+    { id: "payslip", label: "Pay Slip", icon: CreditCard },
+    { id: "ledger", label: "Ledger", icon: BookOpen },
+  ];
+  const activeTabLabel = tabs.find((t) => t.id === activeTab)?.label ?? "";
+
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden text-gray-800">
-      {/* ── Left Navigation Sidebar ── */}
-      <div className="w-[18vw] min-w-[220px] bg-white border-r border-gray-200 flex flex-col justify-between shadow-xs">
-        <div>
-          <div className="p-4 border-b border-gray-100 flex items-center gap-2">
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-              <Building2 size={20} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-gray-900 leading-tight">
-                Document Generator
-              </h2>
-              <p className="text-[11px] text-gray-500">Official Management PDFs</p>
-            </div>
-          </div>
+    <>
+      <style>{STYLES}</style>
 
-          <div className="p-2 space-y-1">
-            {[
-              { id: "offer", label: "Offer Letter", icon: FileText, desc: "Appointment Letter" },
-              { id: "experience", label: "Experience Letter", icon: Award, desc: "Relieving Certificate" },
-              { id: "increment", label: "Increment Letter", icon: TrendingUp, desc: "Salary Revision" },
-              { id: "payslip", label: "Pay Slip", icon: CreditCard, desc: "Monthly Salary Slip" },
-              { id: "ledger", label: "General Ledger", icon: BookOpen, desc: "Financial Accounts" },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-all duration-150 cursor-pointer ${
-                    isActive
-                      ? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-500/20"
-                      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 font-medium"
-                  }`}
-                >
-                  <Icon size={18} className={isActive ? "text-white" : "text-gray-500"} />
-                  <div>
-                    <div className="text-xs font-semibold leading-tight">{tab.label}</div>
-                    <div className={`text-[10px] ${isActive ? "text-blue-100" : "text-gray-400"}`}>
-                      {tab.desc}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="p-3 border-t border-gray-100 bg-gray-50/50">
-          <button
-            onClick={handleExportPDF}
-            disabled={exporting}
-            className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition cursor-pointer disabled:opacity-50"
-          >
-            {exporting ? (
-              <RefreshCw size={15} className="animate-spin" />
-            ) : (
-              <Download size={15} />
+      <div className="h-screen w-full mb-4 box-border overflow-hidden bg-white rounded-2xl shadow-xl border border-gray-200/80">
+        <div className="flex flex-col h-full w-full overflow-hidden text-gray-800">
+          {/* Top Navigation Toolbar */}
+          <header className="flex-none h-13 bg-white border-b border-gray-200 flex items-center px-4 gap-4 z-30 shadow-sm w-full">
+            {viewMode === "editor" && (
+              <button
+                onClick={() => setViewMode("hub")}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition"
+              >
+                <ArrowLeft size={14} /> Back to Hub
+              </button>
             )}
-            {exporting ? "Generating PDF..." : "Export as PDF"}
-          </button>
-        </div>
-      </div>
 
-      {/* ── Middle Controls & Input Form ── */}
-      <div className="w-[32vw] min-w-[340px] border-r border-gray-200 bg-white flex flex-col h-full">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/80">
-          <div>
-            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
-              {activeTab} Document Fields
-            </h3>
-            <p className="text-[11px] text-gray-500">Fill details to auto-generate PDF</p>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
-          {/* OFFER LETTER INPUTS */}
-          {activeTab === "offer" && (
-            <>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Ref Number</label>
-                <input
-                  type="text"
-                  value={offerData.refNumber}
-                  onChange={(e) => setOfferData({ ...offerData, refNumber: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Letter Date</label>
-                <input
-                  type="text"
-                  value={offerData.date}
-                  onChange={(e) => setOfferData({ ...offerData, date: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Candidate Name</label>
-                <input
-                  type="text"
-                  value={offerData.candidateName}
-                  onChange={(e) => setOfferData({ ...offerData, candidateName: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Candidate Address</label>
-                <textarea
-                  rows={2}
-                  value={offerData.address}
-                  onChange={(e) => setOfferData({ ...offerData, address: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Designation</label>
-                <input
-                  type="text"
-                  value={offerData.designation}
-                  onChange={(e) => setOfferData({ ...offerData, designation: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Joining Date</label>
-                  <input
-                    type="text"
-                    value={offerData.joiningDate}
-                    onChange={(e) => setOfferData({ ...offerData, joiningDate: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Salary (INR/pm)</label>
-                  <input
-                    type="text"
-                    value={offerData.salary}
-                    onChange={(e) => setOfferData({ ...offerData, salary: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Salary in Words</label>
-                <input
-                  type="text"
-                  value={offerData.salaryWords}
-                  onChange={(e) => setOfferData({ ...offerData, salaryWords: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-            </>
-          )}
-
-          {/* EXPERIENCE LETTER INPUTS */}
-          {activeTab === "experience" && (
-            <>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Ref Number</label>
-                <input
-                  type="text"
-                  value={expData.refNumber}
-                  onChange={(e) => setExpData({ ...expData, refNumber: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Issue Date</label>
-                <input
-                  type="text"
-                  value={expData.date}
-                  onChange={(e) => setExpData({ ...expData, date: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Candidate Name</label>
-                <input
-                  type="text"
-                  value={expData.candidateName}
-                  onChange={(e) => setExpData({ ...expData, candidateName: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Work Position</label>
-                <input
-                  type="text"
-                  value={expData.workPosition}
-                  onChange={(e) => setExpData({ ...expData, workPosition: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Date of Joining</label>
-                  <input
-                    type="text"
-                    value={expData.dateOfJoining}
-                    onChange={(e) => setExpData({ ...expData, dateOfJoining: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Date of Relieving</label>
-                  <input
-                    type="text"
-                    value={expData.dateOfRelieving}
-                    onChange={(e) => setExpData({ ...expData, dateOfRelieving: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Total Experience</label>
-                  <input
-                    type="text"
-                    value={expData.experience}
-                    onChange={(e) => setExpData({ ...expData, experience: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Basic Pay (INR)</label>
-                  <input
-                    type="text"
-                    value={expData.basicPay}
-                    onChange={(e) => setExpData({ ...expData, basicPay: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* INCREMENT LETTER INPUTS */}
-          {activeTab === "increment" && (
-            <>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Ref Number</label>
-                <input
-                  type="text"
-                  value={incData.refNumber}
-                  onChange={(e) => setIncData({ ...incData, refNumber: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Letter Date</label>
-                <input
-                  type="text"
-                  value={incData.date}
-                  onChange={(e) => setIncData({ ...incData, date: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Candidate Name</label>
-                <input
-                  type="text"
-                  value={incData.candidateName}
-                  onChange={(e) => setIncData({ ...incData, candidateName: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Designation</label>
-                <input
-                  type="text"
-                  value={incData.designation}
-                  onChange={(e) => setIncData({ ...incData, designation: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Current Salary</label>
-                  <input
-                    type="text"
-                    value={incData.currentSalary}
-                    onChange={(e) => setIncData({ ...incData, currentSalary: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Revised Salary</label>
-                  <input
-                    type="text"
-                    value={incData.revisedSalary}
-                    onChange={(e) => setIncData({ ...incData, revisedSalary: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Revised CTC</label>
-                  <input
-                    type="text"
-                    value={incData.revisedCtc}
-                    onChange={(e) => setIncData({ ...incData, revisedCtc: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* PAYSLIP INPUTS */}
-          {activeTab === "payslip" && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Financial Year</label>
-                  <input
-                    type="text"
-                    value={payslipData.financialYear}
-                    onChange={(e) => setPayslipData({ ...payslipData, financialYear: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Payslip Month</label>
-                  <input
-                    type="text"
-                    value={payslipData.monthYear}
-                    onChange={(e) => setPayslipData({ ...payslipData, monthYear: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Employee ID</label>
-                  <input
-                    type="text"
-                    value={payslipData.employeeId}
-                    onChange={(e) => setPayslipData({ ...payslipData, employeeId: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Employee Name</label>
-                  <input
-                    type="text"
-                    value={payslipData.employeeName}
-                    onChange={(e) => setPayslipData({ ...payslipData, employeeName: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Basic Salary</label>
-                  <input
-                    type="text"
-                    value={payslipData.basic}
-                    onChange={(e) => setPayslipData({ ...payslipData, basic: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">HRA</label>
-                  <input
-                    type="text"
-                    value={payslipData.hra}
-                    onChange={(e) => setPayslipData({ ...payslipData, hra: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* LEDGER INPUTS */}
-          {activeTab === "ledger" && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Ledger Name</label>
-                  <input
-                    type="text"
-                    value={ledgerData.ledgerName}
-                    onChange={(e) => setLedgerData({ ...ledgerData, ledgerName: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-700 block mb-1">Account Code</label>
-                  <input
-                    type="text"
-                    value={ledgerData.accountCode}
-                    onChange={(e) => setLedgerData({ ...ledgerData, accountCode: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-xs"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="font-semibold text-gray-700">Transactions</label>
+            <nav className="flex items-center gap-2 flex-1 overflow-x-auto scrollbar-none">
+              {tabs.map(({ id, label, icon: Icon }) => {
+                const active = activeTab === id;
+                return (
                   <button
-                    onClick={handleAddLedgerItem}
-                    className="px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
+                    key={id}
+                    onClick={() => {
+                      setActiveTab(id);
+                      setCurrentDocId(null);
+                      setViewMode("hub");
+                    }}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 ${
+                      active
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-500/20 scale-[1.02]"
+                        : "text-gray-600 bg-gray-100 hover:bg-gray-100 hover:text-gray-900"
+                    }`}
                   >
-                    <Plus size={12} /> Add Row
+                    <Icon size={15} />
+                    {label}
                   </button>
-                </div>
-                <div className="space-y-2 max-h-[35vh] overflow-y-auto pr-1">
-                  {ledgerData.items.map((item, idx) => (
-                    <div key={idx} className="p-2 border border-gray-200 rounded-lg bg-gray-50 relative space-y-1">
-                      <button
-                        onClick={() => handleRemoveLedgerItem(idx)}
-                        className="absolute top-2 right-2 text-red-500 hover:text-red-700 cursor-pointer"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                      <div className="grid grid-cols-2 gap-1">
-                        <input
-                          type="text"
-                          placeholder="Date"
-                          value={item.date}
-                          onChange={(e) => {
-                            const updated = [...ledgerData.items];
-                            updated[idx].date = e.target.value;
-                            setLedgerData({ ...ledgerData, items: updated });
-                          }}
-                          className="p-1 border border-gray-300 rounded text-[11px]"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Voucher"
-                          value={item.voucher}
-                          onChange={(e) => {
-                            const updated = [...ledgerData.items];
-                            updated[idx].voucher = e.target.value;
-                            setLedgerData({ ...ledgerData, items: updated });
-                          }}
-                          className="p-1 border border-gray-300 rounded text-[11px]"
-                        />
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Particulars"
-                        value={item.particulars}
-                        onChange={(e) => {
-                          const updated = [...ledgerData.items];
-                          updated[idx].particulars = e.target.value;
-                          setLedgerData({ ...ledgerData, items: updated });
-                        }}
-                        className="w-full p-1 border border-gray-300 rounded text-[11px]"
-                      />
-                      <div className="grid grid-cols-3 gap-1">
-                        <input
-                          type="text"
-                          placeholder="Debit"
-                          value={item.debit}
-                          onChange={(e) => {
-                            const updated = [...ledgerData.items];
-                            updated[idx].debit = e.target.value;
-                            setLedgerData({ ...ledgerData, items: updated });
-                          }}
-                          className="p-1 border border-gray-300 rounded text-[11px]"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Credit"
-                          value={item.credit}
-                          onChange={(e) => {
-                            const updated = [...ledgerData.items];
-                            updated[idx].credit = e.target.value;
-                            setLedgerData({ ...ledgerData, items: updated });
-                          }}
-                          className="p-1 border border-gray-300 rounded text-[11px]"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Balance"
-                          value={item.balance}
-                          onChange={(e) => {
-                            const updated = [...ledgerData.items];
-                            updated[idx].balance = e.target.value;
-                            setLedgerData({ ...ledgerData, items: updated });
-                          }}
-                          className="p-1 border border-gray-300 rounded text-[11px]"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                );
+              })}
+            </nav>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {viewMode === "hub" && (
+                <button
+                  onClick={() => {
+                    setCurrentDocId(null);
+                    setSaveDocName("");
+                    setSelectedEmployeeId("");
+                    setEditorType("blank");
+                    setViewMode("editor");
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition cursor-pointer active:scale-95"
+                >
+                  <Plus size={15} /> New Blank Document
+                </button>
+              )}
+
+              {viewMode === "editor" && (
+                <>
+                  <button
+                    onClick={() => {
+                      setSaveDocName(saveDocName || `${activeTabLabel} - ${new Date().toLocaleDateString()}`);
+                      setSaveModalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition cursor-pointer"
+                  >
+                    <Save size={14} /> Save Document
+                  </button>
+
+                  <button
+                    onClick={handleExportPDF}
+                    disabled={exporting}
+                    className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-md transition disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {exporting ? (
+                      <RefreshCw size={15} className="animate-spin" />
+                    ) : (
+                      <Download size={15} />
+                    )}
+                    {exporting ? "Exporting…" : "Export PDF"}
+                  </button>
+                </>
+              )}
+            </div>
+          </header>
+
+          {/* Main Content Workspace */}
+          <Suspense
+            fallback={
+              <div className="flex-1 bg-slate-50 p-6 flex flex-col items-center justify-center space-y-4">
+                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs font-semibold text-slate-500">Loading Document Workspace...</p>
               </div>
-            </>
-          )}
+            }
+          >
+            {viewMode === "hub" ? (
+              <DocHomeHub
+                activeTabLabel={activeTabLabel}
+                activeTab={activeTab}
+                savedDocs={savedDocs}
+                loadingDocs={loadingDocs}
+                onNewBlankDoc={() => {
+                  setCurrentDocId(null);
+                  setSaveDocName("");
+                  setSelectedEmployeeId("");
+                  setEditorType("blank");
+                  setViewMode("editor");
+                }}
+                onNewPresetTemplate={() => {
+                  setCurrentDocId(null);
+                  setSaveDocName(`Standard ${activeTabLabel} Template`);
+                  setSelectedEmployeeId("");
+                  setEditorType("template");
+                  setViewMode("editor");
+                }}
+                onOpenSavedDoc={handleOpenSavedDocument}
+                onDeleteSavedDoc={(id) => {
+                  fetch(`/api/documents/${id}`, { method: "DELETE" }).then(() => fetchSavedDocs());
+                }}
+              />
+            ) : (
+              <div className="flex-1 flex overflow-hidden bg-slate-100 relative w-full">
+                {editorType === "template" && (
+                  <DocSideFormPanel
+                    margins={margins}
+                    setMargins={setMargins}
+                    activeTab={activeTab}
+                    offerData={offerData}
+                    setOfferData={setOfferData}
+                    expData={expData}
+                    setExpData={setExpData}
+                    incData={incData}
+                    setIncData={setIncData}
+                    payslipData={payslipData}
+                    setPayslipData={setPayslipData}
+                    ledgerData={ledgerData}
+                    setLedgerData={setLedgerData}
+                    handleAddLedgerItem={handleAddLedgerItem}
+                    handleRemoveLedgerItem={handleRemoveLedgerItem}
+                    handleLedgerItemChange={handleLedgerItemChange}
+                  />
+                )}
+
+                <DocEditorCanvas
+                  printRef={printRef}
+                  margins={margins}
+                  rulerHeightMm={rulerHeightMm}
+                  handleRulerMouseDown={handleRulerMouseDown}
+                  handleUndo={handleUndo}
+                  handleRedo={handleRedo}
+                  execCmd={execCmd}
+                  preserveSelection={preserveSelection}
+                  textColor={textColor}
+                  setTextColor={setTextColor}
+                  bgColor={bgColor}
+                  setBgColor={setBgColor}
+                  showTextColorPicker={showTextColorPicker}
+                  setShowTextColorPicker={setShowTextColorPicker}
+                  showBgColorPicker={showBgColorPicker}
+                  setShowBgColorPicker={setShowBgColorPicker}
+                  showTableGridPicker={showTableGridPicker}
+                  setShowTableGridPicker={setShowTableGridPicker}
+                  hoverGrid={hoverGrid}
+                  setHoverGrid={setHoverGrid}
+                  handleInsertGridTable={handleInsertGridTable}
+                  handleIndent={handleIndent}
+                  handleOutdent={handleOutdent}
+                  handleClearCanvas={handleClearCanvas}
+                />
+              </div>
+            )}
+          </Suspense>
         </div>
       </div>
 
-      {/* ── Right Live Printable A4 Document Preview Area ── */}
-      <div className="flex-1 bg-gray-200/80 overflow-y-auto p-6 flex justify-center items-start">
-        <div
-          ref={printRef}
-          className="w-[210mm] min-h-[297mm] bg-white shadow-2xl p-[18mm] flex flex-col justify-between text-gray-900 relative border border-gray-300"
-          style={{ fontFamily: "Inter, sans-serif" }}
-        >
-          {/* Top Fisto Header */}
-          <FistoLetterHeader
-            refNumber={
-              activeTab === "offer"
-                ? offerData.refNumber
-                : activeTab === "experience"
-                ? expData.refNumber
-                : activeTab === "increment"
-                ? incData.refNumber
-                : null
-            }
-            date={
-              activeTab === "offer"
-                ? offerData.date
-                : activeTab === "experience"
-                ? expData.date
-                : activeTab === "increment"
-                ? incData.date
-                : null
-            }
-          />
-
-          {/* 1. OFFER LETTER PREVIEW */}
-          {activeTab === "offer" && (
-            <div className="flex-1 space-y-4 text-[12px] leading-relaxed">
-              <div className="font-bold text-[14px] text-gray-900 uppercase">
-                {offerData.candidateName}
-              </div>
-              <div className="text-gray-700 whitespace-pre-line leading-snug">
-                {offerData.address}
-              </div>
-              <div className="pt-2 font-medium">Dear {offerData.candidateName},</div>
-              <p>
-                This has reference to the interview and the subsequent discussions you had with us. We are pleased to offer you appointment as “<strong className="font-bold text-gray-900">{offerData.designation}</strong>” in our organization starting from <strong className="font-bold">{offerData.joiningDate}</strong>, at your salary will be <strong className="font-bold">INR.{offerData.salary}/- ({offerData.salaryWords})</strong> per month. No other benefits are provided.
-              </p>
-              <ol className="list-decimal pl-4 space-y-2 text-[11.5px]">
-                <li>
-                  You will be in probation for a period of {offerData.probationMonths} month from the date of joining. At the end of three month, if your performance is found satisfactory, your service will be confirmed.
-                </li>
-                <li>
-                  Your Place of posting will be at our office located at <strong>11/12, Sundaram Brothers layout, Ramanathapuram, Coimbatore - 641 045, TAMILNADU (INDIA)</strong>.
-                </li>
-                <li>
-                  Either party may terminate the employment with {offerData.noticePeriod} notice, which may vary depending on the assigned project.
-                </li>
-              </ol>
-              <div className="pt-4 flex justify-between items-end">
-                <div>
-                  <p>Sincerely,</p>
-                  <p className="font-bold">FISTO TECH PRIVATE LIMITED</p>
-                </div>
-                <ManagingDirectorSignature />
-              </div>
-            </div>
-          )}
-
-          {/* 2. EXPERIENCE CERTIFICATE PREVIEW */}
-          {activeTab === "experience" && (
-            <div className="flex-1 space-y-5 text-[12px] leading-relaxed">
-              <div className="text-center font-bold text-[16px] underline tracking-wide uppercase text-gray-900 my-2">
-                EXPERIENCE CERTIFICATE
-              </div>
-              <p className="text-justify">
-                This is to certify that <strong className="font-bold text-gray-900">{expData.candidateName}</strong> worked as an “<strong className="font-bold">{expData.workPosition}</strong>” in our company from <strong className="font-bold">{expData.dateOfJoining}</strong> to <strong className="font-bold">{expData.dateOfRelieving}</strong> with our entire satisfaction. During this working period, we found him to be a sincere, honest, hardworking, dedicated employee with a professional attitude and very good job knowledge.
-              </p>
-              <p>His basic pay is <strong className="font-bold">Rs. {expData.basicPay}</strong> only.</p>
-              
-              <div className="border border-gray-300 p-4 rounded-lg bg-gray-50/50 space-y-1 my-4">
-                <div className="font-bold text-[13px] border-b border-gray-200 pb-1 mb-2 text-gray-900">
-                  Employee Summary:
-                </div>
-                <div className="grid grid-cols-3 text-[11.5px]">
-                  <span className="font-semibold text-gray-600">Candidate name</span>
-                  <span className="col-span-2 font-bold text-gray-900">: {expData.candidateName}</span>
-                </div>
-                <div className="grid grid-cols-3 text-[11.5px]">
-                  <span className="font-semibold text-gray-600">Work position</span>
-                  <span className="col-span-2 font-bold text-gray-900">: {expData.workPosition}</span>
-                </div>
-                <div className="grid grid-cols-3 text-[11.5px]">
-                  <span className="font-semibold text-gray-600">Date of joining</span>
-                  <span className="col-span-2 font-medium text-gray-900">: {expData.dateOfJoining}</span>
-                </div>
-                <div className="grid grid-cols-3 text-[11.5px]">
-                  <span className="font-semibold text-gray-600">Date of relieving</span>
-                  <span className="col-span-2 font-medium text-gray-900">: {expData.dateOfRelieving}</span>
-                </div>
-                <div className="grid grid-cols-3 text-[11.5px]">
-                  <span className="font-semibold text-gray-600">Experience</span>
-                  <span className="col-span-2 font-bold text-gray-900">: {expData.experience}</span>
-                </div>
-              </div>
-
-              <div className="pt-8 flex justify-between items-end">
-                <div className="font-bold text-gray-800">Thank you</div>
-                <ManagingDirectorSignature />
-              </div>
-            </div>
-          )}
-
-          {/* 3. INCREMENT LETTER PREVIEW */}
-          {activeTab === "increment" && (
-            <div className="flex-1 space-y-4 text-[12px] leading-relaxed">
-              <div className="text-center font-bold text-[15px] tracking-wide uppercase text-gray-900 my-2">
-                LETTER FOR SALARY INCREMENT
-              </div>
-              <div>
-                <div className="font-bold text-gray-900">To,</div>
-                <div className="font-bold text-[13px]">{incData.candidateName}</div>
-                <div className="text-gray-700">{incData.designation}</div>
-                <div className="text-gray-600 whitespace-pre-line">{incData.address}</div>
-              </div>
-              <div><strong>Subject:</strong> Salary Increment Letter</div>
-              <p>Dear <strong>{incData.candidateName}</strong>,</p>
-              <p>
-                We are pleased to inform you that, in recognition of your dedication, performance, and contributions to FISTO TECH PVT LTD, your salary has been revised effective from [{incData.effectiveDate}].
-              </p>
-              <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg space-y-1">
-                <div className="font-bold mb-1">Details of the Salary Revision:</div>
-                <div>Current Salary: <strong>Rs.{incData.currentSalary}</strong></div>
-                <div>Revised Salary: <strong>Rs.{incData.revisedSalary}</strong></div>
-                <div>Revised CTC: <strong>Rs.{incData.revisedCtc}</strong></div>
-              </div>
-              <div className="pt-6 flex justify-between items-end">
-                <div>
-                  <p>Congratulations on your achievement!</p>
-                  <p className="font-bold mt-2">Best Regards,</p>
-                </div>
-                <ManagingDirectorSignature />
-              </div>
-            </div>
-          )}
-
-          {/* 4. PAYSLIP PREVIEW */}
-          {activeTab === "payslip" && (
-            <div className="flex-1 space-y-4 text-[11.5px]">
-              <div className="text-center border-b pb-2">
-                <div className="text-[16px] font-bold text-blue-700 uppercase">FISTO TECH PRIVATE LIMITED</div>
-                <div className="text-[12px] font-bold text-gray-800">Salary Slip - {payslipData.monthYear}</div>
-                <div className="text-[10px] text-gray-500">Financial Year {payslipData.financialYear}</div>
-              </div>
-
-              <div className="grid grid-cols-2 border border-gray-300 p-3 rounded-lg gap-2 bg-gray-50">
-                <div><strong>Employee ID:</strong> {payslipData.employeeId}</div>
-                <div><strong>Employee Name:</strong> {payslipData.employeeName}</div>
-                <div><strong>Designation:</strong> {payslipData.designation}</div>
-                <div><strong>Department:</strong> {payslipData.department}</div>
-              </div>
-
-              <div className="grid grid-cols-2 border border-gray-300 rounded-lg overflow-hidden">
-                <div className="p-3 border-r border-gray-300 space-y-1">
-                  <div className="font-bold text-green-700 border-b pb-1">Earnings</div>
-                  <div className="flex justify-between"><span>Basic:</span><span>Rs. {payslipData.basic}</span></div>
-                  <div className="flex justify-between"><span>HRA:</span><span>Rs. {payslipData.hra}</span></div>
-                </div>
-                <div className="p-3 space-y-1">
-                  <div className="font-bold text-red-700 border-b pb-1">Deductions</div>
-                  <div className="flex justify-between"><span>PF:</span><span>Rs. {payslipData.pf}</span></div>
-                  <div className="flex justify-between"><span>ESI:</span><span>Rs. {payslipData.esi}</span></div>
-                </div>
-              </div>
-
-              <div className="pt-8 flex justify-between items-end">
-                <div className="font-bold text-[13px]">
-                  Net Pay: Rs. {Number(payslipData.basic || 0) + Number(payslipData.hra || 0)}
-                </div>
-                <ManagingDirectorSignature />
-              </div>
-            </div>
-          )}
-
-          {/* 5. LEDGER PREVIEW */}
-          {activeTab === "ledger" && (
-            <div className="flex-1 space-y-3 text-[11px]">
-              <div className="text-center font-bold text-[15px] text-blue-800 uppercase">
-                GENERAL LEDGER ({ledgerData.financialYear})
-              </div>
-              <div className="grid grid-cols-2 border p-2 rounded bg-gray-50">
-                <div><strong>Ledger Name:</strong> {ledgerData.ledgerName}</div>
-                <div><strong>Account Code:</strong> {ledgerData.accountCode}</div>
-                <div><strong>Date:</strong> {ledgerData.date}</div>
-                <div><strong>Page:</strong> {ledgerData.pageNo}</div>
-              </div>
-
-              <table className="w-full border-collapse border border-gray-300 text-left text-[10.5px]">
-                <thead className="bg-gray-100 font-bold border-b border-gray-300">
-                  <tr>
-                    <th className="p-1.5 border-r">Date</th>
-                    <th className="p-1.5 border-r">Voucher</th>
-                    <th className="p-1.5 border-r">Particulars</th>
-                    <th className="p-1.5 border-r text-right">Debit</th>
-                    <th className="p-1.5 border-r text-right">Credit</th>
-                    <th className="p-1.5 text-right">Balance</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {ledgerData.items.map((row, i) => (
-                    <tr key={i}>
-                      <td className="p-1.5 border-r">{row.date}</td>
-                      <td className="p-1.5 border-r">{row.voucher}</td>
-                      <td className="p-1.5 border-r">{row.particulars}</td>
-                      <td className="p-1.5 border-r text-right">{row.debit}</td>
-                      <td className="p-1.5 border-r text-right">{row.credit}</td>
-                      <td className="p-1.5 text-right">{row.balance}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div className="pt-6 flex justify-between items-end border-t mt-4">
-                <div>Prepared By: {ledgerData.preparedBy}</div>
-                <ManagingDirectorSignature />
-              </div>
-            </div>
-          )}
-
-          {/* Bottom Fisto Letterhead Footer */}
-          <FistoLetterFooter />
-        </div>
-      </div>
-    </div>
+      <Suspense fallback={null}>
+        <DocSaveModal
+          saveModalOpen={saveModalOpen}
+          setSaveModalOpen={setSaveModalOpen}
+          saveDocName={saveDocName}
+          setSaveDocName={setSaveDocName}
+          selectedEmployeeId={selectedEmployeeId}
+          setSelectedEmployeeId={setSelectedEmployeeId}
+          employeesList={employeesList}
+          handleSaveDocument={handleSaveDocument}
+          savingDoc={savingDoc}
+        />
+      </Suspense>
+    </>
   );
 }
