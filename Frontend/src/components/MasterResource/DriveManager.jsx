@@ -323,6 +323,7 @@ export default function DriveManager() {
   const [newMenu, setNewMenu] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [storageInfo, setStorageInfo] = useState(null);
+  const [overallStorage, setOverallStorage] = useState(null);
   const [folderCountsMap, setFolderCountsMap] = useState({});
   const hasLoadedOnce = useRef(false);
 
@@ -418,6 +419,14 @@ export default function DriveManager() {
   const fetchFiles = useCallback(async (id, silent = true) => { if (!id) return; if (!silent) setInitialLoading(true); try { const r = await axios.get(`${API_URL}/files/${id}`); let all = r.data.files || r.data || []; if (!isAdmin) { const sIds = all.filter(f => f.isFolder).map(f => f.id); if (sIds.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: sIds }); const vm = vr.data.data || {}; all = all.filter(f => !f.isFolder || !vm[f.id]?.adminOnly); } catch { } } } setFiles(all); const subIds = all.filter(f => f.isFolder).map(f => f.id); if (subIds.length) { bulkCheckAccess(subIds); fetchFolderCounts(all); } } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed to load" }); } finally { setInitialLoading(false); } }, [notify, isAdmin, bulkCheckAccess, fetchFolderCounts]);
   const fetchCrumbs = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/path/${id}`, { params: { rootId: ROOT } }); const cl = (r.data || []).filter(c => c.id !== ROOT); setCrumbs(cl); if (!isAdmin && cl.length) bulkCheckAccess(cl.map(c => c.id)); } catch { setCrumbs([]); } }, [ROOT, isAdmin, bulkCheckAccess]);
   const fetchStorage = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/storage-info/${id}`); setStorageInfo(r.data); } catch { } }, []);
+  const fetchOverallStorage = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API_URL}/overall-storage`);
+      setOverallStorage(r.data);
+    } catch (e) {
+      console.error("Failed to fetch overall storage:", e);
+    }
+  }, [API_URL]);
   const fetchSidebarFolders = useCallback(async (autoSelect = true) => { if (!hasLoadedOnce.current) setSidebarLoading(true); try { const r = await axios.get(`${API_URL}/files/${ROOT}`); let folders = (r.data.files || r.data || []).filter(f => f.isFolder); if (!isAdmin && folders.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: folders.map(f => f.id) }); const vm = vr.data.data || {}; folders = folders.filter(f => !vm[f.id]?.adminOnly); } catch { } } setSidebarFolders(folders); if (folders.length) { bulkCheckAccess(folders.map(f => f.id)); fetchFolderCounts(folders); } if (autoSelect && folders.length && !activeSidebarFolder) { setActiveSidebarFolder(folders[0]); setFolderId(folders[0].id); } } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed" }); } setSidebarLoading(false); }, [ROOT, notify, activeSidebarFolder, bulkCheckAccess, isAdmin, fetchFolderCounts]);
 
   // ─── Clipboard & Move ──────────────────────────────────────────────────────
@@ -572,8 +581,8 @@ export default function DriveManager() {
     }
   }, [selected, displayed]);
 
-  useEffect(() => { fetchSidebarFolders(true); }, []);
-  useEffect(() => { if (folderId) { const isFirst = !hasLoadedOnce.current; fetchFiles(folderId, false); fetchCrumbs(folderId); fetchStorage(folderId); if (isFirst) hasLoadedOnce.current = true; clearSelection(); } }, [folderId]);
+  useEffect(() => { fetchSidebarFolders(true); fetchOverallStorage(); }, [fetchOverallStorage]);
+  useEffect(() => { if (folderId) { const isFirst = !hasLoadedOnce.current; fetchFiles(folderId, false); fetchCrumbs(folderId); fetchStorage(folderId); fetchOverallStorage(); if (isFirst) hasLoadedOnce.current = true; clearSelection(); } }, [folderId, fetchOverallStorage]);
   useEffect(() => { if (activeSidebarFolder) fetchParentGrantedEmployees(activeSidebarFolder.id); }, [activeSidebarFolder]);
   useEffect(() => { if (inlineCreating && inlineRef.current) { inlineRef.current.focus(); inlineRef.current.select(); } }, [inlineCreating]);
   useEffect(() => { if (sidebarCreating && sidebarInlineRef.current) { sidebarInlineRef.current.focus(); sidebarInlineRef.current.select(); } }, [sidebarCreating]);
@@ -669,8 +678,48 @@ export default function DriveManager() {
   const cancelRename = () => { setRenamingId(null); setRenamingContext(null); };
 
   // ─── Upload ────────────────────────────────────────────────────────────────
+  const activeCancelTokens = useRef(new Set());
   const buildFolderTree = (fileList) => { const folderTree = {}; const rootFiles = []; for (const file of fileList) { const relPath = file.webkitRelativePath || file.name; const parts = relPath.split("/"); if (parts.length > 1) { const fp = parts.slice(0, -1).join("/"); if (!folderTree[fp]) folderTree[fp] = []; folderTree[fp].push(file); } else rootFiles.push(file); } return { folderTree, rootFiles }; };
-  const uploadSingleFile = async (file, targetFolderId, itemIndex) => { const fd = new FormData(); fd.append("file", file); fd.append("folderId", targetFolderId); const cancelToken = axios.CancelToken.source(); currentUploadCancelToken.current = cancelToken; try { await axios.post(`${API_URL}/upload`, fd, { cancelToken: cancelToken.token, onUploadProgress: (p) => { const pct = Math.round((p.loaded * 100) / p.total); setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: pct, status: "uploading" } : item)); } }); setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: 100, status: "done" } : item)); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "cancelled" } : item)); throw e; } setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "error" } : item)); } };
+  const uploadSingleFile = async (file, targetFolderId, itemIndex) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("folderId", targetFolderId);
+    const cancelToken = axios.CancelToken.source();
+    activeCancelTokens.current.add(cancelToken);
+    try {
+      await axios.post(`${API_URL}/upload`, fd, {
+        cancelToken: cancelToken.token,
+        onUploadProgress: (p) => {
+          const pct = Math.round((p.loaded * 100) / p.total);
+          setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: pct, status: "uploading" } : item));
+        }
+      });
+      setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: 100, status: "done" } : item));
+    } catch (e) {
+      if (axios.isCancel(e)) {
+        setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "cancelled" } : item));
+        throw e;
+      }
+      setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "error" } : item));
+    } finally {
+      activeCancelTokens.current.delete(cancelToken);
+    }
+  };
+
+  const runUploadPool = async (tasks, concurrency = 4) => {
+    const executing = [];
+    for (const task of tasks) {
+      if (uploadCancelledRef.current) break;
+      const p = Promise.resolve().then(() => task());
+      executing.push(p);
+      if (concurrency <= executing.length) {
+        await Promise.race(executing);
+      }
+      p.then(() => executing.splice(executing.indexOf(p), 1))
+       .catch(() => executing.splice(executing.indexOf(p), 1));
+    }
+    await Promise.all(executing);
+  };
 
   const upload = async (list, targetFolderIdOverride) => {
     if (!list?.length) return;
@@ -688,19 +737,57 @@ export default function DriveManager() {
         const folderIdCache = {};
         const sortedPaths = Object.keys(folderTree).sort((a, b) => a.split("/").length - b.split("/").length);
         for (const folderPath of sortedPaths) { if (uploadCancelledRef.current) break; const parts = folderPath.split("/"); let parentId = uploadTarget; for (let depth = 0; depth < parts.length; depth++) { const cp = parts.slice(0, depth + 1).join("/"); if (folderIdCache[cp]) { parentId = folderIdCache[cp]; continue; } try { const r = await axios.post(`${API_URL}/create-folder`, { folderName: parts[depth], parentFolderId: parentId }); if (r.data?.id) { folderIdCache[cp] = r.data.id; parentId = r.data.id; await axios.post(`${ACCESS_URL}/folder`, { folderId: r.data.id, folderName: parts[depth], createdBy: currentUser.employeeId }).catch(() => { }); } } catch { try { const ex = await axios.get(`${API_URL}/files/${parentId}`); const found = (ex.data.files || ex.data || []).find(f => f.isFolder && f.name === parts[depth]); if (found) { folderIdCache[cp] = found.id; parentId = found.id; } } catch { } } } }
-        let fi = 0;
-        for (const file of arr) { if (uploadCancelledRef.current) { setUploadItems(prev => prev.map((item, i) => i >= fi && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } const relPath = file.webkitRelativePath || file.name; const parts = relPath.split("/"); let tid = uploadTarget; if (parts.length > 1) { const fp = parts.slice(0, -1).join("/"); tid = folderIdCache[fp] || uploadTarget; } setUploadItems(prev => prev.map((item, i) => i === fi ? { ...item, status: "uploading", progress: 0 } : item)); try { await uploadSingleFile(file, tid, fi); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, i) => i > fi && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } } fi++; }
+        
+        const tasks = arr.map((file, idx) => {
+          const relPath = file.webkitRelativePath || file.name;
+          const parts = relPath.split("/");
+          let tid = uploadTarget;
+          if (parts.length > 1) {
+            const fp = parts.slice(0, -1).join("/");
+            tid = folderIdCache[fp] || uploadTarget;
+          }
+          return async () => {
+            if (uploadCancelledRef.current) return;
+            setUploadItems(prev => prev.map((item, i) => i === idx ? { ...item, status: "uploading", progress: 0 } : item));
+            try {
+              await uploadSingleFile(file, tid, idx);
+            } catch (e) {
+              if (axios.isCancel(e)) {
+                setUploadItems(prev => prev.map((item, i) => i > idx && item.status === "waiting" ? { ...item, status: "cancelled" } : item));
+              }
+            }
+          };
+        });
+        await runUploadPool(tasks, 4);
       } else {
-        for (let i = 0; i < rootFiles.length; i++) { if (uploadCancelledRef.current) { setUploadItems(prev => prev.map((item, idx) => idx >= i && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } setUploadItems(prev => prev.map((item, idx) => idx === i ? { ...item, status: "uploading", progress: 0 } : item)); try { await uploadSingleFile(rootFiles[i], uploadTarget, i); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, idx) => idx > i && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } } }
+        const tasks = rootFiles.map((file, idx) => {
+          return async () => {
+            if (uploadCancelledRef.current) return;
+            setUploadItems(prev => prev.map((item, i) => i === idx ? { ...item, status: "uploading", progress: 0 } : item));
+            try {
+              await uploadSingleFile(file, uploadTarget, idx);
+            } catch (e) {
+              if (axios.isCancel(e)) {
+                setUploadItems(prev => prev.map((item, i) => i > idx && item.status === "waiting" ? { ...item, status: "cancelled" } : item));
+              }
+            }
+          };
+        });
+        await runUploadPool(tasks, 4);
       }
-      if (folderId === uploadTarget) { await fetchFiles(folderId); fetchStorage(folderId); }
+      if (folderId === uploadTarget) { await fetchFiles(folderId); fetchStorage(folderId); fetchOverallStorage(); }
     } catch { }
   };
 
-  const cancelUpload = () => { uploadCancelledRef.current = true; if (currentUploadCancelToken.current) currentUploadCancelToken.current.cancel("Cancelled"); setUploadItems(prev => prev.map(item => item.status === "waiting" ? { ...item, status: "cancelled" } : item)); };
+  const cancelUpload = () => {
+    uploadCancelledRef.current = true;
+    activeCancelTokens.current.forEach(token => token.cancel("Cancelled"));
+    activeCancelTokens.current.clear();
+    setUploadItems(prev => prev.map(item => item.status === "waiting" || item.status === "uploading" ? { ...item, status: "cancelled" } : item));
+  };
 
   // ─── Delete / Actions ──────────────────────────────────────────────────────
-  const doDelete = async () => { const targets = [...deleteTargets]; setModalDelete(false); const ids = targets.map(f => f.id); setFiles(p => p.filter(f => !ids.includes(f.id))); setSidebarFolders(p => p.filter(f => !ids.includes(f.id))); clearSelection(); setShowDetail(false); let ok = 0, fail = 0; for (const id of ids) { try { await axios.delete(`${API_URL}/delete/${id}`); await axios.delete(`${ACCESS_URL}/folder/${id}`).catch(() => { }); setFolderAccessMap(p => { const n = { ...p }; delete n[id]; return n; }); ok++; } catch { fail++; } } await fetchFiles(folderId); fetchSidebarFolders(false); notify?.({ title: fail ? "Warning" : "Success", message: `${ok} deleted${fail ? `, ${fail} failed` : ""}` }); setDeleteTargets([]); };
+  const doDelete = async () => { const targets = [...deleteTargets]; setModalDelete(false); const ids = targets.map(f => f.id); setFiles(p => p.filter(f => !ids.includes(f.id))); setSidebarFolders(p => p.filter(f => !ids.includes(f.id))); clearSelection(); setShowDetail(false); let ok = 0, fail = 0; for (const id of ids) { try { await axios.delete(`${API_URL}/delete/${id}`); await axios.delete(`${ACCESS_URL}/folder/${id}`).catch(() => { }); setFolderAccessMap(p => { const n = { ...p }; delete n[id]; return n; }); ok++; } catch { fail++; } } await fetchFiles(folderId); fetchSidebarFolders(false); fetchOverallStorage(); notify?.({ title: fail ? "Warning" : "Success", message: `${ok} deleted${fail ? `, ${fail} failed` : ""}` }); setDeleteTargets([]); };
   const doShare = async (f) => { if (!f) return; try { const r = await axios.post(`${API_URL}/share/${f.id}`); setShareLink(r.data.webViewLink || r.data.directLink || ""); setShareTarget(f); setModalShare(true); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Share failed" }); } };
   const doCopy = async (f) => {
     if (!f) return;
@@ -827,7 +914,27 @@ export default function DriveManager() {
             {sidebarFolders.map(f => <div key={f.id} className="mb-[0.2vh]"><SidebarFolderItem folder={f} /></div>)}
             {sidebarCreating && <div className="flex items-center gap-2 px-3 py-1.5 mb-0.5 bg-[#e8f0fe] rounded-r-full rounded-l-md border-l-[3px] border-[#1967d2]"><div className="shrink-0">{ICONS.folder}</div><input ref={sidebarInlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-sm text-[#202124] outline-none min-w-0" value={sidebarNewName} onChange={e => setSidebarNewName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitSidebarCreate(); if (e.key === "Escape") cancelSidebarCreate(); }} onBlur={() => commitSidebarCreate()} /></div>}
           </div>
-          {storageInfo && <div className="px-[0.8vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0"><div className="text-[0.7vw] text-[#5f6368] mb-[0.2vh]">{storageInfo.fileCount} items • {fmtSize(storageInfo.totalSize)}</div><div className="h-[3px] bg-[#e0e0e0] rounded-full overflow-hidden"><div className="h-full bg-[#1a73e8] rounded-full" style={{ width: `${Math.min(100, (storageInfo.totalSize / (15 * 1024 * 1024 * 1024)) * 100)}%` }} /></div></div>}
+          {overallStorage && (
+            <div className="px-[0.8vw] py-[0.8vh] border-t border-[#e0e0e0] shrink-0 bg-[#f8f9fa] flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[0.7vw] text-[#5f6368] font-semibold">
+                <span className="flex items-center gap-1">
+                
+                  Drive Storage
+                </span>
+                <span>{overallStorage.limit && overallStorage.limit !== "0" ? Math.round((parseInt(overallStorage.usage || 0) / parseInt(overallStorage.limit)) * 100) : 0}% used</span>
+              </div>
+              <div className="h-[6px] bg-[#dadce0] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-[#1a73e8] rounded-full transition-all duration-500" 
+                  style={{ width: `${overallStorage.limit && overallStorage.limit !== "0" ? Math.min(100, (parseInt(overallStorage.usage || 0) / parseInt(overallStorage.limit)) * 100) : 0}%` }} 
+                />
+              </div>
+              <div className="text-[0.65vw] text-[#5f6368]">
+                {fmtSize(overallStorage.usage)} of {fmtSize(overallStorage.limit)} used
+              </div>
+            </div>
+          )}
+          {storageInfo && <div className="px-[0.8vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0 bg-white"><div className="text-[0.7vw] text-[#5f6368] mb-[0.2vh] font-semibold">Folder: {storageInfo.fileCount} items ({fmtSize(storageInfo.totalSize)})</div></div>}
           {isAdmin && <div className="px-[0.6vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0"><button onClick={startSidebarCreate} className="w-full h-[4vh] flex items-center justify-center gap-[0.4vw] rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-[0.8vw] font-semibold cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Add Folder</button></div>}
         </aside>
 

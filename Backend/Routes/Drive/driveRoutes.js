@@ -8,7 +8,7 @@ const router = express.Router();
 
 const upload = multer({
   dest: "temp/",
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 * 1024 },
 });
 
 // ─── OAuth2 Setup ───
@@ -648,6 +648,19 @@ router.get("/storage-info/:folderId", async (req, res) => {
     res.json({ totalSize, fileCount: response.data.files.length, folderId });
   } catch (error) {
     console.error("Storage info error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Overall Drive Storage ───
+router.get("/overall-storage", async (req, res) => {
+  try {
+    const response = await drive.about.get({
+      fields: "storageQuota",
+    });
+    res.json(response.data.storageQuota);
+  } catch (error) {
+    console.error("Overall storage error:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
