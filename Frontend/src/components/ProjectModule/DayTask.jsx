@@ -1,15 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useNotification } from "../NotificationContext";
 import searchIcon from "../../assets/ProjectPages/search.webp";
 
 const DayTask = () => {
   const { notify } = useNotification();
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [todayItems, setTodayItems] = useState([]);
-  const [dayReports, setDayReports] = useState([]);
   const [processingItems, setProcessingItems] = useState(new Set());
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -21,67 +17,53 @@ const DayTask = () => {
   const employeeId = userObj?.userName || "";
   const designation = userObj?.designation;
 
-  useEffect(() => {
-    if (employeeId) {
-      fetchEmployeeTasks();
-      fetchDayReports();
-    }
-  }, [employeeId]);
+  const { data: tasksData, isLoading: tasksLoading, error: tasksError } = useQuery({
+    queryKey: ["employeeTasks", employeeId],
+    queryFn: async () => {
+      if (!employeeId) throw new Error("Employee ID not found");
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/employee-tasks/${employeeId}`,
+      );
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch tasks");
+      }
+      return data.data || [];
+    },
+    enabled: !!employeeId,
+  });
 
-  const fetchDayReports = async () => {
-    try {
+  const { data: dayReportsData, isLoading: dayReportsLoading, refetch: refetchDayReports } = useQuery({
+    queryKey: ["dayReports", employeeId],
+    queryFn: async () => {
+      if (!employeeId) return [];
       const response = await fetch(
         `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${employeeId}`,
       );
-
       const data = await response.json();
-
-      if (data.success) {
-        setDayReports(data.data);
-        const items = data.data.map((report) => {
-          if (report.activityId) {
-            return `activity-${report.activityId}`;
-          } else {
-            return `task-${report.taskId}`;
-          }
-        });
-        setTodayItems(items);
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch day reports");
       }
-    } catch (err) {
-      console.error("Error fetching day reports:", err);
-    }
-  };
+      return data.data || [];
+    },
+    enabled: !!employeeId,
+  });
 
-  const fetchEmployeeTasks = async () => {
-    if (!employeeId) {
-      setError("Employee ID not found");
-      setLoading(false);
-      return;
-    }
+  const tasks = tasksData || [];
+  const dayReports = dayReportsData || [];
+  const loading = tasksLoading || dayReportsLoading;
+  const error = tasksError;
 
-    try {
-      setLoading(true);
-      const response = await fetch(
-        `${
-          import.meta.env.VITE_API_BASE_URL
-        }/project/employee-tasks/${employeeId}`,
-      );
-
-      const data = await response.json();
-
-      if (data.success) {
-        setTasks(data.data);
+  const todayItems = useMemo(() => {
+    if (!dayReportsData) return [];
+    return dayReportsData.map((report) => {
+      if (report.activityId) {
+        return `activity-${report.activityId}`;
+      } else {
+        return `task-${report.taskId}`;
       }
-    } catch (err) {
-      notify({
-        title: "Error",
-        message: `Error fetching tasks: ${err}`,
-      });
-      setError(err.response?.data?.message || "Failed to fetch tasks");
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
+  }, [dayReportsData]);
 
   const handleAddToToday = async (type, id, task, activity = null) => {
     const itemKey = `${type}-${id}`;
@@ -109,7 +91,7 @@ const DayTask = () => {
 
         if (response.ok) {
           if (data.success) {
-            setTodayItems(todayItems.filter((item) => item !== itemKey));
+            refetchDayReports();
             notify({
               title: "Success",
               message: "Day report deleted successfully",
@@ -156,7 +138,7 @@ const DayTask = () => {
         const data = await response.json();
 
         if (data.success) {
-          setTodayItems([...todayItems, itemKey]);
+          refetchDayReports();
           notify({
             title: "Success",
             message: "Day report created successfully",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import HandIcon from "../assets/ProjectPages/rightHand.png";
 import searchIcon from "../assets/ProjectPages/search.webp";
 import filterIcon from "../assets/ProjectPages/filter.webp";
@@ -43,8 +44,6 @@ const Projects = () => {
   const location = useLocation();
   const tableBodyRef = useRef(null);
 
-  const [allProjects, setAllProjects] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 
@@ -56,11 +55,33 @@ const Projects = () => {
   const [itemsPerPage, setItemsPerPage] = useState(6);
 
   const [loggedEmpDetails, setloggedEmpDetails] = useState({});
-
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [showYoursOnly, setShowYoursOnly] = useState(true);
   const [selectedPercentageRange, setSelectedPercentageRange] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState("");
+
+  const empIDParam = !["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)
+    ? loggedEmpDetails.id
+    : selectedEmployee || "";
+
+  const { data: allProjectsData, isLoading: queryLoading } = useQuery({
+    queryKey: ["projects", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+    queryFn: async () => {
+      if (!loggedEmpDetails.id) return [];
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
+      );
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch projects");
+      }
+      return data.data || [];
+    },
+    enabled: !!loggedEmpDetails.id,
+  });
+
+  const allProjects = allProjectsData || [];
+  const loading = queryLoading;
   const [employeeList, setEmployeeList] = useState([]);
   const filterRef = useRef(null);
 
@@ -195,13 +216,7 @@ const Projects = () => {
     };
   }, [searchTerm]);
 
-  useEffect(() => {
-    if (loggedEmpDetails.id) fetchProjects();
-  }, [debouncedSearchTerm, loggedEmpDetails.id, selectedEmployee]);
 
-  useEffect(() => {
-    if (isBaseRoute && loggedEmpDetails.id) fetchProjects();
-  }, [location.pathname]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -290,31 +305,7 @@ const Projects = () => {
     return actualStatus;
   };
 
-  const fetchProjects = async () => {
-    if (!loggedEmpDetails.id) return;
-    setLoading(true);
-    try {
-      let empIDParam = null;
-      if (!["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)) {
-        empIDParam = loggedEmpDetails.id;
-      } else if (
-        ["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role) &&
-        selectedEmployee
-      ) {
-        empIDParam = selectedEmployee;
-      }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
-      );
-      const data = await response.json();
-      if (data.success) setAllProjects(data.data || []);
-      setLoading(false);
-    } catch (error) {
-      console.error("Error fetching projects:", error);
-      setLoading(false);
-    }
-  };
 
   const getFilteredProjects = () => {
     let filteredProjects = [...allProjects];

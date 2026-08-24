@@ -69,6 +69,7 @@ export default function NewProject() {
     },
     { value: "Hold", label: "Hold", color: "bg-yellow-500 text-white" },
     { value: "Canceled", label: "Canceled", color: "bg-red-400 text-white" },
+    { value: "Completed", label: "Completed", color: "bg-green-100 text-green-700" },
   ];
 
   const companyRef = useRef(null);
@@ -901,7 +902,7 @@ export default function NewProject() {
     );
   };
 
-  if (loading) {
+  if (loading || fetchingProject) {
     return (
       <div className="h-[92vh] w-full p-[1.5vw] space-y-[1vw]">
         <div className="h-[2.5vw] w-[30%] animate-shimmer rounded-lg" />
@@ -975,29 +976,6 @@ export default function NewProject() {
           </div>
 
           <div className="flex items-center gap-[0.8vw]">
-            {fetchingProject && (
-              <p className="text-[0.8vw] text-gray-600">
-                <svg
-                  className="animate-spin h-[1vw] w-[1vw] text-black"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-              </p>
-            )}
             {activeTab === "form" && loadedFromRequest && !isEditMode && (
               <div className="flex items-center gap-[0.5vw] bg-white  px-[0.7vw] mb-[0.7vh] py-[0.2vw] rounded-full">
                 <span className="text-[0.72vw] text-gray-700">

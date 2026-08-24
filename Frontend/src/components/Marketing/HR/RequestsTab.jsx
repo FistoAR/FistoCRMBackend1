@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle,
   XCircle,
@@ -41,7 +42,12 @@ const TooltipCell = ({ text }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (!text) return <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-400 border border-gray-300 text-center">-</td>;
+  if (!text)
+    return (
+      <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-400 border border-gray-300 text-center">
+        -
+      </td>
+    );
 
   return (
     <td
@@ -65,7 +71,9 @@ const TooltipCell = ({ text }) => {
             title="Copy to clipboard"
           >
             {copied ? (
-              <span className="text-emerald-400 font-semibold text-[10px]">Copied!</span>
+              <span className="text-emerald-400 font-semibold text-[10px]">
+                Copied!
+              </span>
             ) : (
               <Copy size={12} />
             )}
@@ -93,14 +101,43 @@ const RequestsTab = ({
       notify({ title: type, message });
     }
   };
-  const [internalLeaveRequests, setInternalLeaveRequests] = useState([]);
-  const [internalPermissionRequests, setInternalPermissionRequests] = useState([]);
-  const [internalEmployees, setInternalEmployees] = useState([]);
-  const [internalLoading, setInternalLoading] = useState(false);
+  const { data: internalLeaveRequests = [], isLoading: leaveLoading, refetch: refetchLeaves } = useQuery({
+    queryKey: ["leaveRequests"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/leave-requests`);
+      const data = await response.json();
+      return data.requests || data.data || [];
+    },
+    enabled: !leaveRequests,
+  });
+
+  const { data: internalPermissionRequests = [], isLoading: permLoading, refetch: refetchPerms } = useQuery({
+    queryKey: ["permissionRequests"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/permission-requests`);
+      const data = await response.json();
+      return data.requests || data.data || [];
+    },
+    enabled: !permissionRequests,
+  });
+
+  const { data: internalEmployees = [], isLoading: empLoading, refetch: refetchEmps } = useQuery({
+    queryKey: ["hrEmployees"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/employees`);
+      const data = await response.json();
+      return data.employees || data.data || (Array.isArray(data) ? data : []);
+    },
+    enabled: !(allEmployees && allEmployees.length > 0),
+  });
+
+  const internalLoading = leaveLoading || permLoading || empLoading;
 
   const activeLeaveRequests = leaveRequests ?? internalLeaveRequests;
-  const activePermissionRequests = permissionRequests ?? internalPermissionRequests;
-  const activeEmployees = (allEmployees && allEmployees.length > 0) ? allEmployees : internalEmployees;
+  const activePermissionRequests =
+    permissionRequests ?? internalPermissionRequests;
+  const activeEmployees =
+    allEmployees && allEmployees.length > 0 ? allEmployees : internalEmployees;
   const loading = parentLoading ?? internalLoading;
 
   // Get current user designation
@@ -114,44 +151,12 @@ const RequestsTab = ({
     return userData.employeeName || userData.userName || "";
   };
 
-  const fetchRequestsData = async () => {
-    setInternalLoading(true);
-    try {
-      const [leaveRes, permRes, empRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/hr/leave-requests`),
-        fetch(`${API_BASE_URL}/hr/permission-requests`),
-        fetch(`${API_BASE_URL}/hr/employees`),
-      ]);
-      const leaveData = await leaveRes.json();
-      const permData = await permRes.json();
-      const empData = await empRes.json();
-
-      if (leaveData.requests || leaveData.data) {
-        setInternalLeaveRequests(leaveData.requests || leaveData.data || []);
-      }
-      if (permData.requests || permData.data) {
-        setInternalPermissionRequests(permData.requests || permData.data || []);
-      }
-      if (empData.employees || empData.data || Array.isArray(empData)) {
-        setInternalEmployees(empData.employees || empData.data || (Array.isArray(empData) ? empData : []));
-      }
-    } catch (e) {
-      console.error("Error fetching requests data:", e);
-    } finally {
-      setInternalLoading(false);
-    }
-  };
-
   const handleRefresh = () => {
     if (typeof fetchAllData === "function") fetchAllData();
-    fetchRequestsData();
+    refetchLeaves();
+    refetchPerms();
+    refetchEmps();
   };
-
-  useEffect(() => {
-    if (!leaveRequests || !permissionRequests) {
-      fetchRequestsData();
-    }
-  }, [leaveRequests, permissionRequests]);
 
   const [requestSubTab, setRequestSubTab] = useState("Leave Request");
   const [searchTerm, setSearchTerm] = useState("");
@@ -163,7 +168,6 @@ const RequestsTab = ({
     type: null,
   });
 
-
   // Filter States
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -171,11 +175,11 @@ const RequestsTab = ({
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const currentUserDesignation = getCurrentUserDesignation().toLowerCase();
   const isAdmin = currentUserDesignation.includes("admin");
-  const isManagement = 
-    isAdmin || 
-    currentUserDesignation.includes("sbu") || 
-    currentUserDesignation.includes("project head") || 
-    currentUserDesignation.includes("marketing") || 
+  const isManagement =
+    isAdmin ||
+    currentUserDesignation.includes("sbu") ||
+    currentUserDesignation.includes("project head") ||
+    currentUserDesignation.includes("marketing") ||
     currentUserDesignation.includes("hr");
 
   // Update Modal State
@@ -188,7 +192,6 @@ const RequestsTab = ({
   });
 
   const RECORDS_PER_PAGE = 10;
-
 
   useEffect(() => {
     setCurrentPage(1);
@@ -321,8 +324,8 @@ const RequestsTab = ({
 
   // Handle Update Submit
   const handleUpdateSubmit = async () => {
-    if (!updateModal.selectedAction || !updateModal.remark.trim()) {
-      showToast("Error", "Please select an action and enter a remark");
+    if (!updateModal.selectedAction) {
+      showToast("Error", "Please select an action");
       return;
     }
 
@@ -391,9 +394,13 @@ const RequestsTab = ({
   // Get Final Status
   const getFinalStatus = (request) => {
     const { team_head_status, management_status } = request;
-    const emp = (activeEmployees || []).find(e => (e.employee_id || e.employeeId || e.userName) === request.employee_id);
+    const emp = (activeEmployees || []).find(
+      (e) =>
+        (e.employee_id || e.employeeId || e.userName) === request.employee_id,
+    );
     const empDesignation = (emp?.designation || "").toLowerCase();
-    const isEmpPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
+    const isEmpPHorSBU =
+      empDesignation.includes("project head") || empDesignation.includes("sbu");
 
     if (isEmpPHorSBU) {
       if (management_status) {
@@ -454,14 +461,22 @@ const RequestsTab = ({
   };
 
   const getFilteredRequests = () => {
-    let baseData = (requestSubTab === "Leave Request" ? activeLeaveRequests : activePermissionRequests) || [];
-    
+    let baseData =
+      (requestSubTab === "Leave Request"
+        ? activeLeaveRequests
+        : activePermissionRequests) || [];
+
     return baseData.filter((req) => {
       if (!req) return false;
       // Role-based visibility: PH/SBU requests are only visible to Admins
-      const emp = activeEmployees.find(e => (e.employee_id || e.employeeId || e.userName) === req.employee_id);
+      const emp = activeEmployees.find(
+        (e) =>
+          (e.employee_id || e.employeeId || e.userName) === req.employee_id,
+      );
       const empDesignation = (emp?.designation || "").toLowerCase();
-      const isPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
+      const isPHorSBU =
+        empDesignation.includes("project head") ||
+        empDesignation.includes("sbu");
 
       if (isPHorSBU && !isManagement) {
         return false;
@@ -469,32 +484,39 @@ const RequestsTab = ({
 
       // 1. Keyword Search (Name, ID, Reason, Type)
       const keyword = searchTerm.toLowerCase();
-      const matchesSearch = 
+      const matchesSearch =
         req.employee_name?.toLowerCase().includes(keyword) ||
         req.employee_id?.toLowerCase().includes(keyword) ||
         req.leave_type?.toLowerCase().includes(keyword) ||
         req.reason?.toLowerCase().includes(keyword);
 
       // 2. Employee Filter
-      const matchesEmployee = selectedEmployee === "all" || req.employee_id === selectedEmployee;
+      const matchesEmployee =
+        selectedEmployee === "all" || req.employee_id === selectedEmployee;
 
       // 3. Date Filter
-      const targetDate = requestSubTab === "Leave Request" ? req.from_date : req.permission_date;
+      const targetDate =
+        requestSubTab === "Leave Request" ? req.from_date : req.permission_date;
       let requestDate;
-      
-      if (typeof targetDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-        const [year, month, day] = targetDate.split('-').map(Number);
+
+      if (
+        typeof targetDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
+      ) {
+        const [year, month, day] = targetDate.split("-").map(Number);
         requestDate = new Date(year, month - 1, day);
       } else {
         requestDate = new Date(targetDate);
       }
-      
+
       requestDate.setHours(0, 0, 0, 0);
-      
+
       const matchesStartDate = !startDate || requestDate >= new Date(startDate);
       const matchesEndDate = !endDate || requestDate <= new Date(endDate);
 
-      return matchesSearch && matchesEmployee && matchesStartDate && matchesEndDate;
+      return (
+        matchesSearch && matchesEmployee && matchesStartDate && matchesEndDate
+      );
     });
   };
 
@@ -505,16 +527,16 @@ const RequestsTab = ({
         showToast("Error", "No data to export");
         return;
       }
-      
+
       showToast("Info", "Generating PDF...");
       const pdfExporter = new ExportHRRequestsPDF();
       pdfExporter.export(
-        dataToExport, 
-        requestSubTab, 
-        startDate, 
-        endDate, 
+        dataToExport,
+        requestSubTab,
+        startDate,
+        endDate,
         selectedEmployee !== "all" ? dataToExport[0]?.employee_name : "All",
-        activeEmployees
+        activeEmployees,
       );
       showToast("Success", "PDF exported successfully");
     } catch (error) {
@@ -525,30 +547,31 @@ const RequestsTab = ({
 
   // Use ONLY passed active employees as requested
   const employees = (activeEmployees || [])
-    .filter(emp => {
+    .filter((emp) => {
       if (isManagement) return true;
       const des = (emp.designation || "").toLowerCase();
       return !des.includes("project head") && !des.includes("sbu");
     })
-    .map(emp => ({
+    .map((emp) => ({
       id: emp.employee_id || emp.employeeId,
-      name: emp.employee_name || emp.employeeName
+      name: emp.employee_name || emp.employeeName,
     }))
-    .filter(emp => emp.id)
+    .filter((emp) => emp.id)
     .sort((a, b) => a.name.localeCompare(b.name));
-
-
 
   const filteredRequests = getFilteredRequests();
   const hasActiveFilters = startDate || endDate || selectedEmployee !== "all";
-  
+
   // As requested: No pagination if filtered (only keyword search doesn't count as 'applying filters' in typical UX, but user said 'when applying filters don't need pagination')
   const isPaginated = !hasActiveFilters;
-  
-  const totalPages = isPaginated ? (Math.ceil(filteredRequests.length / RECORDS_PER_PAGE) || 1) : 1;
-  const startIndex = isPaginated ? (currentPage - 1) * RECORDS_PER_PAGE : 0;
-  const paginatedRequests = isPaginated ? filteredRequests.slice(startIndex, startIndex + RECORDS_PER_PAGE) : filteredRequests;
 
+  const totalPages = isPaginated
+    ? Math.ceil(filteredRequests.length / RECORDS_PER_PAGE) || 1
+    : 1;
+  const startIndex = isPaginated ? (currentPage - 1) * RECORDS_PER_PAGE : 0;
+  const paginatedRequests = isPaginated
+    ? filteredRequests.slice(startIndex, startIndex + RECORDS_PER_PAGE)
+    : filteredRequests;
 
   const handlePrevious = () => setCurrentPage((prev) => Math.max(prev - 1, 1));
   const handleNext = () =>
@@ -667,7 +690,7 @@ const RequestsTab = ({
 
               <div>
                 <label className="text-[0.85vw] font-semibold text-gray-700 mb-[0.5vw] block">
-                  Remark <span className="text-red-500">*</span>
+                  Remark
                 </label>
                 <textarea
                   value={updateModal.remark}
@@ -798,15 +821,20 @@ const RequestsTab = ({
             <div className="flex items-center gap-[1vw]">
               {/* Employee Filter */}
               <div className="relative group">
-                <User size="1vw" className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <select 
+                <User
+                  size="1vw"
+                  className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400"
+                />
+                <select
                   value={selectedEmployee}
                   onChange={(e) => setSelectedEmployee(e.target.value)}
                   className="pl-[1.8vw] pr-[0.8vw] py-[0.25vw] bg-gray-100 border border-gray-200 rounded-lg text-[0.8vw] outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
                 >
                   <option value="all">All Employees</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -815,7 +843,7 @@ const RequestsTab = ({
               <div className="flex items-center gap-[0.5vw]">
                 <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
                   <span className="text-[0.7vw] text-gray-500">From</span>
-                  <input 
+                  <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
@@ -824,7 +852,7 @@ const RequestsTab = ({
                 </div>
                 <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
                   <span className="text-[0.7vw] text-gray-500">To</span>
-                  <input 
+                  <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
@@ -862,7 +890,7 @@ const RequestsTab = ({
                 className="pl-[2.1vw] pr-[1vw] py-[0.25vw] rounded-full text-[0.85vw] bg-gray-100 border border-gray-200 focus:ring-1 focus:ring-blue-500 outline-none w-[15vw] transition-all"
               />
             </div>
-            
+
             <button
               onClick={handleExportPDF}
               disabled={filteredRequests.length === 0}
@@ -880,7 +908,10 @@ const RequestsTab = ({
             <div className="p-4 space-y-3 animate-pulse">
               <div className="h-10 bg-gray-200 rounded-lg w-full" />
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-12 bg-gray-100 rounded-lg w-full flex items-center px-4 gap-4">
+                <div
+                  key={i}
+                  className="h-12 bg-gray-100 rounded-lg w-full flex items-center px-4 gap-4"
+                >
                   <div className="h-4 bg-gray-200 rounded w-1/12" />
                   <div className="h-4 bg-gray-200 rounded w-1/4" />
                   <div className="h-4 bg-gray-200 rounded w-1/5" />
@@ -901,7 +932,7 @@ const RequestsTab = ({
               </p>
             </div>
           ) : (
-            <div className="flex-1 min-h-0 overflow-auto p-[0.8vw] bg-white">
+            <div className="flex-1 min-h-0 overflow-auto px-[0.8vw] pb-[0.8vw] pt-0 bg-white">
               <table className="w-full border-collapse border border-gray-300 bg-white">
                 <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                   <tr>
@@ -1015,9 +1046,14 @@ const RequestsTab = ({
                           <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center text-[0.86vw]">
                             {(() => {
                               const emp = (activeEmployees || []).find(
-                                (e) => (e.employee_id || e.employeeId || e.userName) === req.employee_id,
+                                (e) =>
+                                  (e.employee_id ||
+                                    e.employeeId ||
+                                    e.userName) === req.employee_id,
                               );
-                              const empDesignation = (emp?.designation || "").toLowerCase();
+                              const empDesignation = (
+                                emp?.designation || ""
+                              ).toLowerCase();
                               if (
                                 empDesignation.includes("project head") ||
                                 empDesignation.includes("sbu")
@@ -1038,7 +1074,9 @@ const RequestsTab = ({
                                           : "bg-yellow-100 text-yellow-800"
                                     }`}
                                   >
-                                    {req.team_head_status.charAt(0).toUpperCase() +
+                                    {req.team_head_status
+                                      .charAt(0)
+                                      .toUpperCase() +
                                       req.team_head_status.slice(1)}
                                   </span>
                                   {req.team_head_updated_by && (
@@ -1069,12 +1107,13 @@ const RequestsTab = ({
                                         : "bg-yellow-100 text-yellow-800"
                                   }`}
                                 >
-                                  {req.management_status.charAt(0).toUpperCase() +
+                                  {req.management_status
+                                    .charAt(0)
+                                    .toUpperCase() +
                                     req.management_status.slice(1)}
                                 </span>
                                 {req.management_updated_by && (
-                                  <span className="text-[0.7vw] text-gray-500">
-                                  </span>
+                                  <span className="text-[0.7vw] text-gray-500"></span>
                                 )}
                               </div>
                             ) : (
@@ -1144,7 +1183,11 @@ const RequestsTab = ({
                               <div className="flex justify-center items-center gap-[0.3vw]">
                                 <button
                                   onClick={() =>
-                                    handleAction(req.id, "approve", "permission")
+                                    handleAction(
+                                      req.id,
+                                      "approve",
+                                      "permission",
+                                    )
                                   }
                                   className="p-[0.4vw] flex items-center justify-center bg-green-600 text-white rounded-full hover:bg-green-700 cursor-pointer transition-all"
                                   title="Approve Request"

@@ -89,9 +89,9 @@ router.patch("/leave-requests/:id/update-approval", async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { action, remark, updated_by, designation } = req.body;
+    const { action, remark = "", updated_by, designation } = req.body;
 
-    if (!action || !remark || !updated_by || !designation) {
+    if (!action || !updated_by || !designation) {
       return res.status(400).json({
         success: false,
         error: "Missing required fields",

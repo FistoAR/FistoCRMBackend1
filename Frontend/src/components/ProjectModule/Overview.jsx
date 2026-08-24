@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import CreateTask from "./AddTask";
 import Timeline from "./Timeline";
@@ -121,12 +122,40 @@ export default function Overview() {
     projectTab,
     statusHistory,
   } = location.state || {};
-  const [projectData, setProjectData] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [buttonLoading, setbuttonLoading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
-  const [error, setError] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const { data: projectData, isLoading: loading, error, refetch } = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: async () => {
+      if (!projectId) throw new Error("No project ID provided");
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to load project data");
+      }
+      return data.data;
+    },
+    enabled: !!projectId,
+  });
+
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      refetch();
+    }
+  }, [refreshTrigger, refetch]);
+
+  useEffect(() => {
+    const handleRefresh = () => refetch();
+    window.addEventListener("RefreshLoad", handleRefresh);
+    return () => window.removeEventListener("RefreshLoad", handleRefresh);
+  }, [refetch]);
 
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
 
@@ -308,68 +337,22 @@ export default function Overview() {
   }, [showCreateTask]);
 
   useEffect(() => {
-    if (showEmployeeModal) return;
+    const userData =
+      sessionStorage.getItem("user") || localStorage.getItem("user");
+    const userObj = userData ? JSON.parse(userData) : null;
+    const userRole = userObj?.designation || "";
+    const userId = userObj?.userName || "";
+    const isTeamHead = userObj?.teamHead || "";
 
-    const loadData = async () => {
-      const userData =
-        sessionStorage.getItem("user") || localStorage.getItem("user");
-      const userObj = userData ? JSON.parse(userData) : null;
-      const userRole = userObj?.designation || "";
-      const userId = userObj?.userName || "";
-      const isTeamHead = userObj?.teamHead || "";
-
-      setRole(userRole);
-      setTeamHead(isTeamHead);
-      setCurrentUserId(userId);
-      if (["Admin", "SBU", "Project Head"].includes(userRole)) {
-        setShowYours(false);
-      } else {
-        setShowYours(true);
-      }
-
-      if (!projectId) {
-        setError("No project ID provided");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        if (!showEmployeeModal && refreshTrigger != 0) {
-          setLoading(false);
-        } else {
-          setLoading(true);
-        }
-        const response = await fetch(
-          `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}`,
-        );
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (data.success) {
-          setProjectData(data.data);
-        } else {
-          throw new Error(data.message || "Failed to load project data");
-        }
-      } catch (error) {
-        console.error("Error fetching projects:", error);
-        setError(error.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    window.addEventListener("RefreshLoad", loadData);
-
-    loadData();
-
-    return () => {
-      window.removeEventListener("RefreshLoad", loadData);
-    };
-  }, [projectId, refreshTrigger, showEmployeeModal]);
+    setRole(userRole);
+    setTeamHead(isTeamHead);
+    setCurrentUserId(userId);
+    if (["Admin", "SBU", "Project Head"].includes(userRole)) {
+      setShowYours(false);
+    } else {
+      setShowYours(true);
+    }
+  }, [showEmployeeModal]);
 
   const stats = useMemo(() => {
     if (!projectData) {

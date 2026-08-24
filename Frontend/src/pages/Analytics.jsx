@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, act } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   PieChart,
   Pie,
@@ -136,20 +137,128 @@ const Analytics = () => {
     !!fromDate ||
     !!toDate;
 
-  useEffect(() => {
-    const fetchAllData = async () => {
-      setLoading(true);
-      await Promise.all([
-        fetchAllEmployees(),
-        fetchAnalyticsData(),
-        fetchTimelineData(),
-        fetchTeamMembers(),
-      ]);
+  const { data: employeesData = [], isLoading: employeesQueryLoading } = useQuery({
+    queryKey: ["allEmployees"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
+      );
+      const result = await response.json();
+      return result.status ? result.employees || [] : [];
+    },
+  });
 
-      loadProjectEmployees("all");
-      setLoading(false);
-    };
-    fetchAllData();
+  const { data: analyticsResult, isLoading: analyticsQueryLoading } = useQuery({
+    queryKey: ["analyticsOverview"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/overview`,
+      );
+      const result = await response.json();
+      if (result.success) {
+        return {
+          projects: [
+            { id: "all", name: "All projects" },
+            ...result.data.projects.map((p) => ({
+              id: p.projectId,
+              name: p.projectName,
+              status: p.status,
+            })),
+          ],
+          overallStats: result.data.overallStats,
+        };
+      }
+      return null;
+    },
+  });
+
+  const { data: projectDetailData } = useQuery({
+    queryKey: ["analyticsProject", selectedProject],
+    queryFn: async () => {
+      if (selectedProject === "all") return null;
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/project/${selectedProject}`,
+      );
+      const result = await response.json();
+      return result.success ? result.data : null;
+    },
+    enabled: selectedProject !== "all",
+  });
+
+  const { data: timelineResult = [], isLoading: timelineQueryLoading } = useQuery({
+    queryKey: ["analyticsTimeline"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/timeline`,
+      );
+      const result = await response.json();
+      return result.success ? result.data.timeline || [] : [];
+    },
+  });
+
+  const { data: teamMembersResult, isLoading: teamQueryLoading } = useQuery({
+    queryKey: ["analyticsTeamMembers"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/team-members`,
+      );
+      const result = await response.json();
+      if (result.success) {
+        const uniqueEmployees = new Map();
+        result.data.projects?.forEach((project) => {
+          project.teamMembers?.forEach((member) => {
+            if (!uniqueEmployees.has(member.id)) {
+              uniqueEmployees.set(member.id, member);
+            }
+          });
+        });
+        return {
+          departments: result.data.departments || [],
+          teamMembers: Array.from(uniqueEmployees.values()),
+        };
+      }
+      return null;
+    },
+  });
+
+  const queriesLoading = employeesQueryLoading || analyticsQueryLoading || timelineQueryLoading || teamQueryLoading;
+
+  useEffect(() => {
+    setLoading(queriesLoading);
+  }, [queriesLoading]);
+
+  useEffect(() => {
+    if (employeesData.length > 0) setAllEmployee(employeesData);
+  }, [employeesData]);
+
+  useEffect(() => {
+    if (analyticsResult) {
+      setProjects(analyticsResult.projects);
+      setOverallStats(analyticsResult.overallStats);
+    }
+  }, [analyticsResult]);
+
+  useEffect(() => {
+    if (selectedProject === "all") {
+      setSelectedProjectData(null);
+    } else if (projectDetailData) {
+      setSelectedProjectData(projectDetailData);
+    }
+  }, [projectDetailData, selectedProject]);
+
+  useEffect(() => {
+    if (timelineResult.length > 0) setTimelineData(timelineResult);
+  }, [timelineResult]);
+
+  useEffect(() => {
+    if (teamMembersResult) {
+      setDepartments(teamMembersResult.departments);
+      setTeamMembers(teamMembersResult.teamMembers);
+    }
+  }, [teamMembersResult]);
+
+  useEffect(() => {
+    loadProjectEmployees("all");
   }, []);
 
   useEffect(() => {
@@ -197,108 +306,7 @@ const Analytics = () => {
     };
   }, [showFilterDropdown]);
 
-  const fetchAllEmployees = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
-      );
-      const result = await response.json();
-      if (result.status) {
-        setAllEmployee(result.employees);
-      }
-    } catch (error) {
-      console.error("Error Employees:", error);
-    }
-  };
 
-  const fetchAnalyticsData = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/overview`,
-      );
-      const result = await response.json();
-      if (result.success) {
-        const projectsList = [
-          { id: "all", name: "All projects" },
-          ...result.data.projects.map((p) => ({
-            id: p.projectId,
-            name: p.projectName,
-            status: p.status,
-          })),
-        ];
-        setProjects(projectsList);
-        setOverallStats(result.data.overallStats);
-      }
-    } catch (error) {
-      console.error("Error fetching analytics:", error);
-    }
-  };
-
-  const fetchProjectData = async (projectId) => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/project/${projectId}`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        setSelectedProjectData(result.data);
-      }
-    } catch (error) {
-      console.error("Error fetching project data:", error);
-    }
-  };
-
-  const fetchTimelineData = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/timeline`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        setTimelineData(result.data.timeline || []);
-      }
-    } catch (error) {
-      console.error("Error fetching timeline:", error);
-    }
-  };
-
-  const fetchTeamMembers = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/team-members`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        console.log("API Response:", result);
-        console.log("Departments from API:", result.data.departments);
-        if (result.data.departments) {
-          setDepartments(result.data.departments || []);
-          console.log("Departments state updated:", result.data.departments);
-        } else {
-          console.log("No departments in API response");
-        }
-
-        if (result.data.projects) {
-          const uniqueEmployees = new Map();
-          result.data.projects.forEach((project) => {
-            project.teamMembers?.forEach((member) => {
-              if (!uniqueEmployees.has(member.id)) {
-                uniqueEmployees.set(member.id, member);
-              }
-            });
-          });
-          setTeamMembers(Array.from(uniqueEmployees.values()));
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching team members:", error);
-      setDepartments([]);
-      setTeamMembers([]);
-    }
-  };
 
   const fetchReportTasks = async (employeeId, monthFilter) => {
     try {

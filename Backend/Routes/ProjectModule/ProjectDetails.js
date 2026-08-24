@@ -361,6 +361,10 @@ router.put("/:projectId", async (req, res) => {
     const { projectId } = req.params;
     const updateData = req.body;
 
+    if (updateData.status === "Completed") {
+      updateData.percentage = 100;
+    }
+
     const project = await Project_Details.findByIdAndUpdate(
       projectId,
       { $set: updateData },
@@ -372,6 +376,19 @@ router.put("/:projectId", async (req, res) => {
         success: false,
         message: "Project not found",
       });
+    }
+
+    if (updateData.status === "Completed") {
+      const tasks = await Tasks.find({ projectId });
+      for (const t of tasks) {
+        t.percentage = 100;
+        if (t.activities && t.activities.length > 0) {
+          t.activities.forEach((activity) => {
+            activity.percentage = 100;
+          });
+        }
+        await t.save();
+      }
     }
 
     res.status(200).json({

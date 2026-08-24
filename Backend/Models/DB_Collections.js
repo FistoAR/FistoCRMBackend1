@@ -17,7 +17,7 @@ const statusHistorySchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["In Progress", "Hold", "Canceled"],
+      enum: ["In Progress", "Hold", "Canceled", "Completed"],
       required: true,
     },
     changedBy: { type: String },
@@ -49,7 +49,7 @@ const Project_details = new mongoose.Schema(
     correctionDate: [correction_date],
     status: {
       type: String,
-      enum: ["In Progress", "Hold", "Canceled"],
+      enum: ["In Progress", "Hold", "Canceled", "Completed"],
       default: "In Progress",
     },
     statusHistory: {

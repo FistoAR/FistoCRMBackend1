@@ -1,15 +1,26 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
 import Personal from "../components/Dashboard/Personal";
 import WelcomeNewEmployee from "../components/Dashboard/WelcomeNewEmployee";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 const Dashboard = () => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    const storedUserData =
+      sessionStorage.getItem("user") || localStorage.getItem("user");
+    if (storedUserData) {
+      try {
+        return JSON.parse(storedUserData);
+      } catch (err) {
+        console.error("Error parsing user data:", err);
+      }
+    }
+    return null;
+  });
   const [activeTab, setActiveTab] = useState("personal");
   const [isUnconfigured, setIsUnconfigured] = useState(false);
-  const [checkingRole, setCheckingRole] = useState(true);
 
   // System designations that have built-in sidebar defaults and don't need role_tab_access
   const SYSTEM_DESIGNATIONS = [
@@ -18,56 +29,33 @@ const Dashboard = () => {
     "Software Developer", "UI/UX", "3D", "Intern", "Developer"
   ];
 
-  useEffect(() => {
-    const storedUserData =
-      sessionStorage.getItem("user") || localStorage.getItem("user");
+  const designation = (user?.designation || "").trim();
 
-    if (storedUserData) {
-      try {
-        const parsedUser = JSON.parse(storedUserData);
-        setUser(parsedUser);
+  const { isLoading: checkingRole } = useQuery({
+    queryKey: ["myPermissions", designation],
+    queryFn: async () => {
+      if (!designation) return null;
+      
+      const isSystemDesignation = SYSTEM_DESIGNATIONS.some(
+        (k) => k.toLowerCase() === designation.toLowerCase()
+      );
 
-        const designation = (parsedUser.designation || "").trim();
-        if (designation) {
-          // Check if it's a known system designation
-          const isSystemDesignation = SYSTEM_DESIGNATIONS.some(
-            (k) => k.toLowerCase() === designation.toLowerCase()
-          );
+      const res = await axios.get(`${API_BASE_URL}/role-access/my-permissions`, {
+        params: { designation }
+      });
+      const { allowedPaths } = res.data || {};
 
-          axios
-            .get(`${API_BASE_URL}/role-access/my-permissions`, {
-              params: { designation }
-            })
-            .then((res) => {
-              const { allowedPaths } = res.data || {};
-
-              if (Array.isArray(allowedPaths) && allowedPaths.length === 0) {
-                // Explicitly configured with 0 allowed tabs → unconfigured
-                setIsUnconfigured(true);
-              } else if (allowedPaths === null && !isSystemDesignation) {
-                // No config at all AND not a known system role → show welcome
-                setIsUnconfigured(true);
-              } else {
-                setIsUnconfigured(false);
-              }
-            })
-            .catch(() => {
-              setIsUnconfigured(false);
-            })
-            .finally(() => {
-              setCheckingRole(false);
-            });
-        } else {
-          setCheckingRole(false);
-        }
-      } catch (err) {
-        console.error("Error parsing user data:", err);
-        setCheckingRole(false);
+      if (Array.isArray(allowedPaths) && allowedPaths.length === 0) {
+        setIsUnconfigured(true);
+      } else if (allowedPaths === null && !isSystemDesignation) {
+        setIsUnconfigured(true);
+      } else {
+        setIsUnconfigured(false);
       }
-    } else {
-      setCheckingRole(false);
-    }
-  }, []);
+      return res.data;
+    },
+    enabled: !!designation,
+  });
 
   if (checkingRole) {
     return (

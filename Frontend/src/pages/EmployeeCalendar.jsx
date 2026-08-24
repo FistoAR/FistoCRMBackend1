@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -40,15 +41,46 @@ const CalendarSkeleton = () => (
 
 const EmployeeCalendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("");
   const [userRole, setUserRole] = useState(null);
   const [userName, setUserName] = useState(null);
   const [userId, setUserId] = useState(null);
   const [teamHead, setTeamHead] = useState(false);
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const { data: employeesData = [], isLoading: queryEmployeesLoading } = useQuery({
+    queryKey: ["activeEmployees"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
+      );
+      const data = await response.json();
+      if (data.employees && Array.isArray(data.employees)) {
+        return data.employees.filter(
+          (emp) =>
+            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) &&
+            emp.employment_type === "On Role",
+        );
+      }
+      return [];
+    },
+  });
+
+  const { data: tasksData = [], isLoading: queryTasksLoading } = useQuery({
+    queryKey: ["employeeCalendarTasks", selectedEmployee],
+    queryFn: async () => {
+      if (!selectedEmployee) return [];
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/employee-calendar-tasks/${selectedEmployee}`,
+      );
+      const data = await response.json();
+      return data.success ? data.data || [] : [];
+    },
+    enabled: !!selectedEmployee,
+  });
+
+  const employees = employeesData;
+  const tasks = tasksData;
+  const loading = queryTasksLoading;
+  const employeesLoading = queryEmployeesLoading;
   const [hoveredTask, setHoveredTask] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({
     x: 0,
@@ -77,7 +109,6 @@ const EmployeeCalendar = () => {
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   useEffect(() => {
-    fetchEmployees();
     try {
       const stored =
         localStorage.getItem("user") || sessionStorage.getItem("user");
@@ -105,53 +136,7 @@ const EmployeeCalendar = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (selectedEmployee) {
-      fetchEmployeeTasks(selectedEmployee);
-    } else {
-      setTasks([]);
-    }
-  }, [selectedEmployee, currentDate]);
 
-  const fetchEmployees = async () => {
-    setEmployeesLoading(true);
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
-      );
-      const data = await response.json();
-      if (data.employees && Array.isArray(data.employees)) {
-        const filteredEmployees = data.employees.filter(
-          (emp) =>
-            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) &&
-            emp.employment_type === "On Role",
-        );
-        setEmployees(filteredEmployees);
-      }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
-    } finally {
-      setEmployeesLoading(false);
-    }
-  };
-
-  const fetchEmployeeTasks = async (employeeId) => {
-    setLoading(true);
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project/employee-calendar-tasks/${employeeId}`,
-      );
-      const data = await response.json();
-      if (data.success) {
-        setTasks(data.data || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch tasks:", error);
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();

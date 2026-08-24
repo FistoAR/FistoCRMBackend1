@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -84,16 +85,12 @@ const InternReports = () => {
   const [currentBatch, setCurrentBatch] = useState(0);
   const [loadedBatches, setLoadedBatches] = useState(new Set([0]));
 
-  const [loading, setLoading] = useState(false);
-  const [fetchingMore, setFetchingMore] = useState(false); // ✅ New state for background loading
   const [loadingAllRecords, setLoadingAllRecords] = useState(false); // Load all records for filtering
   const [reportType, setReportType] = useState("intern"); // ✅ New state for report type
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("all");
   const [toast, setToast] = useState(null);
   const filterRef = useRef(null);
@@ -150,148 +147,100 @@ const InternReports = () => {
     };
   }, []);
 
-  const fetchEmployees = async () => {
-    try {
-      if (userInfo?.isAdmin) {
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const { data: employeesData = [] } = useQuery({
+    queryKey: ["internEmployees", userInfo?.employee_id, userInfo?.isAdmin, userInfo?.isTeamHead],
+    queryFn: async () => {
+      if (!userInfo) return [];
+      if (userInfo.isAdmin) {
         const response = await fetch(`${API_URL}/calendar/employees`);
         const data = await response.json();
-        if (data.status) {
-          setEmployees(data.data || []);
-        }
-      } else if (userInfo?.isTeamHead) {
+        return data.status ? data.data || [] : [];
+      } else if (userInfo.isTeamHead) {
         const response = await fetch(
-          `${API_URL}/intern-reports/team-by-designation/${userInfo?.designation}`,
+          `${API_URL}/intern-reports/team-by-designation/${userInfo.designation}`,
         );
         const data = await response.json();
-        if (data.success) {
-          setEmployees(data.data || []);
-        }
+        return data.success ? data.data || [] : [];
       }
-    } catch (error) {
-      console.error("Error fetching employees:", error);
-    }
-  };
+      return [];
+    },
+    enabled: !!userInfo,
+  });
+  
+  const employees = employeesData;
 
-  // Fetch employees list
-  useEffect(() => {
-    if (userInfo) {
-      fetchEmployees();
-    }
-  }, [userInfo]);
-
-  const activeAbortControllerRef = useRef(null);
-  const activeRequestCountRef = useRef(0);
-
-  // Initial fetch when user info is loaded
-  useEffect(() => {
-    if (userInfo) {
-      resetAndFetch(reportType, selectedEmployee, searchTerm, startDate, endDate);
-    }
-  }, [userInfo, reportType, selectedEmployee, searchTerm, startDate, endDate]);
-
-  // Reset and fetch reports cleanly
-  const resetAndFetch = (currentType = reportType, empId = selectedEmployee, search = searchTerm, start = startDate, end = endDate) => {
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-    }
-    setAllFetchedReports([]);
-    setCurrentBatch(0);
-    setLoadedBatches(new Set([0]));
-    setCurrentPage(1);
-    setTotalReportsCount(0);
-    fetchReportsBatch(0, false, currentType, empId, search, start, end);
-  };
-
-  // Fetch a specific batch of reports with given filters
-  const fetchReportsBatch = async (
-    batchNumber,
-    append = false,
-    typeParam = reportType,
-    empParam = selectedEmployee,
-    searchParam = searchTerm,
-    startParam = startDate,
-    endParam = endDate
-  ) => {
-    if (!append) {
-      if (activeAbortControllerRef.current) {
-        activeAbortControllerRef.current.abort();
-      }
-      setLoading(true);
-      activeRequestCountRef.current += 1;
-    } else {
-      setFetchingMore(true);
-    }
-
-    const controller = new AbortController();
-    if (!append) {
-      activeAbortControllerRef.current = controller;
-    }
-
-    try {
-      const offset = batchNumber * FETCH_BATCH_SIZE;
+  const { data: reportsQueryData, isLoading: reportsQueryLoading } = useQuery({
+    queryKey: ["internReports", userInfo?.employee_id, reportType, selectedEmployee, searchTerm, startDate, endDate, currentBatch],
+    queryFn: async () => {
+      if (!userInfo) return { reports: [], total: 0 };
+      const offset = currentBatch * FETCH_BATCH_SIZE;
       const params = new URLSearchParams({
         limit: FETCH_BATCH_SIZE,
         offset: offset,
       });
 
-      if (empParam !== "all") params.append("employee_id", empParam);
-      if (startParam) params.append("start_date", startParam);
-      if (endParam) params.append("end_date", endParam);
-      if (searchParam) params.append("search", searchParam);
+      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+      if (searchTerm) params.append("search", searchTerm);
 
       let url = "";
-      if (typeParam === "management") {
+      if (reportType === "management") {
         url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
-      } else if (userInfo?.isAdmin) {
+      } else if (userInfo.isAdmin) {
         url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
-      } else if (userInfo?.isTeamHead) {
+      } else if (userInfo.isTeamHead) {
         params.append("designation", userInfo.designation);
         params.append("isTeamHead", "true");
         url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
       } else {
-        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
+        url = `${API_URL}/intern-reports/reports/${userInfo.employee_id}?${params.toString()}`;
       }
 
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url);
       const data = await response.json();
+      return {
+        reports: data.success ? data.reports || [] : [],
+        total: data.success ? (data.total || (data.reports?.length || 0)) : 0
+      };
+    },
+    enabled: !!userInfo,
+  });
 
-      if (data.success) {
-        const newReports = data.reports || [];
+  const loading = reportsQueryLoading && allFetchedReports.length === 0;
+  const fetchingMore = reportsQueryLoading && allFetchedReports.length > 0;
 
-        if (append) {
-          setAllFetchedReports((prev) => {
-            const existingKeys = new Set(
-              prev.map((r) => `${r.employee_id}_${r.report_date}`)
-            );
-            const uniqueNew = newReports.filter(
-              (r) => !existingKeys.has(`${r.employee_id}_${r.report_date}`)
-            );
-            return [...prev, ...uniqueNew];
-          });
-        } else {
-          setAllFetchedReports(newReports);
-          setTotalReportsCount(data.total || newReports.length);
-        }
-
-        setLoadedBatches((prev) => new Set([...prev, batchNumber]));
-      }
-    } catch (error) {
-      if (error.name === "AbortError") {
-        return;
-      }
-      console.error("Error fetching reports:", error);
-      showToast("Error", "Failed to fetch reports");
-    } finally {
-      if (append) {
-        setFetchingMore(false);
+  useEffect(() => {
+    if (reportsQueryData) {
+      const newReports = reportsQueryData.reports;
+      if (currentBatch > 0) {
+        setAllFetchedReports((prev) => {
+          const existingKeys = new Set(
+            prev.map((r) => `${r.employee_id}_${r.report_date}`)
+          );
+          const uniqueNew = newReports.filter(
+            (r) => !existingKeys.has(`${r.employee_id}_${r.report_date}`)
+          );
+          return [...prev, ...uniqueNew];
+        });
       } else {
-        activeRequestCountRef.current = Math.max(0, activeRequestCountRef.current - 1);
-        if (activeRequestCountRef.current === 0) {
-          setLoading(false);
-        }
+        setAllFetchedReports(newReports);
+        setTotalReportsCount(reportsQueryData.total);
       }
+      setLoadedBatches((prev) => new Set([...prev, currentBatch]));
     }
-  };
+  }, [reportsQueryData, currentBatch]);
+
+  // Reset batch and paging state when filters change
+  useEffect(() => {
+    setAllFetchedReports([]);
+    setCurrentBatch(0);
+    setLoadedBatches(new Set([0]));
+    setCurrentPage(1);
+    setTotalReportsCount(0);
+  }, [reportType, selectedEmployee, searchTerm, startDate, endDate]);
 
   // ✅ loadAllRecordsForFiltering is no longer needed as the backend handles filtering
 
@@ -380,14 +329,13 @@ const InternReports = () => {
   // ✅ Calculate total pages based on server total, not filtered length
   const totalPages = Math.ceil(totalReportsCount / RECORDS_PER_PAGE);
 
-
   // ✅ Smart page change handler
   const handlePageChange = async (newPage) => {
     const firstRecordNeeded = (newPage - 1) * RECORDS_PER_PAGE;
     const batchNeeded = Math.floor(firstRecordNeeded / FETCH_BATCH_SIZE);
 
     if (!loadedBatches.has(batchNeeded)) {
-      await fetchReportsBatch(batchNeeded, true);
+      setCurrentBatch(batchNeeded);
     }
 
     setCurrentPage(newPage);
