@@ -1908,4 +1908,53 @@ router.patch("/request/:requestId/reject", async (req, res) => {
   }
 });
 
+router.delete("/deleteProject/:projectId", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Project ID is required",
+      });
+    }
+
+    const project = await Project_Details.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Delete project details
+    await Project_Details.findByIdAndDelete(projectId);
+
+    // Delete all related tasks
+    await Tasks.deleteMany({ projectId });
+
+    // Delete all related day reports
+    await DayReport.deleteMany({ projectId });
+
+    // Delete all related task reports
+    await TaskReports.deleteMany({ projectId });
+
+    // Delete all related task reports review
+    await TaskReportsReview.deleteMany({ projectId });
+
+    res.status(200).json({
+      success: true,
+      message: "Project and all associated data deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error deleting project:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete project",
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;
+

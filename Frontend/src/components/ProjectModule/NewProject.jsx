@@ -101,12 +101,51 @@ export default function NewProject() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [projectId, setProjectId] = useState(null);
 
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmDeleteText, setConfirmDeleteText] = useState("");
+
   const isRequestOnlyUser =
     isTeamHead && !["Admin", "SBU", "Project Head"].includes(employeeRole);
 
   const isAdminLevel = ["Admin", "SBU", "Project Head"].includes(employeeRole);
 
   const isFormDisabled = fetchingProject || loading;
+
+  const handleDeleteProject = async () => {
+    if (confirmDeleteText !== formData.projectName) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/deleteProject/${projectId}`,
+        {
+          method: "DELETE",
+        }
+      );
+      const data = await response.json();
+      if (response.ok && data.success) {
+        notify({
+          title: "Success",
+          message: "Project and all associated data deleted successfully!",
+        });
+        setShowDeleteModal(false);
+        navigate(getProjectsPath(employeeRole));
+      } else {
+        notify({
+          title: "Error",
+          message: data.message || "Failed to delete project",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting project:", error);
+      notify({
+        title: "Error",
+        message: "Failed to delete project. Please try again.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   useEffect(() => {
     if (location.state?.isEditMode && location.state?.projectId) {
@@ -1623,24 +1662,41 @@ export default function NewProject() {
               </fieldset>
             </div>
 
-            <div className="flex items-center justify-end pr-[1vw] h-[7%] pb-[0.5vw] gap-[1vw]">
-              <button
-                className="bg-gray-300 hover:bg-gray-200 text-black px-[1.3vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
-                onClick={() => navigate(getProjectsPath(employeeRole))}
-              >
-                Cancel
-              </button>
-              <button
-                className="bg-black hover:bg-gray-900 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer disabled:opacity-60"
-                onClick={handleSave}
-                disabled={loading || fetchingProject}
-              >
-                {( !isEditMode && isRequestOnlyUser )
-                  ? "Request"
-                  : isEditMode
-                    ? "Update"
-                    : "Save"}
-              </button>
+             <div className="flex items-center justify-between w-full pr-[1vw] h-[7%] pb-[0.5vw]">
+           
+              <div>
+
+              </div>
+              <div className="flex items-center gap-[1vw]">
+                <button
+                  className="bg-gray-300 hover:bg-gray-200 text-black px-[1.3vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
+                  onClick={() => navigate(getProjectsPath(employeeRole))}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="bg-black hover:bg-gray-900 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer disabled:opacity-60"
+                  onClick={handleSave}
+                  disabled={loading || fetchingProject}
+                >
+                  {( !isEditMode && isRequestOnlyUser )
+                    ? "Request"
+                    : isEditMode
+                      ? "Update"
+                      : "Save"}
+                </button>
+                  {isEditMode && isAdminLevel && (
+                  <button
+                    className="bg-red-600 hover:bg-red-700 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
+                    onClick={() => {
+                      setConfirmDeleteText("");
+                      setShowDeleteModal(true);
+                    }}
+                  >
+                    Delete Project
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -1692,6 +1748,58 @@ export default function NewProject() {
           </div>
         </div>
       )}
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/25 backdrop-blur-[0.1px] flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-[32%] p-[1.5vw]">
+            <div className="flex justify-between items-center mb-[1vw] bg-blue-50 rounded-md px-[0.5vw] py-[0.4vw]">
+              <h3 className="text-[1.1vw] font-semibold text-blue-600">
+                Delete Project
+              </h3>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="p-[0.4vw] hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X className="w-[1.2vw] h-[1.2vw]" />
+              </button>
+            </div>
+            <div className="mb-[1vw]">
+              <p className="text-[0.85vw] text-gray-700 mb-[0.8vw]">
+                This action <strong className="text-gray-900">CANNOT</strong> be undone. This will permanently delete the project <strong className="text-gray-900">{formData.projectName}</strong>.
+              </p>
+              <p className="text-[0.85vw] text-red-600 font-semibold mb-[1vw]">
+               Warning: All associated tasks, day reports, task reports, reviews, and the entire worked employees' reports in this project will be deleted permanently.
+              </p>
+              <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.5vw]">
+                Please type <strong className="text-gray-900">"{formData.projectName}"</strong> to confirm:
+              </label>
+              <input
+                type="text"
+                value={confirmDeleteText}
+                onChange={(e) => setConfirmDeleteText(e.target.value)}
+                placeholder="Enter project name"
+                className="w-full border border-gray-600 rounded-lg px-[0.7vw] py-[0.4vw] text-[0.8vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+            <div className="flex gap-[1vw] justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-[1.3vw] py-[0.3vw] bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-full text-[0.8vw] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProject}
+                disabled={confirmDeleteText !== formData.projectName || loading}
+                className="px-[1.3vw] py-[0.3vw] bg-red-600 hover:bg-red-700 text-white rounded-full text-[0.8vw] cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+              >
+                {loading ? "Deleting..." : "Delete Project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -30,8 +30,6 @@ const checkIfAdmin = (userData) => {
     designation === "super admin" ||
     designation === "digital marketing & hr" ||
     designation === "digital marketing" ||
-    designation === "project head" ||
-    designation === "sbu" ||
     designation === "management" ||
     empType === "admin"
   );
