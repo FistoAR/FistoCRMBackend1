@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
+import axios from "axios";
 import {
   ChevronLeft,
   ChevronRight,
@@ -6,6 +7,15 @@ import {
   Plus,
   X,
   Calendar as CalendarIcon,
+  History,
+  Clock,
+  Download,
+  Filter,
+  Copy,
+  Check,
+  RotateCcw,
+  Info,
+  Trash2,
 } from "lucide-react";
 import TimeIcon from "../../assets/Calendar/Date.webp";
 import link from "../../assets/Calendar/add_link.webp";
@@ -73,23 +83,229 @@ const Calendar = () => {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // Get event status based on date and eventStatus field
+  // ─── History View & Modal Tab States ───────────────────────────────
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyEventType, setHistoryEventType] = useState("All");
+  const [historyStatus, setHistoryStatus] = useState("All");
+  const [historyFromDate, setHistoryFromDate] = useState("");
+  const [historyToDate, setHistoryToDate] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyRowsPerPage, setHistoryRowsPerPage] = useState(10);
+  const [modalActiveTab, setModalActiveTab] = useState("details"); // 'details' | 'history'
+
+  const formatDateDDMMYYYY = (dateStr) => {
+    if (!dateStr) return "N/A";
+    try {
+      const [y, m, d] = dateStr.split("-");
+      if (y && m && d) {
+        return `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y}`;
+      }
+      const dt = new Date(dateStr);
+      if (!isNaN(dt.getTime())) {
+        const day = String(dt.getDate()).padStart(2, "0");
+        const month = String(dt.getMonth() + 1).padStart(2, "0");
+        const year = dt.getFullYear();
+        return `${day}/${month}/${year}`;
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const formatDurationHuman = (mins) => {
+    if (mins === undefined || mins === null || isNaN(mins) || mins <= 0) return "N/A";
+    const hours = Math.floor(mins / 60);
+    const remainderMins = Math.round(mins % 60);
+    if (hours > 0) {
+      return `${hours} hr${hours > 1 ? "s" : ""}${remainderMins > 0 ? ` ${remainderMins} min${remainderMins > 1 ? "s" : ""}` : ""}`;
+    }
+    return `${remainderMins} min${remainderMins !== 1 ? "s" : ""}`;
+  };
+
+  const buildDateTimeISO = (dateStr, timeStr) => {
+    if (!dateStr) return new Date().toISOString();
+    try {
+      const time = timeStr && String(timeStr).trim() ? String(timeStr).trim() : "09:00";
+      const parts = time.split(":");
+      const hours = parseInt(parts[0], 10) || 0;
+      const minutes = parseInt(parts[1], 10) || 0;
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return new Date().toISOString();
+      d.setHours(hours, minutes, 0, 0);
+      return d.toISOString();
+    } catch (e) {
+      return new Date().toISOString();
+    }
+  };
+
+  const calculateDurationString = (startIso, endIso) => {
+    try {
+      const start = new Date(startIso);
+      const end = new Date(endIso);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return "1 hr";
+      const diffMs = Math.max(0, end.getTime() - start.getTime());
+      const totalMins = Math.max(1, Math.round(diffMs / (1000 * 60)));
+      const hrs = Math.floor(totalMins / 60);
+      const mins = totalMins % 60;
+      if (hrs > 0) {
+        return mins > 0 ? `${hrs} hr ${mins} mins` : `${hrs} hr${hrs > 1 ? "s" : ""}`;
+      }
+      return `${totalMins} min${totalMins > 1 ? "s" : ""}`;
+    } catch (e) {
+      return "1 hr";
+    }
+  };
+
+  const TruncatedTextWithTooltip = ({ text, maxLength = 25, showCopy = false }) => {
+    const [copied, setCopied] = useState(false);
+    const [showTooltip, setShowTooltip] = useState(false);
+
+    if (!text) return <span className="text-gray-400 italic">N/A</span>;
+    const isTruncated = text.length > maxLength;
+    const displayText = isTruncated ? text.slice(0, maxLength) + "..." : text;
+
+    const handleCopy = (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+      <div
+        className="relative inline-block"
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        <span className="cursor-pointer text-gray-700 text-[0.78vw] hover:text-blue-600 font-medium">
+          {displayText}
+        </span>
+
+        {showTooltip && (
+          <div
+            className="absolute left-0 bottom-full mb-1 z-50 p-2 bg-gray-900 text-white text-[0.7vw] rounded-lg shadow-xl max-w-[18vw] break-words flex flex-col gap-1 border border-gray-700 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-gray-200">{text}</div>
+            {showCopy && (
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="self-end flex items-center gap-1 text-[0.65vw] px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors cursor-pointer"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3 h-3 text-green-300" /> Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" /> Copy
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const extractTechPres = (event) => {
+    if (!event) return {};
+    let tp = event.technical_presentation || event.technicalPresentation || {};
+    if (typeof tp === "string" && tp.trim()) {
+      try {
+        tp = JSON.parse(tp);
+      } catch (e) {
+        tp = {};
+      }
+    }
+    return {
+      presenter1Name:
+        tp.presenter1?.name ||
+        tp.presenter1Name ||
+        tp.presenter1_name ||
+        event.presenter1Name ||
+        event.presenter1_name ||
+        event.presenter1?.name ||
+        "",
+      presenter1Topic:
+        tp.presenter1?.topic ||
+        tp.presenter1Topic ||
+        tp.presenter1_topic ||
+        event.presenter1Topic ||
+        event.presenter1_topic ||
+        event.presenter1?.topic ||
+        "",
+      presenter2Name:
+        tp.presenter2?.name ||
+        tp.presenter2Name ||
+        tp.presenter2_name ||
+        event.presenter2Name ||
+        event.presenter2_name ||
+        event.presenter2?.name ||
+        "",
+      presenter2Topic:
+        tp.presenter2?.topic ||
+        tp.presenter2Topic ||
+        tp.presenter2_topic ||
+        event.presenter2Topic ||
+        event.presenter2_topic ||
+        event.presenter2?.topic ||
+        "",
+      motivationalQuote:
+        tp.motivationalQuote ||
+        tp.motivational_quote ||
+        event.motivationalQuote ||
+        event.motivational_quote ||
+        "Learning never exhausts the mind; it empowers the future.",
+    };
+  };
+
+  const openHistoryEventDetails = (event) => {
+    setEditingEvent(event);
+    const tp = extractTechPres(event);
+    setEventForm({
+      title: event.title || "",
+      eventtype: event.eventtype || "Meeting",
+      subtype: event.subtype || "",
+      mode: event.mode || "",
+      startTime: event.startTime || "",
+      endTime: event.endTime || "",
+      date: event.date || "",
+      endDate: event.endDate || event.date || "",
+      agenda: event.agenda || "",
+      link: event.link || "",
+      day: event.day || "workingday",
+      employees: event.employees || [],
+      audience: event.audience || "",
+      priority: event.priority || "",
+      eventStatus: event.eventStatus || "In Progress",
+      remarks: event.remarks || "",
+      formType: event.formType || "day",
+      employeeID: event.employeeID || event.employee_id || "",
+      actual_start_time: event.actual_start_time || null,
+      actual_end_time: event.actual_end_time || null,
+      actual_duration: event.actual_duration || null,
+      presenter1Name: tp.presenter1Name,
+      presenter1Topic: tp.presenter1Topic,
+      presenter2Name: tp.presenter2Name,
+      presenter2Topic: tp.presenter2Topic,
+      motivationalQuote: tp.motivationalQuote,
+    });
+    setShowEventModal(true);
+  };
+
+  // Get event status based on date, time, start status and eventStatus field
   const getEventStatusColor = (event) => {
     const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
-    todayStart.setHours(0, 0, 0, 0);
-
-    const eventDate = new Date(event.date);
-    eventDate.setHours(0, 0, 0, 0);
-
     const status = event.eventStatus || event.event_status || event.eventstatus;
+    const actualStart = event.actual_start_time || event.actualStartTime;
+    const actualEnd = event.actual_end_time || event.actualEndTime;
 
-    // Completed status - Green
-    if (status === "Completed") {
+    // 1. Completed status - Green
+    if (status === "Completed" || actualEnd) {
       return {
         status: "Completed",
         borderColor: "border-[#22c55e]",
@@ -99,23 +315,52 @@ const Calendar = () => {
       };
     }
 
-    // Missed status (past date and not completed) - Red
-    if (eventDate < todayStart && status !== "Completed") {
+    // 2. In Progress / Host Started Meeting - Mild Blue
+    if (actualStart && !actualEnd) {
+      return {
+        status: "In Progress",
+        borderColor: "border-[#3b82f6]",
+        bgColor: "bg-[#dbeafe]",
+        hoverBg: "hover:bg-[#bfdbfe]",
+        ringColor: "ring-[#3b82f6]",
+      };
+    }
+
+    // 3. Not started, but scheduled time is done/past - Red
+    const isTimeDone = (() => {
+      if (!event.date) return false;
+      try {
+        const dateStr = event.date;
+        const timeStr = event.startTime || event.start_time || "23:59";
+        const eventDateTime = new Date(`${dateStr}T${timeStr}`);
+        if (!isNaN(eventDateTime.getTime())) {
+          return eventDateTime < now;
+        }
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const eventDate = new Date(dateStr);
+        eventDate.setHours(0, 0, 0, 0);
+        return eventDate < todayStart;
+      } catch (e) {
+        return false;
+      }
+    })();
+
+    if (isTimeDone) {
       return {
         status: "Missed",
         borderColor: "border-[#FF4D4F]",
-        bgColor: "bg-[#FFB3B3]",
-        hoverBg: "hover:bg-[#ffa3a3]",
+        bgColor: "bg-[#FFECEC]",
+        hoverBg: "hover:bg-[#FFD6D6]",
         ringColor: "ring-[#FF4D4F]",
       };
     }
 
-    // Pending/In Progress (current or future date, not completed) - Blue
+    // 4. Pending / Upcoming - Soft Blue
     return {
       status: "Pending",
       borderColor: "border-[#00B4D8]",
-      bgColor: "bg-[#90E0EF]",
-      hoverBg: "hover:bg-[#6DD3E8]",
+      bgColor: "bg-[#e0f2fe]",
+      hoverBg: "hover:bg-[#bae6fd]",
       ringColor: "ring-[#00B4D8]",
     };
   };
@@ -185,6 +430,7 @@ const Calendar = () => {
       ...extractedData,
     });
 
+    const tp = extractTechPres(event);
     // Populate the event form with all event details
     setEventForm({
       title: event.title || "",
@@ -205,6 +451,11 @@ const Calendar = () => {
       eventStatus: extractedData.eventStatus,
       remarks: event.remarks || "",
       employeeID: extractedData.employeeID || currentEmployeeId,
+      presenter1Name: tp.presenter1Name,
+      presenter1Topic: tp.presenter1Topic,
+      presenter2Name: tp.presenter2Name,
+      presenter2Topic: tp.presenter2Topic,
+      motivationalQuote: tp.motivationalQuote,
     });
 
     // Reset remarks input state
@@ -284,6 +535,11 @@ const Calendar = () => {
     eventStatus: "",
     remarks: "",
     employeeID: "",
+    presenter1Name: "",
+    presenter1Topic: "",
+    presenter2Name: "",
+    presenter2Topic: "",
+    motivationalQuote: "Learning never exhausts the mind; it empowers the future.",
   });
 
   const [showRemarksInput, setShowRemarksInput] = useState(false);
@@ -787,30 +1043,60 @@ const Calendar = () => {
     setSelectedEmployee("");
   };
 
-  const getEmployeeName = (employeeId) => {
-    if (!employeeId) return "";
-    if (!Array.isArray(employees) || employees.length === 0) return employeeId;
+  const getEmployeeName = (empInput) => {
+    if (!empInput) return "";
+    if (typeof empInput === "object") {
+      if (empInput.employee_name || empInput.employeeName || empInput.name) {
+        return empInput.employee_name || empInput.employeeName || empInput.name;
+      }
+      empInput =
+        empInput.employee_id ||
+        empInput.intern_id ||
+        empInput.employeeID ||
+        empInput.internId ||
+        empInput._id ||
+        empInput.id ||
+        "";
+    }
 
-    const employee = employees.find((emp) => {
-      const empId =
-        emp._id ||
-        emp.id ||
-        emp.employee_id ||
-        emp.employeeId ||
-        emp.email_official;
-      return empId === employeeId;
-    });
+    const searchId = String(empInput).trim();
+    if (!searchId) return "";
 
-    if (!employee) return employeeId;
+    if (Array.isArray(employees) && employees.length > 0) {
+      const found = employees.find((emp) => {
+        const empId = String(
+          emp.employee_id ||
+            emp.employeeID ||
+            emp._id ||
+            emp.id ||
+            ""
+        ).trim();
+        const intId = String(emp.intern_id || emp.internId || "").trim();
+        const email = String(emp.email_official || "").trim();
 
-    return (
-      employee.employeeName ||
-      employee.employee_name ||
-      employee.email_official ||
-      employee.userName ||
-      employee.user_name ||
-      employeeId
-    );
+        return (
+          empId === searchId ||
+          (intId && intId === searchId) ||
+          (email && email === searchId) ||
+          empId.toLowerCase() === searchId.toLowerCase() ||
+          (intId && intId.toLowerCase() === searchId.toLowerCase())
+        );
+      });
+
+      if (found) {
+        return (
+          found.employee_name ||
+          found.employeeName ||
+          found.name ||
+          found.email_official ||
+          found.userName ||
+          found.user_name ||
+          searchId
+        );
+      }
+    }
+
+    return searchId;
   };
 
   const handleCancel = () => {
@@ -870,6 +1156,7 @@ const Calendar = () => {
         employeeID: event.employeeID || event.employeeid || event.employee_id,
       });
 
+      const tp = extractTechPres(event);
       const formData = {
         title: event.title,
         eventtype: event.eventtype,
@@ -893,6 +1180,14 @@ const Calendar = () => {
           event.employeeid ||
           event.employee_id ||
           currentEmployeeId,
+        actual_start_time: event.actual_start_time || event.actualStartTime || null,
+        actual_end_time: event.actual_end_time || event.actualEndTime || null,
+        actual_duration: event.actual_duration || event.actualDuration || null,
+        presenter1Name: tp.presenter1Name,
+        presenter1Topic: tp.presenter1Topic,
+        presenter2Name: tp.presenter2Name,
+        presenter2Topic: tp.presenter2Topic,
+        motivationalQuote: tp.motivationalQuote,
       };
 
       setEventForm(formData);
@@ -914,10 +1209,26 @@ const Calendar = () => {
   };
 
   const formatDate = (d) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    if (!d) return "";
+    if (typeof d === "string") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+      const parsed = new Date(d);
+      if (!isNaN(parsed.getTime())) {
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, "0");
+        const day = String(parsed.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+      return d;
+    }
+    try {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    } catch (e) {
+      return String(d || "");
+    }
   };
 
   const formatTime = (hour) => {
@@ -1135,24 +1446,19 @@ const Calendar = () => {
 
   const getHeaderEventsForDate = (date) => {
     const dateStr = formatDate(date);
+    if (!dateStr) return [];
 
     return events.filter((event) => {
-      const hasEmptyTime = event.startTime === "" && event.endTime === "";
-      const isSingleDay = event.date === (event.endDate || event.date);
+      const startStr = formatDate(event.date);
+      const endStr = formatDate(event.endDate || event.date);
+      const hasEmptyTime = !event.startTime && !event.endTime;
+      const isSingleDay = startStr === endStr;
 
-      if (event.date === dateStr && isSingleDay && hasEmptyTime) {
+      if (startStr === dateStr && isSingleDay && hasEmptyTime) {
         return true;
       }
       if (!isSingleDay) {
-        const eventStart = new Date(event.date);
-        const eventEnd = new Date(event.endDate);
-        const checkDate = new Date(dateStr);
-
-        eventStart.setHours(0, 0, 0, 0);
-        eventEnd.setHours(0, 0, 0, 0);
-        checkDate.setHours(0, 0, 0, 0);
-
-        return checkDate >= eventStart && checkDate <= eventEnd;
+        return dateStr >= startStr && dateStr <= endStr;
       }
 
       return false;
@@ -1357,10 +1663,21 @@ const Calendar = () => {
           userData.user_name ||
           null;
 
+        const possibleRole =
+          userData.role ||
+          userData.userRole ||
+          userData.user_role ||
+          userData.designation ||
+          userData.job_title ||
+          userData.jobTitle ||
+          userData.userType ||
+          userData.user_type ||
+          userData.type ||
+          userData.department ||
+          null;
+
         setCurrentEmployeeId(possibleId);
-        setCurrentUserRole(
-          userData.role || userData.userRole || userData.user_role || null
-        );
+        setCurrentUserRole(possibleRole);
       } catch (error) {
         console.error("Error parsing user data:", error);
       }
@@ -1440,6 +1757,9 @@ const Calendar = () => {
       audience: ev.audience || null,
       eventStatus: ev.eventStatus || ev.event_status || null,
       remarks: ev.remarks || "",
+      actual_start_time: ev.actual_start_time || ev.actualStartTime || null,
+      actual_end_time: ev.actual_end_time || ev.actualEndTime || null,
+      actual_duration: ev.actual_duration || ev.actualDuration || null,
     };
   };
 
@@ -1478,6 +1798,10 @@ const Calendar = () => {
       .toLowerCase();
     const meetingLike = [
       "meeting",
+      "team meeting",
+      "project meeting",
+      "monthly staff meeting",
+      "client meeting",
       "quotation",
       "invoice",
       "payment following",
@@ -1489,8 +1813,12 @@ const Calendar = () => {
       "projectdiscuss",
       "project_discuss",
       "personal",
+      "technical presentation",
+      "technicalpresentation",
+      "technical_presentation",
+      "others",
     ];
-    return meetingLike.includes(v);
+    return meetingLike.includes(v) || (v !== "special day" && v !== "announcement" && v !== "");
   };
 
   useEffect(() => {
@@ -1616,30 +1944,31 @@ const Calendar = () => {
     const fetchEmployees = async () => {
       try {
         setLoadingEmployees(true);
-        const employeesData = await calendarService.getAllEmployees();
-        // fetch designations as well for Meeting category
-        let designationsData = [];
+        const response = await calendarService.getAllEmployees();
+        const employeesList = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.data)
+          ? response.data
+          : Array.isArray(response?.employees)
+          ? response.employees
+          : [];
+
+        setEmployees(employeesList);
+
+        let desigResponse = [];
         try {
-          designationsData = await calendarService.getDesignations();
-        } catch (e) {
-          console.info("Failed to fetch designations:", e);
-        }
+          desigResponse = await calendarService.getDesignations();
+        } catch (e) {}
 
-        if (Array.isArray(employeesData)) {
-          setEmployees(employeesData);
-        } else {
-          console.info(
-            "Employee service returned no employees or unexpected shape",
-            employeesData
-          );
-          setEmployees([]);
-        }
+        const designationsList = Array.isArray(desigResponse)
+          ? desigResponse
+          : Array.isArray(desigResponse?.data)
+          ? desigResponse.data
+          : Array.isArray(desigResponse?.designations)
+          ? desigResponse.designations
+          : [];
 
-        if (Array.isArray(designationsData)) {
-          setDesignations(designationsData);
-        } else {
-          setDesignations([]);
-        }
+        setDesignations(designationsList);
       } catch (error) {
         console.info("Failed to fetch employees:", error);
         setEmployees([]);
@@ -1744,22 +2073,127 @@ const Calendar = () => {
     return true;
   };
 
+  const isEventHoster = (event) => {
+    if (!event || !currentEmployeeId) return false;
+    if (currentUserRole === "Super Admin") return true;
+
+    const hostId =
+      event.employeeID ||
+      event.employeeid ||
+      event.employee_id ||
+      event.employeeId;
+    return String(hostId) === String(currentEmployeeId);
+  };
+
+  const isManagementRole = () => {
+    let roleStr = "";
+    if (currentUserRole) {
+      roleStr = String(currentUserRole).toLowerCase().trim();
+    }
+
+    if (!roleStr) {
+      try {
+        const storedUser =
+          localStorage.getItem("user") || sessionStorage.getItem("user");
+        if (storedUser) {
+          const u = JSON.parse(storedUser);
+          roleStr = String(
+            u.role ||
+              u.userRole ||
+              u.user_role ||
+              u.designation ||
+              u.job_title ||
+              u.jobTitle ||
+              u.userType ||
+              u.user_type ||
+              u.type ||
+              u.department ||
+              ""
+          )
+            .toLowerCase()
+            .trim();
+        }
+      } catch (e) {}
+    }
+
+    // Default to true if role is undetermined so options are not hidden unexpectedly
+    if (!roleStr) return true;
+
+    return (
+      roleStr.includes("admin") ||
+      roleStr.includes("sbu") ||
+      roleStr.includes("hr") ||
+      roleStr.includes("manager") ||
+      roleStr.includes("head") ||
+      roleStr.includes("director") ||
+      roleStr.includes("lead")
+    );
+  };
+
+  const isEmployeeActive = (emp) => {
+    if (!emp) return false;
+    if (emp.is_relieved || emp.isRelieved || emp.relieved) return false;
+    const status = (
+      emp.working_status ||
+      emp.workingStatus ||
+      emp.status ||
+      emp.working_state ||
+      "Active"
+    )
+      .toString()
+      .trim()
+      .toLowerCase();
+
+    return (
+      status !== "relieved" &&
+      status !== "resigned" &&
+      status !== "terminated" &&
+      status !== "inactive" &&
+      status !== "left"
+    );
+  };
+
+  const getAvailableEventTypes = () => {
+    if (isManagementRole()) {
+      return [
+        "Meeting",
+        "Team Meeting",
+        "Project Meeting",
+        "Monthly Staff meeting",
+        "Client Meeting",
+        "Technical Presentation",
+        "Personal",
+        "Quotation",
+        "Invoice",
+        "Payment Following",
+        "Client Following",
+        "Others",
+      ];
+    }
+    return [
+      "Meeting",
+      "Team Meeting",
+      "Project Meeting",
+      "Monthly Staff meeting",
+      "Client Meeting",
+      "Technical Presentation",
+      "Personal",
+      "Others",
+    ];
+  };
+
   const canCreateEvent = () => {
     return true;
   };
 
   const getEventsForDate = (date) => {
     const dateStr = formatDate(date);
+    if (!dateStr) return [];
     return events.filter((event) => {
-      const eventStart = new Date(event.date);
-      const eventEnd = new Date(event.endDate || event.date);
-      const checkDate = new Date(dateStr);
-
-      eventStart.setHours(0, 0, 0, 0);
-      eventEnd.setHours(0, 0, 0, 0);
-      checkDate.setHours(0, 0, 0, 0);
-
-      return checkDate >= eventStart && checkDate <= eventEnd;
+      const startStr = formatDate(event.date);
+      const endStr = formatDate(event.endDate || event.date);
+      if (!startStr) return false;
+      return dateStr >= startStr && dateStr <= endStr;
     });
   };
 
@@ -1811,26 +2245,13 @@ const Calendar = () => {
 
   const getEventCountForDate = (date) => {
     const dateStr = formatDate(date);
-
-    const timeSlotEvents = events.filter((event) => {
-      if (event.date === dateStr) return true;
-
-      if (event.endDate && event.endDate !== event.date) {
-        const eventStart = new Date(event.date);
-        const eventEnd = new Date(event.endDate);
-        const checkDate = new Date(dateStr);
-
-        eventStart.setHours(0, 0, 0, 0);
-        eventEnd.setHours(0, 0, 0, 0);
-        checkDate.setHours(0, 0, 0, 0);
-
-        return checkDate >= eventStart && checkDate <= eventEnd;
-      }
-
-      return false;
-    });
-
-    return timeSlotEvents.length;
+    if (!dateStr) return 0;
+    return events.filter((event) => {
+      const startStr = formatDate(event.date);
+      const endStr = formatDate(event.endDate || event.date);
+      if (!startStr) return false;
+      return dateStr >= startStr && dateStr <= endStr;
+    }).length;
   };
 
   const saveEvent = async () => {
@@ -1856,12 +2277,24 @@ const Calendar = () => {
     }
 
     if (!eventForm.priority) {
-    notify({
-      title: "Warning",
-      message: "Please select a priority level before saving the event",
-    });
-    return;
-  }
+      notify({
+        title: "Warning",
+        message: "Please select a priority level before saving the event",
+      });
+      return;
+    }
+
+    if (
+      eventForm.startTime &&
+      eventForm.endTime &&
+      eventForm.endTime < eventForm.startTime
+    ) {
+      notify({
+        title: "Warning",
+        message: "End time cannot be earlier than start time",
+      });
+      return;
+    }
 
     // Permission check for editing existing events
     if (editingEvent) {
@@ -1886,6 +2319,48 @@ const Calendar = () => {
       }
     }
 
+    if (eventForm.eventtype === "Meeting") {
+      if (
+        !Array.isArray(eventForm.employees) ||
+        eventForm.employees.length === 0
+      ) {
+        notify({
+          title: "Warning",
+          message: "At least one Attendee is required for Meeting events",
+        });
+        return;
+      }
+    }
+
+    if (eventForm.eventtype === "Technical Presentation") {
+      if (!eventForm.presenter1Name || !eventForm.presenter1Name.trim()) {
+        notify({
+          title: "Warning",
+          message: "Presenter Name 1 is required",
+        });
+        return;
+      }
+      if (!eventForm.motivationalQuote || !eventForm.motivationalQuote.trim()) {
+        notify({
+          title: "Warning",
+          message: "Motivational Quote is required",
+        });
+        return;
+      }
+    }
+
+    let finalEventType = eventForm.eventtype;
+    if (eventForm.eventtype === "Others") {
+      if (!eventForm.customEventType || !eventForm.customEventType.trim()) {
+        notify({
+          title: "Warning",
+          message: "Please enter custom event type",
+        });
+        return;
+      }
+      finalEventType = eventForm.customEventType.trim();
+    }
+
     console.log("Permission check passed, proceeding with save...");
 
     // ✅ START LOADING
@@ -1894,7 +2369,7 @@ const Calendar = () => {
     try {
       const eventData = {
         title: eventForm.title,
-        eventtype: eventForm.eventtype,
+        eventtype: finalEventType,
         date: eventForm.date,
         endDate: eventForm.endDate || eventForm.date,
         agenda: eventForm.agenda,
@@ -1902,6 +2377,44 @@ const Calendar = () => {
         formType: eventForm.formType || view,
         employeeID: editingEvent ? editingEvent.employeeID : currentEmployeeId,
       };
+
+      if (eventForm.eventtype === "Technical Presentation") {
+        const allEmpIds = Array.isArray(employees)
+          ? employees
+              .map(
+                (emp) =>
+                  emp._id ||
+                  emp.id ||
+                  emp.employee_id ||
+                  emp.employeeId ||
+                  emp.email_official
+              )
+              .filter(Boolean)
+          : [];
+
+        const techPres = {
+          meetingType: "Technical Presentation",
+          presenter1: {
+            name: eventForm.presenter1Name ? eventForm.presenter1Name.trim() : "",
+            topic: eventForm.presenter1Topic ? eventForm.presenter1Topic.trim() : "",
+          },
+          presenter2: {
+            name: eventForm.presenter2Name ? eventForm.presenter2Name.trim() : "",
+            topic: eventForm.presenter2Topic ? eventForm.presenter2Topic.trim() : "",
+          },
+          motivationalQuote: eventForm.motivationalQuote
+            ? eventForm.motivationalQuote.trim()
+            : "Learning never exhausts the mind; it empowers the future.",
+        };
+        eventData.technical_presentation = techPres;
+        eventData.technicalPresentation = techPres;
+        eventData.meetingType = "Technical Presentation";
+        eventData.presenter1 = techPres.presenter1;
+        eventData.presenter2 = techPres.presenter2;
+        eventData.motivationalQuote = techPres.motivationalQuote;
+        eventData.attendees = allEmpIds;
+        eventData.subtype = null;
+      }
 
       // Include start/end times and attendees for meeting-like types
       if (isMeetingLike({ eventtype: eventForm.eventtype })) {
@@ -1918,14 +2431,48 @@ const Calendar = () => {
         eventData.day = eventForm.day;
       }
 
-      // If marking as completed with remarks
-      if (
-        showRemarksInput &&
-        eventForm.remarks &&
-        eventForm.remarks.trim() !== ""
-      ) {
+      // If marking as completed with remarks or status is Completed
+      const isMarkingCompleted =
+        (showRemarksInput && (eventForm.eventStatus === "Mark as Completed" || eventForm.eventStatus === "Completed")) ||
+        eventForm.eventStatus === "Completed" ||
+        eventForm.eventStatus === "Mark as Completed";
+
+      if (isMarkingCompleted) {
         eventData.eventStatus = "Completed";
-        eventData.remarks = eventForm.remarks;
+        if (eventForm.remarks) eventData.remarks = eventForm.remarks;
+
+        const existingActStart =
+          eventForm.actual_start_time ||
+          editingEvent?.actual_start_time ||
+          editingEvent?.actualStartTime;
+        const existingActEnd =
+          eventForm.actual_end_time ||
+          editingEvent?.actual_end_time ||
+          editingEvent?.actualEndTime;
+
+        const actStartISO =
+          existingActStart ||
+          buildDateTimeISO(
+            eventForm.date || editingEvent?.date,
+            eventForm.startTime || editingEvent?.startTime || editingEvent?.start_time
+          );
+        const actEndISO =
+          existingActEnd ||
+          buildDateTimeISO(
+            eventForm.endDate || eventForm.date || editingEvent?.endDate || editingEvent?.date,
+            eventForm.endTime || editingEvent?.endTime || editingEvent?.end_time
+          );
+        const actDur =
+          eventForm.actual_duration ||
+          editingEvent?.actual_duration ||
+          calculateDurationString(actStartISO, actEndISO);
+
+        eventData.actual_start_time = actStartISO;
+        eventData.actual_end_time = actEndISO;
+        eventData.actual_duration = actDur;
+        eventData.actualStartTime = actStartISO;
+        eventData.actualEndTime = actEndISO;
+        eventData.actualDuration = actDur;
       } else {
         // Include existing status/remarks if present
         if (eventForm.eventStatus)
@@ -1972,10 +2519,10 @@ const Calendar = () => {
   const deleteEvent = async () => {
     if (!editingEvent) return;
 
-    if (!canEditEvent(editingEvent)) {
+    if (!isEventHoster(editingEvent)) {
       notify({
         title: "Warning",
-        message: `You don't have permission to delete this event`,
+        message: `Only the meeting host can delete this event`,
       });
       return;
     }
@@ -2002,6 +2549,114 @@ const Calendar = () => {
           message: `Failed to delete event: ${error} `,
         });
       }
+    }
+  };
+
+  const handleDeleteHistoryEvent = async (ev, e) => {
+    if (e) e.stopPropagation();
+    const eventId = ev._id || ev.id;
+    if (!eventId) return;
+
+    if (!isEventHoster(ev)) {
+      notify({
+        title: "Warning",
+        message: `Only the meeting host can delete this event`,
+      });
+      return;
+    }
+
+    const ok = await confirm({
+      type: "error",
+      title: `Are you sure you want to delete "${ev.title || "this meeting"}"?`,
+      message: "This action cannot be undone.\nAre you sure?",
+      confirmText: "Yes, Delete",
+      cancelText: "Cancel",
+    });
+
+    if (ok) {
+      try {
+        await calendarService.deleteEvent(eventId, currentEmployeeId);
+        setEvents((prev) => prev.filter((item) => (item._id || item.id) !== eventId));
+        setAllEvents((prev) => prev.filter((item) => (item._id || item.id) !== eventId));
+        if (editingEvent && (editingEvent._id || editingEvent.id) === eventId) {
+          setShowEventModal(false);
+          setEditingEvent(null);
+          clearModalData();
+        }
+        notify({
+          title: "Success",
+          message: "Meeting deleted successfully",
+        });
+      } catch (error) {
+        console.error("Failed to delete event:", error);
+        notify({
+          title: "Error",
+          message: `Failed to delete meeting: ${error}`,
+        });
+      }
+    }
+  };
+
+  const formatIstTime = (dateStr) => {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return (
+        d.toLocaleTimeString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        }) + " IST"
+      );
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const handleMeetingStatusAction = async (action) => {
+    if (!editingEvent) return;
+    const eventId = editingEvent._id || editingEvent.id;
+    try {
+      setIsSaving(true);
+      const res = await axios.patch(
+        `${import.meta.env.VITE_API_BASE_URL1}/api/calendar/${eventId}/meeting-status`,
+        { action, employeeID: currentEmployeeId }
+      );
+      if (res.data && res.data.status) {
+        const updated = res.data.data;
+        const normalized = normalizeEvent(updated);
+        setEditingEvent(normalized);
+        setEventForm((prev) => ({
+          ...prev,
+          actual_start_time: normalized.actual_start_time,
+          actual_end_time: normalized.actual_end_time,
+          actual_duration: normalized.actual_duration,
+          eventStatus: normalized.eventStatus,
+        }));
+        setEvents((prev) =>
+          prev.map((ev) => (ev._id === normalized._id ? normalized : ev))
+        );
+        setAllEvents((prev) =>
+          prev.map((ev) => (ev._id === normalized._id ? normalized : ev))
+        );
+        notify({
+          title: "Success",
+          message:
+            action === "start"
+              ? "Meeting started successfully!"
+              : `Meeting ended! Actual Duration: ${normalized.actual_duration || ""}`,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to update meeting status:", err);
+      notify({
+        title: "Error",
+        message: "Failed to update meeting status",
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -2493,19 +3148,15 @@ const Calendar = () => {
                   );
                   const statusColors = getEventStatusColor(event);
 
-                  const sessionUser = (() => {
-                    try {
-                      const u =
-                        localStorage.getItem("user") ||
-                        sessionStorage.getItem("user");
-                      return u ? JSON.parse(u) : null;
-                    } catch (e) {
-                      return null;
-                    }
-                  })();
-                  const creator = sessionUser
-                    ? [sessionUser]
-                    : employees.filter((emp) => emp._id === event.employeeID);
+                  const creatorName = getEmployeeName(
+                    event.employeeID || event.employee_id || event.employeeid
+                  );
+                  const attendeeList =
+                    Array.isArray(event.employees) && event.employees.length > 0
+                      ? event.employees
+                      : Array.isArray(event.attendees) && event.attendees.length > 0
+                      ? event.attendees
+                      : [];
 
                   const ringClass = isFront
                     ? `ring-2 shadow-lg ${statusColors.ringColor}`
@@ -2529,12 +3180,15 @@ const Calendar = () => {
                       title={`${statusColors.status} - ${
                         event.priority || ""
                       } - Agenda - ${event.agenda}${
-                        isMeetingLike(event) && event.employees.length > 0
-                          ? `\nAttendees- ${event.employees
+                        isMeetingLike(event) &&
+                        !isEventType(event, "Technical Presentation") &&
+                        attendeeList.length > 0
+                          ? `\nAttendees - ${attendeeList
                               .map((empId) => getEmployeeName(empId))
+                              .filter(Boolean)
                               .join(", ")}`
                           : ""
-                      }`}
+                      }${creatorName ? `\nCreator - ${creatorName}` : ""}`}
                     >
                       <div
                         className="absolute right-0 top-0 bottom-0 w-[2vw] cursor-pointer flex justify-center items-center"
@@ -2544,10 +3198,8 @@ const Calendar = () => {
                         }}
                       >
                         -
-                      </div>
-
-                      <div>
-                        <div className="flex gap-[1vw]">
+                      </div>                      <div className="flex-1 min-w-0 pr-[16vw] flex flex-col justify-center gap-[0.2vw]">
+                        <div className="flex flex-wrap items-center gap-x-[1vw] gap-y-[0.2vw]">
                           <div className="flex items-center gap-[0.3vw]">
                             {/* Priority Badge BEFORE Title */}
                             {event.priority && (
@@ -2567,7 +3219,7 @@ const Calendar = () => {
                             )}
 
                             <div
-                              className={`font-normal ${
+                              className={`font-semibold ${
                                 duration <= 45
                                   ? duration >= 30
                                     ? "text-[1.6vh]"
@@ -2578,13 +3230,13 @@ const Calendar = () => {
                               Title -{" "}
                             </div>
                             <div
-                              className={`truncate max-w-[10vw] ${
+                              className={`truncate max-w-[10vw] font-bold ${
                                 duration <= 45
                                   ? duration >= 30
                                     ? "text-[1.6vh]"
                                     : "text-[1.2vh]"
                                   : "text-[2vh]"
-                              } ml-[0.3vw]`}
+                              } ml-[0.2vw]`}
                               title={event.title}
                             >
                               {event.title}
@@ -2594,7 +3246,7 @@ const Calendar = () => {
                               <div className="text-[0.65vw] text-gray-500 ml-[0.3vw] truncate">
                                 {event.eventtype || event.eventType}
                               </div>
-                              {event.subtype && (
+                              {event.subtype && !isEventType(event, "Technical Presentation") && (
                                 <div className="text-[0.6vw] text-gray-600 bg-gray-100 px-[0.25vw] py-[0.03vw] rounded ml-[0.2vw]">
                                   {event.subtype}
                                 </div>
@@ -2615,7 +3267,7 @@ const Calendar = () => {
                             </div>
                           </div>
 
-                          <div className="flex items-center">
+                          <div className="flex items-center text-gray-700">
                             <div
                               className={`${
                                 duration <= 45
@@ -2645,76 +3297,90 @@ const Calendar = () => {
                           </div>
                         </div>
 
-                        {duration > 59 && (
-                          <div className="text-[0.8vw] max-w-[30vw] truncate">
+                        {duration > 59 && event.agenda && (
+                          <div className="text-[0.78vw] max-w-[30vw] truncate text-gray-700">
                             Agenda - {event.agenda}
+                          </div>
+                        )}
+
+                        {isEventType(event, "Meeting") &&
+                          !isEventType(event, "Technical Presentation") &&
+                          Array.isArray(event.employees) &&
+                          event.employees.length > 0 && (
+                            <div className="flex items-center gap-[0.3vw] max-w-full truncate text-[0.78vw]">
+                              <span className="font-medium text-gray-800 flex-shrink-0">
+                                Persons -
+                              </span>
+                              <span className="truncate text-gray-700 font-normal">
+                                {event.employees
+                                  .slice(0, 3)
+                                  .map((empId) => getEmployeeName(empId))
+                                  .join(", ")}
+                              </span>
+                              {event.employees.length > 3 && (
+                                <span className="text-gray-600 font-semibold flex-shrink-0 ml-[0.2vw]">
+                                  +{event.employees.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                        {event.link && event.link.length > 0 && (
+                          <div className="truncate text-[0.75vw]">
+                            <label className="text-gray-800 font-medium">
+                              Link:{" "}
+                              <a
+                                href={event.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 underline hover:text-blue-800"
+                              >
+                                {event.link}
+                              </a>
+                            </label>
                           </div>
                         )}
                       </div>
 
                       <div
-                        className={`absolute right-[3%] ${
-                          duration >= 45 ? "top-[5%]" : ""
-                        } cursor-pointer flex gap-[0.4vw] items-center`}
+                        className={`absolute right-[1.5vw] ${
+                          duration >= 45 ? "top-[50%] -translate-y-1/2" : "top-[0.2vw]"
+                        } cursor-pointer flex items-center gap-[0.4vw] bg-white/85 backdrop-blur-xs px-[0.4vw] py-[0.2vw] rounded-lg shadow-2xs z-20 max-w-[14vw] overflow-hidden border border-gray-200/60`}
                       >
-                        {creator && creator.length >= 0 && duration >= 45 && (
+                        {creatorName && duration >= 45 && (
                           <div
-                            className="relative w-[1.8vw] h-[1.8vw]"
-                            title={creator[0]?.employeeName || ""}
+                            className="relative w-[1.8vw] h-[1.8vw] flex-shrink-0"
+                            title={creatorName}
                           >
-                            {creator[0]?.profile ? (
-                              <>
-                                <img
-                                  src={
-                                    creator[0]?.profile
-                                      ? import.meta.env.VITE_API_BASE_URL1 +
-                                        creator[0]?.profile
-                                      : ""
-                                  }
-                                  alt={creator[0]?.employeeName || ""}
-                                  className="w-full h-full rounded-full object-cover shadow-sm"
-                                  onError={(e) => {
-                                    e.target.style.display = "none";
-                                    e.target.nextSibling.style.display = "flex";
-                                  }}
-                                />
-                                <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium text-[0.9vw]">
-                                  {creator[0]?.employeeName?.[0]?.toUpperCase() ||
-                                    "?"}
-                                </div>
-                              </>
-                            ) : (
-                              <div className="h-full w-full bg-blue-500 text-white rounded-full flex items-center justify-center font-medium text-[0.9vw]">
-                                {creator[0]?.employeeName?.[0]?.toUpperCase() ||
-                                  "?"}
-                              </div>
-                            )}
+                            <div className="h-full w-full bg-blue-500 text-white rounded-full flex items-center justify-center font-medium text-[0.9vw]">
+                              {creatorName[0]?.toUpperCase() || "?"}
+                            </div>
                           </div>
                         )}
 
                         <div
-                          className={`${
-                            duration < 45 ? "flex items-center gap-[0.5vw]" : ""
+                          className={`flex flex-col min-w-0 ${
+                            duration < 45 ? "flex-row items-center gap-[0.5vw]" : ""
                           }`}
                         >
                           <div
-                            className={`${
+                            className={`font-semibold text-gray-900 truncate ${
                               duration < 45
                                 ? duration >= 30
                                   ? "text-[1.4vh]"
                                   : "text-[1.2vh]"
-                                : "text-[0.8vw]"
+                                : "text-[0.78vw]"
                             }`}
                           >
-                            {creator[0]?.employeeName}
+                            {creatorName || "N/A"}
                           </div>
                           <div
-                            className={`opacity-90 ${
+                            className={`opacity-80 text-gray-600 truncate ${
                               duration <= 45
                                 ? duration >= 30
-                                  ? "text-[1.4vh] mt-[-0.1vw]"
+                                  ? "text-[1.4vh]"
                                   : "text-[1.2vh]"
-                                : "text-[0.7vw] mt-[-0.1vw]"
+                                : "text-[0.68vw]"
                             }`}
                           >
                             {new Date(event.createdAt).toLocaleString("en-GB", {
@@ -2728,66 +3394,6 @@ const Calendar = () => {
                           </div>
                         </div>
                       </div>
-
-                      {isEventType(event, "Meeting") &&
-                        Array.isArray(event.employees) &&
-                        event.employees.length > 0 && (
-                          <div className="flex flex-col">
-                            <div className="flex items-center">
-                              <div
-                                className={`opacity-110 ${
-                                  duration <= 45
-                                    ? duration >= 30
-                                      ? "text-[1.4vh]"
-                                      : "text-[1.2vh]"
-                                    : "text-[0.85vw]"
-                                }`}
-                              >
-                                Persons -{" "}
-                              </div>
-
-                              {event.employees.slice(0, 3).map((empId) => (
-                                <div
-                                  key={empId}
-                                  className={`opacity-90 ${
-                                    duration <= 45
-                                      ? duration >= 30
-                                        ? "text-[1.4vh]"
-                                        : "text-[1.2vh]"
-                                      : "text-[0.8vw]"
-                                  } ml-[0.3vw]`}
-                                >
-                                  {getEmployeeName(empId)}
-                                  {event.employees.indexOf(empId) !==
-                                    Math.min(2, event.employees.length - 1) &&
-                                    ","}
-                                </div>
-                              ))}
-
-                              {event.employees.length > 3 && (
-                                <div className="text-xs text-gray-700 ml-[0.2vw]">
-                                  +{event.employees.length - 3} more
-                                </div>
-                              )}
-                            </div>
-
-                            {event.link.length > 0 && (
-                              <div className="mt-[0.3vw]">
-                                <label className="text-gray-800 font-medium">
-                                  Link:{" "}
-                                  <a
-                                    href={event.link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 underline hover:text-blue-800"
-                                  >
-                                    {event.link}
-                                  </a>
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        )}
                     </div>
                   );
                 })}
@@ -2990,6 +3596,7 @@ const Calendar = () => {
                         event.priority || ""
                       } - Agenda - ${event.agenda}${
                         isEventType(event, "Meeting") &&
+                        !isEventType(event, "Technical Presentation") &&
                         event.employees.length > 0
                           ? `\nAttendees - ${event.employees
                               .map((empId) => getEmployeeName(empId))
@@ -3072,9 +3679,15 @@ const Calendar = () => {
                     <div className="space-y-[0.2vw]">
                       {filteredHeaderEvents.map((event, eventIndex) => {
                         const statusColors = getEventStatusColor(event);
-                        const creator = employees.filter(
-                          (emp) => emp._id === event.employeeID
+                        const creatorName = getEmployeeName(
+                          event.employeeID || event.employee_id || event.employeeid
                         );
+                        const attendeeList =
+                          Array.isArray(event.employees) && event.employees.length > 0
+                            ? event.employees
+                            : Array.isArray(event.attendees) && event.attendees.length > 0
+                            ? event.attendees
+                            : [];
 
                         return (
                           <div
@@ -3084,13 +3697,15 @@ const Calendar = () => {
                             title={`${statusColors.status} - ${
                               event.priority || ""
                             } - Agenda - ${event.agenda}${
-                              isEventType(event, "Meeting") &&
-                              event.employees.length > 0
-                                ? `\nAttendees - ${event.employees
+                              isMeetingLike(event) &&
+                              !isEventType(event, "Technical Presentation") &&
+                              attendeeList.length > 0
+                                ? `\nAttendees - ${attendeeList
                                     .map((empId) => getEmployeeName(empId))
+                                    .filter(Boolean)
                                     .join(", ")}`
                                 : ""
-                            }\nCreator - ${creator[0]?.employeeName}`}
+                            }${creatorName ? `\nCreator - ${creatorName}` : ""}`}
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-[0.3vw]">
@@ -3249,9 +3864,15 @@ const Calendar = () => {
                         );
 
                         const statusColors = getEventStatusColor(event);
-                        const creator = employees.filter(
-                          (emp) => emp._id === event.employeeID
+                        const creatorName = getEmployeeName(
+                          event.employeeID || event.employee_id || event.employeeid
                         );
+                        const attendeeList =
+                          Array.isArray(event.employees) && event.employees.length > 0
+                            ? event.employees
+                            : Array.isArray(event.attendees) && event.attendees.length > 0
+                            ? event.attendees
+                            : [];
 
                         const ringClass = isFront
                           ? `ring-2 shadow-lg ${statusColors.ringColor}`
@@ -3281,13 +3902,15 @@ const Calendar = () => {
                             title={`${statusColors.status} - ${
                               event.priority || ""
                             } - Agenda - ${event.agenda}${
-                              isEventType(event, "Meeting") &&
-                              event.employees.length > 0
-                                ? `\nAttendees - ${event.employees
+                              isMeetingLike(event) &&
+                              !isEventType(event, "Technical Presentation") &&
+                              attendeeList.length > 0
+                                ? `\nAttendees - ${attendeeList
                                     .map((empId) => getEmployeeName(empId))
+                                    .filter(Boolean)
                                     .join(", ")}`
                                 : ""
-                            }\nCreator - ${creator[0]?.employeeName}`}
+                            }${creatorName ? `\nCreator - ${creatorName}` : ""}`}
                           >
                             <div
                               className="absolute right-0 top-0 bottom-0 w-[2vw] cursor-pointer flex justify-center items-center"
@@ -3625,9 +4248,15 @@ const Calendar = () => {
                         >
                           {dayEvents.map((event) => {
                             const statusColors = getEventStatusColor(event);
-                            const creator = employees.filter(
-                              (emp) => emp._id === event.employeeID
+                            const creatorName = getEmployeeName(
+                              event.employeeID || event.employee_id || event.employeeid
                             );
+                            const attendeeList =
+                              Array.isArray(event.employees) && event.employees.length > 0
+                                ? event.employees
+                                : Array.isArray(event.attendees) && event.attendees.length > 0
+                                ? event.attendees
+                                : [];
 
                             return (
                               <div
@@ -3645,13 +4274,15 @@ const Calendar = () => {
                                 title={`${statusColors.status} - ${
                                   event.priority || ""
                                 } - Agenda - ${event.agenda}${
-                                  isEventType(event, "Meeting") &&
-                                  event.employees.length > 0
-                                    ? `\nAttendees - ${event.employees
+                                  isMeetingLike(event) &&
+                                  !isEventType(event, "Technical Presentation") &&
+                                  attendeeList.length > 0
+                                    ? `\nAttendees - ${attendeeList
                                         .map((empId) => getEmployeeName(empId))
+                                        .filter(Boolean)
                                         .join(", ")}`
                                     : ""
-                                }\nCreator - ${creator[0]?.employeeName}`}
+                                }${creatorName ? `\nCreator - ${creatorName}` : ""}`}
                               >
                                 {/* Priority Badge BEFORE Title */}
                                 {event.priority && (
@@ -3697,9 +4328,15 @@ const Calendar = () => {
                       const trackIndex = eventTracks.get(event._id) || 0;
                       const statusColors = getEventStatusColor(event);
 
-                      const creator = employees.filter(
-                        (emp) => emp._id === event.employeeID
+                      const creatorName = getEmployeeName(
+                        event.employeeID || event.employee_id || event.employeeid
                       );
+                      const attendeeList =
+                        Array.isArray(event.employees) && event.employees.length > 0
+                          ? event.employees
+                          : Array.isArray(event.attendees) && event.attendees.length > 0
+                          ? event.attendees
+                          : [];
 
                       return (
                         <div
@@ -3729,13 +4366,15 @@ const Calendar = () => {
                           title={`${statusColors.status} - ${
                             event.priority || ""
                           } - Agenda - ${event.agenda}${
-                            isEventType(event, "Meeting") &&
-                            event.employees.length > 0
-                              ? `\nAttendees - ${event.employees
+                            isMeetingLike(event) &&
+                            !isEventType(event, "Technical Presentation") &&
+                            attendeeList.length > 0
+                              ? `\nAttendees - ${attendeeList
                                   .map((empId) => getEmployeeName(empId))
+                                  .filter(Boolean)
                                   .join(", ")}`
                               : ""
-                          }\nCreator - ${creator[0]?.employeeName}`}
+                          }${creatorName ? `\nCreator - ${creatorName}` : ""}`}
                         >
                           {segment.showTitle && (
                             <div className="flex items-center gap-[0.3vw] flex-1 min-w-0">
@@ -3808,17 +4447,567 @@ const Calendar = () => {
         } ${weekEnd.getDate()}, ${weekStart.getFullYear()}`;
       case "month":
         return `${months[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+      case "history":
+        return "Meeting & Reminder History Log";
       default:
         return "";
     }
   };
 
+  const exportHistoryToCSV = (eventsToExport) => {
+    if (!eventsToExport || eventsToExport.length === 0) {
+      notify({ title: "Export Warning", message: "No history records to export." });
+      return;
+    }
+
+    const formatTime12hr = (timeStr) => {
+      if (!timeStr || timeStr === "N/A") return "N/A";
+      try {
+        const parts = timeStr.trim().split(":");
+        if (parts.length < 2) return timeStr;
+        let hh = parseInt(parts[0], 10);
+        const mm = parts[1].slice(0, 2).padStart(2, "0");
+        if (isNaN(hh)) return timeStr;
+        const ampm = hh >= 12 ? "PM" : "AM";
+        hh = hh % 12;
+        if (hh === 0) hh = 12;
+        return `${String(hh).padStart(2, "0")}:${mm} ${ampm}`;
+      } catch (e) {
+        return timeStr;
+      }
+    };
+
+    const resolveEmpName = (e) => {
+      if (!e) return "";
+      if (typeof e === "object") {
+        if (e.employee_name || e.employeeName || e.name) {
+          return e.employee_name || e.employeeName || e.name;
+        }
+        e = e.employee_id || e.employeeID || e._id || e.id || "";
+      }
+      const idStr = String(e).trim();
+      if (!idStr) return "";
+      const found = (employees || []).find(
+        (emp) =>
+          String(emp.employee_id || emp.employeeID || emp._id || emp.id).trim() === idStr
+      );
+      if (found) {
+        return found.employee_name || found.employeeName || found.name || idStr;
+      }
+      return idStr;
+    };
+
+    // Format 12-hour AM/PM Export Timestamp (No IST)
+    const nowFormatted = new Date()
+      .toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      })
+      .toUpperCase();
+
+    const metaRows = [
+      `"Report Title:","Dairy Remainder & Meeting History Report"`,
+      `"Export Date & Time:","${nowFormatted.replace(",", "")}"`,
+      `"Total Records:","${eventsToExport.length}"`,
+      `""`, // Empty row separator before table headers
+    ];
+
+    const headers = [
+      "Title",
+      "Event Type",
+      "Priority",
+      "Status",
+      "Date (DD/MM/YYYY)",
+      "Scheduled Start Time",
+      "Scheduled End Time",
+      "Scheduled Duration",
+      "Actual Start Time",
+      "Actual End Time",
+      "Actual Duration",
+      "Assigned Employees",
+      "Remarks",
+      "Agenda",
+    ];
+
+    const rows = eventsToExport.map((ev) => {
+      const scheduledStart = formatTime12hr(ev.startTime);
+      const scheduledEnd = formatTime12hr(ev.endTime);
+      const scheduledMins = getEventDuration(ev.startTime, ev.endTime);
+      const scheduledDurStr = formatDurationHuman(scheduledMins);
+
+      const rawActStart = ev.actual_start_time || ev.actualStartTime;
+      const rawActEnd = ev.actual_end_time || ev.actualEndTime;
+      const actualStart = formatTime12hr(formatIstTime(rawActStart));
+      const actualEnd = formatTime12hr(formatIstTime(rawActEnd));
+      const actualDurStr = ev.actual_duration || ev.actualDuration || "N/A";
+      const dateFormatted = formatDateDDMMYYYY(ev.date);
+
+      const empList =
+        Array.isArray(ev.employees) && ev.employees.length > 0
+          ? ev.employees
+          : Array.isArray(ev.attendees) && ev.attendees.length > 0
+          ? ev.attendees
+          : [];
+
+      const employeeNames = empList
+        .map((e) => resolveEmpName(e))
+        .filter(Boolean)
+        .join("; ");
+
+      return [
+        `"${(ev.title || "").replace(/"/g, '""')}"`,
+        `"${(ev.eventtype || "").replace(/"/g, '""')}"`,
+        `"${(ev.priority || "Normal").replace(/"/g, '""')}"`,
+        `"${(ev.eventStatus || "In Progress").replace(/"/g, '""')}"`,
+        `"${dateFormatted}"`,
+        `"${scheduledStart}"`,
+        `"${scheduledEnd}"`,
+        `"${scheduledDurStr}"`,
+        `"${actualStart}"`,
+        `"${actualEnd}"`,
+        `"${actualDurStr}"`,
+        `"${employeeNames.replace(/"/g, '""')}"`,
+        `"${(ev.remarks || "").replace(/"/g, '""')}"`,
+        `"${(ev.agenda || "").replace(/"/g, '""')}"`,
+      ];
+    });
+
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [...metaRows, headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const downloadLink = document.createElement("a");
+    downloadLink.setAttribute("href", encodedUri);
+    downloadLink.setAttribute(
+      "download",
+      `Dairy_Remainder_History_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+  };
+
+  const renderHistoryView = () => {
+    const listToFilter = (allEvents && allEvents.length > 0) ? allEvents : (events || []);
+    const filteredEvents = listToFilter.filter((ev) => {
+      // Search filter
+      if (historySearch.trim()) {
+        const q = historySearch.toLowerCase().trim();
+        const titleMatch = (ev.title || "").toLowerCase().includes(q);
+        const typeMatch = (ev.eventtype || ev.event_type || "").toLowerCase().includes(q);
+        const remarkMatch = (ev.remarks || "").toLowerCase().includes(q);
+        const agendaMatch = (ev.agenda || "").toLowerCase().includes(q);
+        if (!titleMatch && !typeMatch && !remarkMatch && !agendaMatch) {
+          return false;
+        }
+      }
+
+      // Event type filter (case-insensitive)
+      if (historyEventType !== "All") {
+        const evType = (ev.eventtype || ev.event_type || ev.eventType || "").toLowerCase().trim();
+        const filterType = historyEventType.toLowerCase().trim();
+        if (evType !== filterType) return false;
+      }
+
+      // Status filter (case-insensitive)
+      if (historyStatus !== "All") {
+        const status = (ev.eventStatus || ev.event_status || "In Progress").toLowerCase().trim();
+        const filterStatus = historyStatus.toLowerCase().trim();
+        if (status !== filterStatus) return false;
+      }
+
+      // Date range filter
+      if (historyFromDate && ev.date < historyFromDate) return false;
+      if (historyToDate && ev.date > historyToDate) return false;
+
+      return true;
+    });
+
+    // Sort by date descending (newest first)
+    const sortedEvents = [...filteredEvents].sort((a, b) => {
+      const dA = new Date((a.date || "") + "T" + (a.startTime || "00:00"));
+      const dB = new Date((b.date || "") + "T" + (b.startTime || "00:00"));
+      return dB - dA;
+    });
+
+    const totalPages = Math.ceil(sortedEvents.length / historyRowsPerPage) || 1;
+    const paginatedEvents = sortedEvents.slice(
+      (historyPage - 1) * historyRowsPerPage,
+      historyPage * historyRowsPerPage
+    );
+
+    // Page number buttons logic
+    const renderPageNumbers = () => {
+      const pages = [];
+      const maxButtons = 5;
+      let startPage = Math.max(1, historyPage - 2);
+      let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+      if (endPage - startPage < maxButtons - 1) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+      }
+
+      for (let p = startPage; p <= endPage; p++) {
+        pages.push(
+          <button
+            key={p}
+            type="button"
+            onClick={() => setHistoryPage(p)}
+            className={`px-[0.6vw] py-[0.25vw] rounded-lg text-[0.75vw] font-medium transition-colors cursor-pointer ${
+              p === historyPage
+                ? "bg-blue-600 text-white font-bold shadow-2xs"
+                : "bg-[#f1f5f9] text-[#334155] hover:bg-gray-200"
+            }`}
+          >
+            {p}
+          </button>
+        );
+      }
+      return pages;
+    };
+
+    return (
+      <div className="flex-1 p-[1vw] bg-[#f8fafc] flex flex-col gap-[0.8vw] h-full min-h-0 overflow-hidden">
+        {/* Top Controls Card - Sticky Title & Filter Header */}
+        <div className="bg-white rounded-2xl shadow-xs border border-gray-200 p-[1vw] flex flex-col gap-[0.8vw] shrink-0">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            {/* Left Pill Tabs & Count */}
+            <div className="flex items-center gap-[0.8vw]">
+              <div className="flex border border-gray-200 rounded-full bg-gray-50 p-1">
+                <button
+                  type="button"
+                  className="px-[1vw] py-[0.35vw] bg-white text-blue-600 font-bold rounded-full shadow-xs text-[0.78vw]"
+                >
+                  Reminders Log
+                </button>
+              </div>
+              <span className="text-[0.8vw] text-gray-500 font-medium">
+                ({sortedEvents.length} total records)
+              </span>
+            </div>
+
+            {/* Right Search, Filter & Export Buttons */}
+            <div className="flex items-center gap-[0.6vw]">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="w-[0.9vw] h-[0.9vw] absolute left-[0.7vw] top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search reports..."
+                  value={historySearch}
+                  onChange={(e) => {
+                    setHistorySearch(e.target.value);
+                    setHistoryPage(1);
+                  }}
+                  className="pl-[2.2vw] pr-[1vw] py-[0.4vw] text-[0.78vw] bg-[#f1f5f9] text-[#334155] border border-gray-200 rounded-full focus:outline-none focus:ring-1 focus:ring-blue-500 w-[14vw]"
+                />
+              </div>
+
+              {/* Export Excel / CSV */}
+              <button
+                type="button"
+                onClick={() => exportHistoryToCSV(sortedEvents)}
+                className="flex items-center gap-[0.4vw] px-[0.9vw] py-[0.4vw] bg-[#f1f5f9] hover:bg-gray-200 text-[#334155] rounded-xl text-[0.78vw] font-medium border border-gray-200 transition-all cursor-pointer"
+              >
+                <Download className="w-[0.85vw] h-[0.85vw]" />
+                <span>Export Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setHistorySearch("");
+                  setHistoryEventType("All");
+                  setHistoryStatus("All");
+                  setHistoryFromDate("");
+                  setHistoryToDate("");
+                  setHistoryPage(1);
+                }}
+                className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.4vw] bg-[#f1f5f9] hover:bg-gray-200 text-[#334155] rounded-xl text-[0.78vw] font-medium border border-gray-200 transition-all cursor-pointer"
+              >
+                <RotateCcw className="w-[0.8vw] h-[0.8vw]" />
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-[0.8vw] pt-[0.5vw] border-t border-gray-100">
+            {/* Event Type Filter */}
+            <div>
+              <select
+                value={historyEventType}
+                onChange={(e) => {
+                  setHistoryEventType(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="w-full px-[0.7vw] py-[0.35vw] text-[0.75vw] bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+              >
+                <option value="All">All Event Types</option>
+                {["Team Meeting", "Project Meeting", "Monthly Staff meeting", "Client Meeting", "Technical Presentation", "Meeting", "Personal", "Special day", "Announcement", "Quotation", "Invoice", "Payment Following", "Client Following", "Others"].map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <select
+                value={historyStatus}
+                onChange={(e) => {
+                  setHistoryStatus(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="w-full px-[0.7vw] py-[0.35vw] text-[0.75vw] bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+              >
+                <option value="All">All Statuses</option>
+                <option value="Completed">Completed</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Pending">Pending</option>
+                <option value="Missed">Missed</option>
+              </select>
+            </div>
+
+            {/* From Date */}
+            <div className="flex items-center gap-1">
+              <span className="text-[0.7vw] text-gray-500 whitespace-nowrap">From:</span>
+              <input
+                type="date"
+                value={historyFromDate}
+                onChange={(e) => {
+                  setHistoryFromDate(e.target.value);
+                  if (historyToDate && e.target.value && historyToDate < e.target.value) {
+                    setHistoryToDate("");
+                  }
+                  setHistoryPage(1);
+                }}
+                className="w-full px-[0.5vw] py-[0.35vw] text-[0.75vw] bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* To Date */}
+            <div className="flex items-center gap-1">
+              <span className="text-[0.7vw] text-gray-500 whitespace-nowrap">To:</span>
+              <input
+                type="date"
+                value={historyToDate}
+                disabled={!historyFromDate}
+                min={historyFromDate}
+                onChange={(e) => {
+                  setHistoryToDate(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className={`w-full px-[0.5vw] py-[0.35vw] text-[0.75vw] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                  !historyFromDate ? "bg-gray-200 text-gray-400 cursor-not-allowed border-gray-200" : "bg-gray-50 border-gray-300"
+                }`}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* History Data Table - Scrollable Body with Sticky Table Header */}
+        <div className="bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden flex flex-col justify-between flex-1 min-h-0">
+          <div className="overflow-y-auto flex-1 relative min-h-0">
+            <table className="w-full text-left border-collapse relative">
+              <thead className="sticky top-0 z-10 bg-[#ebf0fc] shadow-2xs">
+                <tr className="bg-[#ebf0fc] text-[#1e293b] text-[0.75vw] font-semibold border-b border-[#cbd5e1]">
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8] text-center w-[4vw]">S.No</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Date</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Scheduled Time</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Actual Time</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Total Duration</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Meeting Title</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Type & Priority</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8]">Remarks</th>
+                  <th className="py-[0.8vw] px-[1vw] border-r border-[#dce6f8] text-center">Status</th>
+                  <th className="py-[0.8vw] px-[1vw] text-center min-w-[8.5vw]">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 text-[0.78vw] text-gray-700">
+                {paginatedEvents.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-[3vw] text-center text-gray-500">
+                      <div className="flex flex-col items-center justify-center gap-[0.5vw]">
+                        <History className="w-[2.5vw] h-[2.5vw] text-gray-300" />
+                        <p className="font-semibold text-gray-600 text-[0.9vw]">No history records found</p>
+                        <p className="text-[0.75vw]">Try adjusting your search criteria or date filters.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedEvents.map((ev, index) => {
+                    const itemIndex = (historyPage - 1) * historyRowsPerPage + index + 1;
+                    const schedMins = getEventDuration(ev.startTime, ev.endTime);
+                    const schedDurStr = formatDurationHuman(schedMins);
+
+                    // Image 1 Status pill color scheme
+                    const statusStr = ev.eventStatus || "In Progress";
+                    const isCompleted = statusStr === "Completed";
+                    const isMissed = statusStr === "Missed";
+                    const isPending = statusStr === "Pending";
+
+                    return (
+                      <tr key={ev._id || ev.id || index} className="hover:bg-[#f8fafc] transition-colors border-b border-gray-200">
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 text-center font-medium text-gray-500">{itemIndex}</td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 font-medium text-gray-800 whitespace-nowrap">
+                          {formatDateDDMMYYYY(ev.date)}
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 whitespace-nowrap font-medium text-gray-700">
+                          {ev.startTime ? `${ev.startTime} - ${ev.endTime || ""}` : "Full Day"}
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 whitespace-nowrap">
+                          {ev.actual_start_time ? (
+                            <div className="flex flex-col text-[0.7vw]">
+                              <span className="text-emerald-700 font-medium">Start: {formatIstTime(ev.actual_start_time)}</span>
+                              {ev.actual_end_time && (
+                                <span className="text-rose-700 font-medium">End: {formatIstTime(ev.actual_end_time)}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 italic">-</span>
+                          )}
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 whitespace-nowrap">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-semibold text-gray-800">
+                              {ev.actual_duration || schedDurStr}
+                            </span>
+                            {ev.actual_duration && (
+                              <span className="text-[0.65vw] text-gray-500">Sched: {schedDurStr}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 font-semibold text-gray-900">
+                          {ev.title || "Untitled Meeting"}
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="px-[0.5vw] py-[0.15vw] bg-blue-50 text-blue-700 rounded text-[0.7vw] w-fit font-medium border border-blue-100">
+                              {ev.eventtype || "Meeting"}
+                            </span>
+                            {ev.priority && (
+                              <span className={`text-[0.65vw] font-semibold ${
+                                ev.priority === "High" ? "text-red-600" : ev.priority === "Medium" ? "text-orange-600" : "text-green-600"
+                              }`}>
+                                {ev.priority} Priority
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200">
+                          <TruncatedTextWithTooltip
+                            text={ev.remarks || ev.agenda || ""}
+                            maxLength={25}
+                          />
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] border-r border-gray-200 text-center">
+                          <span
+                            className={`px-[0.8vw] py-[0.2vw] rounded-full text-[0.7vw] font-semibold inline-block shadow-2xs ${
+                              isCompleted
+                                ? "bg-[#22c55e] text-white"
+                                : isMissed
+                                ? "bg-[#ef4444] text-white"
+                                : isPending
+                                ? "bg-[#f59e0b] text-white"
+                                : "bg-[#3b82f6] text-white"
+                            }`}
+                          >
+                            {statusStr}
+                          </span>
+                        </td>
+                        <td className="py-[0.7vw] px-[1vw] text-center">
+                          <div className="flex items-center justify-center gap-[0.4vw]">
+                            <button
+                              type="button"
+                              onClick={() => openHistoryEventDetails(ev)}
+                              className="px-[0.6vw] py-[0.25vw] bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[0.7vw] font-medium transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                            >
+                              <Info className="w-[0.7vw] h-[0.7vw]" />
+                              Details
+                            </button>
+                            {isEventHoster(ev) && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteHistoryEvent(ev, e)}
+                                className="px-[0.6vw] py-[0.25vw] bg-rose-600 hover:bg-rose-700 text-white rounded-md text-[0.7vw] font-medium transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                                title="Delete meeting (Host only)"
+                              >
+                                <Trash2 className="w-[0.7vw] h-[0.7vw]" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Controls - Enhanced with Rows Per Page & Page Numbers */}
+          {sortedEvents.length > 0 && (
+            <div className="p-[0.8vw] px-[1.2vw] bg-white border-t border-gray-200 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-[1vw]">
+                <span className="text-[0.78vw] text-gray-600 font-medium">
+                  Showing {((historyPage - 1) * historyRowsPerPage) + 1} to {Math.min(historyPage * historyRowsPerPage, sortedEvents.length)} of {sortedEvents.length} entries
+                </span>
+                <div className="flex items-center gap-[0.4vw]">
+                  <span className="text-[0.75vw] text-gray-500 font-medium">Rows per page:</span>
+                  <select
+                    value={historyRowsPerPage}
+                    onChange={(e) => {
+                      setHistoryRowsPerPage(Number(e.target.value));
+                      setHistoryPage(1);
+                    }}
+                    className="px-[0.5vw] py-[0.2vw] text-[0.75vw] bg-[#f1f5f9] text-[#334155] border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-[0.4vw]">
+                <button
+                  type="button"
+                  disabled={historyPage === 1}
+                  onClick={() => setHistoryPage((p) => Math.max(p - 1, 1))}
+                  className="px-[0.8vw] py-[0.35vw] bg-[#f1f5f9] text-[#334155] rounded-lg text-[0.75vw] font-medium hover:bg-gray-200 disabled:opacity-40 cursor-pointer"
+                >
+                  &lt; Previous
+                </button>
+                {renderPageNumbers()}
+                <button
+                  type="button"
+                  disabled={historyPage >= totalPages}
+                  onClick={() => setHistoryPage((p) => Math.min(p + 1, totalPages))}
+                  className="px-[0.8vw] py-[0.35vw] bg-[#f1f5f9] text-[#334155] rounded-lg text-[0.75vw] font-medium hover:bg-gray-200 disabled:opacity-40 cursor-pointer"
+                >
+                  Next &gt;
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
-      className="h-screen flex flex-col text-black"
+      className="h-full flex-1 min-h-0 flex flex-col text-black"
       onMouseUp={handleMouseUp}
     >
-      <header className=" border-gray-200 px-4 py-3">
+      <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 shadow-2xs">
         <div className="flex items-start justify-between relative">
           <div className="flex flex-col justify-center space-x-4 gap-[1vw]">
             <div className="flex items-center space-x-2">
@@ -3920,28 +5109,42 @@ const Calendar = () => {
               </div>
 
               <div className="flex border border-gray-300 rounded-full bg-white overflow-hidden shadow-sm">
-                {["day", "week", "month"].map((viewOption) => (
+                {["day", "week", "month", "history"].map((viewOption) => (
                   <button
                     key={viewOption}
                     onClick={() => setView(viewOption)}
-                    className={`px-[0.7vw] py-[0.4vw] text-[0.72vw] font-medium capitalize transition-colors cursor-pointer border-r border-gray-200 ${
+                    className={`px-[0.7vw] py-[0.4vw] text-[0.72vw] font-medium capitalize transition-colors cursor-pointer border-r border-gray-200 last:border-r-0 ${
                       view === viewOption
-                        ? "bg-[#ebf0fc] text-gray-900 shadow-sm"
+                        ? "bg-[#ebf0fc] text-gray-900 font-bold shadow-xs"
                         : "text-gray-700 hover:bg-gray-50"
                     }`}
                   >
-                    {viewOption}
+                    {viewOption === "history" ? "History" : viewOption}
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
+            <button
+              type="button"
+              onClick={() => setView("history")}
+              className={`flex items-center space-x-[0.4vw] px-[0.8vw] py-[0.4vw] rounded-[1vw] transition-colors shadow-sm text-[0.8vw] cursor-pointer font-medium border ${
+                view === "history"
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"
+              }`}
+            >
+              <History className="w-[0.9vw] h-[0.9vw]" />
+              <span>History</span>
+            </button>
+
             {canCreateEvent() && (
               <button
                 onClick={() => {
                   setEditingEvent(null);
+                  setModalActiveTab("details");
                   setEventForm({
                     title: "",
                     eventtype: "Meeting",
@@ -3957,7 +5160,7 @@ const Calendar = () => {
                     employees: [],
                     audience: "",
                     priority: "",
-                    formType: view,
+                    formType: view === "history" ? "day" : view,
                     eventStatus: "In Progress",
                     remarks: "",
                     employeeID: currentEmployeeId || "",
@@ -4009,6 +5212,7 @@ const Calendar = () => {
         {view === "day" && renderDayView()}
         {view === "week" && renderWeekView()}
         {view === "month" && renderMonthView()}
+        {view === "history" && renderHistoryView()}
       </div>
 
       {showEventModal && (
@@ -4050,7 +5254,7 @@ const Calendar = () => {
                 </p>
               )}
               {editingEvent && (
-                <div className="mb-[0.8vw]">
+                <div className="mb-[0.8vw] flex flex-wrap items-center gap-[0.6vw]">
                   <button
                     onClick={(ev) => {
                       ev.stopPropagation();
@@ -4062,9 +5266,39 @@ const Calendar = () => {
                       } else {
                         setViewOnlyRemarks(false);
                         setShowRemarksInput(true);
+
+                        const existingActStart =
+                          eventForm.actual_start_time ||
+                          editingEvent?.actual_start_time ||
+                          editingEvent?.actualStartTime;
+                        const existingActEnd =
+                          eventForm.actual_end_time ||
+                          editingEvent?.actual_end_time ||
+                          editingEvent?.actualEndTime;
+
+                        const actStartISO =
+                          existingActStart ||
+                          buildDateTimeISO(
+                            eventForm.date || editingEvent?.date,
+                            eventForm.startTime || editingEvent?.startTime || editingEvent?.start_time
+                          );
+                        const actEndISO =
+                          existingActEnd ||
+                          buildDateTimeISO(
+                            eventForm.endDate || eventForm.date || editingEvent?.endDate || editingEvent?.date,
+                            eventForm.endTime || editingEvent?.endTime || editingEvent?.end_time
+                          );
+                        const actDur =
+                          eventForm.actual_duration ||
+                          editingEvent?.actual_duration ||
+                          calculateDurationString(actStartISO, actEndISO);
+
                         setEventForm({
                           ...eventForm,
                           eventStatus: "Mark as Completed",
+                          actual_start_time: actStartISO,
+                          actual_end_time: actEndISO,
+                          actual_duration: actDur,
                         });
                       }
                     }}
@@ -4078,44 +5312,143 @@ const Calendar = () => {
                       ? "Completed"
                       : "Mark as Completed"}
                   </button>
+
+                  {/* Host Start / End Meeting Controls & Actual Duration */}
+                  {isMeetingLike(eventForm) && (() => {
+                    const actStart = eventForm.actual_start_time || editingEvent?.actual_start_time || editingEvent?.actualStartTime;
+                    const actEnd = eventForm.actual_end_time || editingEvent?.actual_end_time || editingEvent?.actualEndTime;
+                    const actDur = eventForm.actual_duration || editingEvent?.actual_duration || editingEvent?.actualDuration;
+                    const isHostOrAdmin = (editingEvent?.employeeID === currentEmployeeId ||
+                      editingEvent?.employee_id === currentEmployeeId ||
+                      currentUserRole === "Super Admin");
+
+                    return (
+                      <>
+                        {!actStart && eventForm.eventStatus !== "Completed" && (
+                          isHostOrAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleMeetingStatusAction("start")}
+                              disabled={isSaving}
+                              className="px-[0.7vw] py-[0.3vw] bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-[0.8vw] font-medium flex items-center gap-[0.3vw] shadow-xs transition-all cursor-pointer"
+                            >
+                              <span>▶️</span> Start Meeting
+                            </button>
+                          ) : (
+                            <span className="text-[0.75vw] text-gray-500 bg-gray-100 px-[0.6vw] py-[0.25vw] rounded-full italic">
+                              Meeting Not Started
+                            </span>
+                          )
+                        )}
+
+                        {actStart && !actEnd && (
+                          <div className="flex items-center gap-[0.5vw]">
+                            <div className="flex items-center gap-[0.3vw] bg-blue-50 border border-blue-300 text-blue-800 px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium animate-pulse">
+                              <span className="w-[0.5vw] h-[0.5vw] rounded-full bg-blue-500"></span>
+                              In Progress ({formatIstTime(actStart)})
+                            </div>
+                            {isHostOrAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleMeetingStatusAction("end")}
+                                disabled={isSaving}
+                                className="px-[0.7vw] py-[0.3vw] bg-rose-600 hover:bg-rose-700 text-white rounded-full text-[0.8vw] font-medium flex items-center gap-[0.3vw] shadow-xs transition-all cursor-pointer"
+                              >
+                                <span>⏹️</span> End Meeting
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {actEnd && (
+                          <div className="flex items-center gap-[0.4vw] bg-blue-50 border border-blue-200 text-blue-900 px-[0.7vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium shadow-2xs">
+                            <span>⏱️ Actual Duration: <strong>{actDur || "N/A"}</strong></span>
+                            <span className="text-blue-300">|</span>
+                            <span className="text-gray-600">
+                              {formatIstTime(actStart)} - {formatIstTime(actEnd)}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
 
-            <div
-              className="flex items-start justify-between gap-[0.5vw]"
-              style={{ display: showRemarksInput ? "none" : undefined }}
-            >
-              <div className="flex items-center gap-[0.5vw]">
+            <div className="flex items-start justify-between gap-[0.5vw]">
+              <div className="flex items-center gap-[0.5vw] flex-wrap">
                 <img src={options} alt="" className="w-[1.1vw] h-[1.1vw]" />
                 <div className="w-fit bg-gray-200 text-gray-700 rounded-full px-[0.5vw] py-[0.3vw] text-[0.8vw]">
                   <select
-                    name=""
-                    id=""
-                    className="focus:outline-none focus:ring-0"
-                    value={eventForm.eventtype}
-                    onChange={(e) =>
-                      setEventForm({ ...eventForm, eventtype: e.target.value })
+                    className="focus:outline-none focus:ring-0 bg-transparent"
+                    value={
+                      getAvailableEventTypes().includes(eventForm.eventtype)
+                        ? eventForm.eventtype
+                        : (getAvailableEventTypes()[0] || "Meeting")
                     }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "Technical Presentation") {
+                        setEventForm({
+                          ...eventForm,
+                          eventtype: val,
+                          customEventType: "",
+                          title: "Technical Presentation",
+                        });
+                        if (titleError) setTitleError(false);
+                      } else if (val === "Others") {
+                        setEventForm({
+                          ...eventForm,
+                          eventtype: "Others",
+                          customEventType: eventForm.customEventType || "",
+                          title: eventForm.title === "Technical Presentation" ? "" : eventForm.title,
+                        });
+                      } else {
+                        const currentTitle = eventForm.title || "";
+                        const newTitle = currentTitle === "Technical Presentation" ? "" : currentTitle;
+                        setEventForm({
+                          ...eventForm,
+                          eventtype: val,
+                          customEventType: "",
+                          title: newTitle,
+                        });
+                      }
+                    }}
                     disabled={editingEvent && !canEditEvent(editingEvent)}
                   >
                     <option value="" disabled>
                       Event Type
                     </option>
-                    {[
-                      "Quotation",
-                      "Invoice",
-                      "Payment Following",
-                      "Client Following",
-                      "Meeting",
-                      "Personal",
-                    ].map((emp) => (
+                    {getAvailableEventTypes().map((emp) => (
                       <option key={emp} value={emp}>
                         {emp}
                       </option>
                     ))}
                   </select>
                 </div>
+
+                {(eventForm.eventtype === "Others" || (!getAvailableEventTypes().includes(eventForm.eventtype) && eventForm.eventtype)) && (
+                  <input
+                    type="text"
+                    placeholder="Type custom event type..."
+                    value={
+                      eventForm.customEventType !== undefined
+                        ? eventForm.customEventType
+                        : (eventForm.eventtype === "Others" ? "" : eventForm.eventtype)
+                    }
+                    onChange={(e) =>
+                      setEventForm({
+                        ...eventForm,
+                        eventtype: "Others",
+                        customEventType: e.target.value,
+                      })
+                    }
+                    disabled={editingEvent && !canEditEvent(editingEvent)}
+                    className="px-[0.6vw] py-[0.3vw] rounded-full border border-gray-300 bg-white text-[0.8vw] focus:outline-none focus:ring-2 focus:ring-blue-500 w-[10vw]"
+                  />
+                )}
+
                 <div className="ml-[0.4vw] w-fit bg-gray-200 text-gray-700 rounded-full px-[0.5vw] py-[0.3vw] text-[0.8vw]">
                   <select
                     value={eventForm.priority}
@@ -4123,7 +5456,7 @@ const Calendar = () => {
                       setEventForm({ ...eventForm, priority: e.target.value })
                     }
                     disabled={editingEvent && !canEditEvent(editingEvent)}
-                    className="focus:outline-none focus:ring-0"
+                    className="focus:outline-none focus:ring-0 bg-transparent"
                   >
                     <option value="" disabled>
                       Priority
@@ -4176,12 +5509,19 @@ const Calendar = () => {
                         type="time"
                         className="text-gray-700 text-[0.8vw] focus:outline-none focus:ring-0 bg-[#ebf0fc] px-[0.7vw] py-[0.4vw] rounded-full"
                         value={eventForm.startTime}
-                        onChange={(e) =>
+                        max={eventForm.endTime || undefined}
+                        onChange={(e) => {
+                          const newStart = e.target.value;
+                          let newEnd = eventForm.endTime;
+                          if (newEnd && newEnd < newStart) {
+                            newEnd = newStart;
+                          }
                           setEventForm({
                             ...eventForm,
-                            startTime: e.target.value,
-                          })
-                        }
+                            startTime: newStart,
+                            endTime: newEnd,
+                          });
+                        }}
                         disabled={editingEvent && !canEditEvent(editingEvent)}
                       />
                     </div>
@@ -4191,12 +5531,21 @@ const Calendar = () => {
                         type="time"
                         className="text-gray-700 text-[0.8vw] focus:outline-none focus:ring-0 bg-[#ebf0fc] px-[0.7vw] py-[0.4vw] rounded-full"
                         value={eventForm.endTime}
-                        onChange={(e) =>
+                        min={eventForm.startTime || undefined}
+                        onChange={(e) => {
+                          const newEnd = e.target.value;
+                          if (eventForm.startTime && newEnd < eventForm.startTime) {
+                            notify({
+                              title: "Warning",
+                              message: "End time cannot be earlier than start time",
+                            });
+                            return;
+                          }
                           setEventForm({
                             ...eventForm,
-                            endTime: e.target.value,
-                          })
-                        }
+                            endTime: newEnd,
+                          });
+                        }}
                         disabled={editingEvent && !canEditEvent(editingEvent)}
                       />
                     </div>
@@ -4242,13 +5591,20 @@ const Calendar = () => {
                         type="time"
                         className="text-gray-700 text-[0.8vw] focus:outline-none focus:ring-0 bg-[#ebf0fc] px-[0.7vw] py-[0.4vw] rounded-full"
                         value={eventForm.startTime}
+                        max={eventForm.endTime || undefined}
                         disabled={editingEvent && !canEditEvent(editingEvent)}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const newStart = e.target.value;
+                          let newEnd = eventForm.endTime;
+                          if (newEnd && newEnd < newStart) {
+                            newEnd = newStart;
+                          }
                           setEventForm({
                             ...eventForm,
-                            startTime: e.target.value,
-                          })
-                        }
+                            startTime: newStart,
+                            endTime: newEnd,
+                          });
+                        }}
                       />
                     </div>
                   )}
@@ -4276,13 +5632,22 @@ const Calendar = () => {
                         type="time"
                         className="text-gray-700 text-[0.8vw] focus:outline-none focus:ring-0 bg-[#ebf0fc] px-[0.7vw] py-[0.4vw] rounded-full"
                         value={eventForm.endTime}
+                        min={eventForm.startTime || undefined}
                         disabled={editingEvent && !canEditEvent(editingEvent)}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const newEnd = e.target.value;
+                          if (eventForm.startTime && newEnd < eventForm.startTime) {
+                            notify({
+                              title: "Warning",
+                              message: "End time cannot be earlier than start time",
+                            });
+                            return;
+                          }
                           setEventForm({
                             ...eventForm,
-                            endTime: e.target.value,
-                          })
-                        }
+                            endTime: newEnd,
+                          });
+                        }}
                       />
                     </div>
                   )}
@@ -4327,7 +5692,8 @@ const Calendar = () => {
               </div>
             )}
 
-            {eventForm.eventtype === "Meeting" && (
+            {(isMeetingLike(eventForm) || eventForm.eventtype === "Meeting") &&
+              eventForm.eventtype !== "Technical Presentation" && (
               <div className="flex items-center gap-[0.6vw] mt-[0.6vw]">
                 <img
                   src={TimeIcon}
@@ -4337,13 +5703,67 @@ const Calendar = () => {
                 <div className="w-fit bg-[#ebf0fc] text-gray-700 rounded-full px-[0.5vw] py-[0.3vw] text-[0.8vw]">
                   <select
                     value={eventForm.subtype}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const selectedCategory = e.target.value;
+                      let autoSelectedEmployees = [];
+
+                      if (selectedCategory === "All") {
+                        autoSelectedEmployees = Array.isArray(employees)
+                          ? employees
+                              .filter((emp) => isEmployeeActive(emp))
+                              .map(
+                                (emp) =>
+                                  emp._id ||
+                                  emp.id ||
+                                  emp.employee_id ||
+                                  emp.employeeId ||
+                                  emp.email_official
+                              )
+                              .filter(Boolean)
+                          : [];
+                      } else if (selectedCategory && selectedCategory !== "") {
+                        autoSelectedEmployees = Array.isArray(employees)
+                          ? employees
+                              .filter((emp) => {
+                                if (!isEmployeeActive(emp)) return false;
+                                const desig = (
+                                  emp.designation ||
+                                  emp.job_title ||
+                                  emp.department ||
+                                  ""
+                                )
+                                  .toString()
+                                  .toLowerCase()
+                                  .trim();
+                                const cat = selectedCategory
+                                  .toString()
+                                  .toLowerCase()
+                                  .trim();
+                                return (
+                                  desig === cat ||
+                                  desig.includes(cat) ||
+                                  cat.includes(desig)
+                                );
+                              })
+                              .map(
+                                (emp) =>
+                                  emp._id ||
+                                  emp.id ||
+                                  emp.employee_id ||
+                                  emp.employeeId ||
+                                  emp.email_official
+                              )
+                              .filter(Boolean)
+                          : [];
+                      }
+
                       setEventForm({
                         ...eventForm,
-                        subtype: e.target.value,
+                        subtype: selectedCategory,
+                        employees: autoSelectedEmployees,
                         mode: "",
-                      })
-                    }
+                      });
+                    }}
                     disabled={editingEvent && !canEditEvent(editingEvent)}
                     className="focus:outline-none focus:ring-0"
                   >
@@ -4432,26 +5852,136 @@ const Calendar = () => {
                 </div>
               )}
 
-            <div className="flex gap-[0.5vw]">
-              <img
-                src={segment}
-                alt=""
-                className="w-[1.2vw] h-[1.2vw] mb-[0.5vw]"
-              />
-              <textarea
-                value={eventForm.agenda}
-                onChange={(e) =>
-                  setEventForm({ ...eventForm, agenda: e.target.value })
-                }
-                disabled={editingEvent && !canEditEvent(editingEvent)}
-                className="w-full px-[0.5vw] py-[0.3vw] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[#ebf0fc] text-[0.8vw]"
-                rows="3"
-                placeholder="Agenda...."
-              />
-            </div>
+            {eventForm.eventtype !== "Technical Presentation" && (
+              <div className="flex gap-[0.5vw]">
+                <img
+                  src={segment}
+                  alt=""
+                  className="w-[1.2vw] h-[1.2vw] mb-[0.5vw]"
+                />
+                <textarea
+                  value={eventForm.agenda}
+                  onChange={(e) =>
+                    setEventForm({ ...eventForm, agenda: e.target.value })
+                  }
+                  disabled={editingEvent && !canEditEvent(editingEvent)}
+                  className="w-full px-[0.5vw] py-[0.3vw] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[#ebf0fc] text-[0.8vw]"
+                  rows="3"
+                  placeholder="Agenda...."
+                />
+              </div>
+            )}
 
-            {eventForm.eventtype === "Meeting" && (
-              <div className="flex flex-col justify-center gap-[0.5vw]">
+            {eventForm.eventtype === "Technical Presentation" && (
+              <div className="flex flex-col gap-[0.8vw] mt-[0.6vw] p-[0.8vw] bg-[#f4f7fe] rounded-xl border border-blue-200 text-[0.8vw]">
+                <div className="flex items-center justify-between font-bold text-blue-900 border-b border-blue-200 pb-[0.3vw]">
+                  <span>Technical Presentation Details</span>
+                </div>
+
+                {/* Presenter 1 */}
+                <div className="flex flex-col gap-[0.4vw]">
+                  <span className="font-semibold text-gray-800 flex items-center gap-[0.3vw]">
+                    👤 Presenter 1
+                  </span>
+                  <div className="grid grid-cols-2 gap-[0.6vw]">
+                    <div>
+                      <label className="text-[0.72vw] font-medium text-gray-600 mb-[0.1vw] block">
+                        Presenter Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. John David"
+                        value={eventForm.presenter1Name || ""}
+                        onChange={(e) =>
+                          setEventForm({ ...eventForm, presenter1Name: e.target.value })
+                        }
+                        disabled={editingEvent && !canEditEvent(editingEvent)}
+                        className="w-full px-[0.6vw] py-[0.35vw] rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-[0.8vw]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[0.72vw] font-medium text-gray-600 mb-[0.1vw] block">
+                        Topic <span className="text-gray-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. AI in Web Development"
+                        value={eventForm.presenter1Topic || ""}
+                        onChange={(e) =>
+                          setEventForm({ ...eventForm, presenter1Topic: e.target.value })
+                        }
+                        disabled={editingEvent && !canEditEvent(editingEvent)}
+                        className="w-full px-[0.6vw] py-[0.35vw] rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-[0.8vw]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <hr className="border-gray-200" />
+
+                {/* Presenter 2 */}
+                <div className="flex flex-col gap-[0.4vw]">
+                  <span className="font-semibold text-gray-800 flex items-center gap-[0.3vw]">
+                    👤 Presenter 2 <span className="text-gray-400 font-normal text-[0.7vw]">(Optional)</span>
+                  </span>
+                  <div className="grid grid-cols-2 gap-[0.6vw]">
+                    <div>
+                      <label className="text-[0.72vw] font-medium text-gray-600 mb-[0.1vw] block">
+                        Presenter Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. John David"
+                        value={eventForm.presenter2Name || ""}
+                        onChange={(e) =>
+                          setEventForm({ ...eventForm, presenter2Name: e.target.value })
+                        }
+                        disabled={editingEvent && !canEditEvent(editingEvent)}
+                        className="w-full px-[0.6vw] py-[0.35vw] rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-[0.8vw]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[0.72vw] font-medium text-gray-600 mb-[0.1vw] block">
+                        Topic <span className="text-gray-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. AI in Web Development"
+                        value={eventForm.presenter2Topic || ""}
+                        onChange={(e) =>
+                          setEventForm({ ...eventForm, presenter2Topic: e.target.value })
+                        }
+                        disabled={editingEvent && !canEditEvent(editingEvent)}
+                        className="w-full px-[0.6vw] py-[0.35vw] rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-[0.8vw]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <hr className="border-gray-200" />
+
+                {/* Motivational Quote */}
+                <div className="flex flex-col gap-[0.4vw]">
+                  <label className="font-semibold text-gray-800 flex items-center gap-[0.3vw]">
+                    💡 Motivational Quote <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    rows="2"
+                    value={eventForm.motivationalQuote}
+                    onChange={(e) =>
+                      setEventForm({ ...eventForm, motivationalQuote: e.target.value })
+                    }
+                    disabled={editingEvent && !canEditEvent(editingEvent)}
+                    className="w-full px-[0.6vw] py-[0.35vw] rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-[0.8vw] italic text-gray-700"
+                    placeholder="Enter motivational quote..."
+                  />
+                </div>
+              </div>
+            )}
+
+            {(isMeetingLike(eventForm) || eventForm.eventtype === "Meeting") &&
+              eventForm.eventtype !== "Technical Presentation" && (
+                <div className="flex flex-col justify-center gap-[0.5vw]">
                 <div className="flex items-center gap-[0.5vw]">
                   <img src={person} alt="" className="w-[1.2vw] h-[1.2vw]" />
                   <div className="w-fit bg-[#ebf0fc] text-gray-700 rounded-full px-[0.5vw] py-[0.3vw] text-[0.8vw]">
@@ -4465,7 +5995,7 @@ const Calendar = () => {
                       }
                     >
                       <option value="" disabled>
-                        {loadingEmployees ? "Loading..." : "Add Attendees"}
+                        {loadingEmployees ? "Loading..." : "Add Attendees *"}
                       </option>
                       {Array.isArray(employees) && employees.length > 0 ? (
                         employees
@@ -4478,19 +6008,8 @@ const Calendar = () => {
                               emp.email_official;
                             if (eventForm.employees.includes(empId))
                               return false;
-                            if (
-                              eventForm.subtype &&
-                              eventForm.subtype !== "" &&
-                              eventForm.subtype !== "All"
-                            ) {
-                              const empDesignation = (
-                                emp.designation ||
-                                emp.job_title ||
-                                ""
-                              ).toString();
-                              return empDesignation === eventForm.subtype;
-                            }
-                            return true;
+                            // Only show active employees in the dropdown for new assignments
+                            return isEmployeeActive(emp);
                           })
                           .map((emp, idx) => {
                             const empId =
@@ -4526,17 +6045,18 @@ const Calendar = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-[0.4vw] mt-[0.3vw] ml-[7%]">
-                  {Array.isArray(eventForm.employees) &&
-                  eventForm.employees.length > 0
-                    ? eventForm.employees.map((empId) => (
-                        <span
+                {Array.isArray(eventForm.employees) && eventForm.employees.length > 0 && (
+                  <div className="mt-[0.5vw] ml-[7%] max-h-[8vw] overflow-y-auto p-[0.4vw] bg-gray-50 border border-gray-200 rounded-xl">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-[0.35vw]">
+                      {eventForm.employees.map((empId) => (
+                        <div
                           key={empId}
-                          className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs flex items-center gap-1"
+                          className="px-[0.5vw] py-[0.2vw] bg-blue-50 border border-blue-200 text-blue-800 rounded-lg text-[0.72vw] flex items-center justify-between gap-[0.3vw] shadow-2xs"
                         >
-                          {getEmployeeName(empId)}
+                          <span className="truncate font-medium">{getEmployeeName(empId)}</span>
                           {(!editingEvent || canEditEvent(editingEvent)) && (
                             <button
+                              type="button"
                               onClick={() =>
                                 setEventForm({
                                   ...eventForm,
@@ -4545,42 +6065,40 @@ const Calendar = () => {
                                   ),
                                 })
                               }
-                              className="text-red-500 font-bold hover:text-red-700"
+                              className="text-red-500 font-bold hover:text-red-700 text-[0.8vw] cursor-pointer flex-shrink-0"
                             >
                               ×
                             </button>
                           )}
-                        </span>
-                      ))
-                    : null}
-                </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             <div className="space-y-4">
-              {showRemarksInput && (
-                <div className="flex flex-col gap-[0.6vw]">
-                  <label className="text-[0.85vw] text-gray-700 font-medium">
-                    Remarks
-                  </label>
-                  <textarea
-                    value={eventForm.remarks}
-                    onChange={(e) =>
-                      setEventForm({ ...eventForm, remarks: e.target.value })
-                    }
-                    disabled={viewOnlyRemarks}
-                    className={`px-[0.5vw] py-[0.4vw] rounded-md focus:outline-none focus:ring-2 ${
-                      viewOnlyRemarks ? "bg-gray-100" : "bg-[#ebf0fc]"
-                    } text-[0.9vw]`}
-                    rows={2}
-                    placeholder={
-                      viewOnlyRemarks
-                        ? "Remarks (read only)"
-                        : "Enter remarks here to complete the event"
-                    }
-                  />
-                </div>
-              )}
+              <div className="flex flex-col gap-[0.4vw]">
+                <label className="text-[0.85vw] text-gray-700 font-medium flex items-center justify-between">
+                  <span>Remarks <span className="text-gray-400 font-normal text-[0.7vw]">(Optional)</span></span>
+                  {eventForm.eventStatus === "Completed" && (
+                    <span className="text-emerald-600 text-[0.7vw] bg-emerald-50 px-[0.4vw] py-[0.1vw] rounded font-semibold">Completed Remarks</span>
+                  )}
+                </label>
+                <textarea
+                  value={eventForm.remarks || ""}
+                  onChange={(e) =>
+                    setEventForm({ ...eventForm, remarks: e.target.value })
+                  }
+                  disabled={editingEvent && !canEditEvent(editingEvent) && eventForm.eventStatus === "Completed" && viewOnlyRemarks}
+                  className={`px-[0.6vw] py-[0.4vw] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    viewOnlyRemarks ? "bg-gray-100" : "bg-[#ebf0fc]"
+                  } text-[0.85vw] text-gray-800`}
+                  rows={2}
+                  placeholder="Enter remarks..."
+                />
+              </div>
 
               <div className="flex justify-end space-x-[0.8vw]">
                 <button
@@ -4590,7 +6108,7 @@ const Calendar = () => {
                   {eventForm.eventStatus === "Completed" ? "Close" : "Cancel"}
                 </button>
 
-                {/* Hide Update and Delete buttons if status is Completed */}
+                {/* Update button if status is not completed */}
                 {eventForm.eventStatus !== "Completed" && (
                   <>
                     {(!editingEvent || canEditEvent(editingEvent)) && (
@@ -4638,16 +6156,20 @@ const Calendar = () => {
                         )}
                       </button>
                     )}
-
-                    {editingEvent && canEditEvent(editingEvent) && (
-                      <button
-                        onClick={deleteEvent}
-                        className="px-[0.8vw] py-[0.35vw] text-[0.75vw] font-medium text-white bg-red-600 rounded-full hover:bg-red-700 transition-colors cursor-pointer"
-                      >
-                        Delete
-                      </button>
-                    )}
                   </>
+                )}
+
+                {/* Delete button (available for hoster/creator only, including Completed meetings) */}
+                {editingEvent && isEventHoster(editingEvent) && (
+                  <button
+                    type="button"
+                    onClick={deleteEvent}
+                    className="px-[0.8vw] py-[0.35vw] text-[0.75vw] font-medium text-white bg-red-600 rounded-full hover:bg-red-700 transition-colors cursor-pointer flex items-center gap-1"
+                    title="Delete meeting (Host only)"
+                  >
+                    <Trash2 className="w-[0.75vw] h-[0.75vw]" />
+                    Delete
+                  </button>
                 )}
               </div>
             </div>

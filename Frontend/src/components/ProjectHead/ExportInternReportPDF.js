@@ -86,7 +86,12 @@ class ExportInternReportPDF {
                   
                   if (reportType === "management") {
                     // For management, Project is col 8, Outcomes is col 9
-                    row.push(task.project_name || "-", task.outcome !== "-" ? task.outcome : (task.task_name || "-"));
+                    let outcomeText = task.outcome !== "-" ? task.outcome : (task.task_name || "-");
+                    // Clean up / format long URLs to avoid taking multiple text wrapping lines
+                    if (typeof outcomeText === "string" && outcomeText.includes("https://www.dropbox.com")) {
+                      outcomeText = outcomeText.replace(/(https:\/\/www\.dropbox\.com\/scl\/fi\/[^\/\?]+).*/gi, "$1...");
+                    }
+                    row.push(task.project_name || "-", outcomeText);
                   } else {
                     row.push(task.project_name || "-", task.task_name || "-");
                     row.push(
@@ -107,32 +112,32 @@ class ExportInternReportPDF {
                   const isMgmt = reportType === "management";
                   row.push(
                     { 
-                      content: `Leave type\n${task.task_name}`, // Pass text for height calculation
+                      content: `Leave type\n${task.task_name}`,
                       isLeaveCell: true,
                       label: "Leave type",
                       value: task.task_name,
                       labelColor: [180, 124, 50],
                       valueColor: [17, 24, 39],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, fontSize: 7.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, fontSize: 6.5, textColor: [254, 249, 195] } 
                     },
                     { 
-                      content: `Reason\n${task.reason || task.outcome || "-"}`, // Pass text for height calculation
+                      content: `Reason\n${task.reason || task.outcome || "-"}`,
                       isLeaveCell: true,
                       label: "Reason",
                       value: task.reason || task.outcome || "-",
                       labelColor: [180, 124, 50],
                       valueColor: [60, 60, 60],
                       colSpan: isMgmt ? 5 : 8,
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, halign: "left", fontSize: 7.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "left", fontSize: 6.5, textColor: [254, 249, 195] } 
                     },
                     { 
-                      content: `Status\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`, // Pass text for height calculation
+                      content: `Status\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
                       isLeaveCell: true,
                       label: "Status",
                       value: `PH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
                       labelColor: [180, 124, 50],
                       valueColor: [60, 60, 60],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 15, halign: "center", fontSize: 7.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "center", fontSize: 6.5, textColor: [254, 249, 195] } 
                     }
                   );
                 }
@@ -212,11 +217,29 @@ class ExportInternReportPDF {
             body: bodyRows,
             startY: 35,
             rowPageBreak: 'avoid', // Crucial: Prevent single task row from splitting
-            styles: { fontSize: 8, cellPadding: 3, overflow: "linebreak", halign: "left", valign: "middle", lineColor: [180, 180, 180], lineWidth: 0.1, textColor: [50, 50, 50] },
-            headStyles: { fillColor: [76, 175, 80], textColor: [255, 255, 255], fontStyle: "bold", halign: "center", valign: "middle", lineColor: [76, 175, 80], lineWidth: 0.1, cellPadding: 3 },
+            styles: { 
+              fontSize: 6.5, 
+              cellPadding: 1.5, 
+              overflow: "linebreak", 
+              halign: "left", 
+              valign: "middle", 
+              lineColor: [180, 180, 180], 
+              lineWidth: 0.1, 
+              textColor: [50, 50, 50] 
+            },
+            headStyles: { 
+              fillColor: [76, 175, 80], 
+              textColor: [255, 255, 255], 
+              fontStyle: "bold", 
+              halign: "center", 
+              valign: "middle", 
+              lineColor: [76, 175, 80], 
+              lineWidth: 0.1, 
+              cellPadding: 2 
+            },
             alternateRowStyles: { fillColor: [245, 251, 245] },
             columnStyles,
-            margin: { left: 10, right: 10, top: 20, bottom: 15 },
+            margin: { left: 10, right: 10, top: 20, bottom: 12 },
             pageBreak: "auto",
             
             didDrawCell: function (data) {

@@ -13,11 +13,50 @@ import {
 } from "lucide-react";
 import Notification from "../ToastProp";
 
-const RECORDS_PER_PAGE = 9;
+const RECORDS_PER_PAGE = 15;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+const checkIfAdmin = (userData) => {
+  if (!userData) return false;
+  const role = (userData.role || userData.userRole || "").toLowerCase();
+  const designation = (userData.designation || "").toLowerCase();
+  const empType = (userData.employeementType || "").toLowerCase();
+
+  return (
+    role === "admin" ||
+    role === "superadmin" ||
+    role === "management" ||
+    designation === "admin" ||
+    designation === "super admin" ||
+    designation === "digital marketing & hr" ||
+    designation === "digital marketing" ||
+    designation === "management" ||
+    empType === "admin"
+  );
+};
+
 const Workdone = () => {
-  const [mainTab, setMainTab] = useState("reports");
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
+      return checkIfAdmin(userData);
+    } catch {
+      return false;
+    }
+  });
+
+  const [mainTab, setMainTab] = useState(() => {
+    try {
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
+      return checkIfAdmin(userData) ? "viewReport" : "reports";
+    } catch {
+      return "reports";
+    }
+  });
   const [formData, setFormData] = useState({
     projectName: "",
     description: "",
@@ -82,10 +121,12 @@ const Workdone = () => {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
       
       // Validate employee ID exists
-      if (!userData.employee_id && !userData.userName) {
+      if (!userData.employee_id && !userData.userName && !userData._id) {
         showToast("Error", "Log out login again, employee id is missing");
         setLoading(false);
         return;
@@ -128,10 +169,12 @@ const Workdone = () => {
   };
 
   const handleSubmit = async () => {
-    const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
+    const userData = JSON.parse(
+      sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+    );
 
     // Validate employee ID exists
-    if (!userData.employee_id && !userData.userName) {
+    if (!userData.employee_id && !userData.userName && !userData._id) {
       showToast("Error", "Log out login again, employee id is missing");
       return;
     }
@@ -227,10 +270,44 @@ const Workdone = () => {
   const getFilteredReports = () => {
     let filtered = reports;
 
-    // Filter by employee
+    // Filter to show ONLY the logged-in employee's reports if user is NOT admin
+    if (!isAdmin) {
+      try {
+        const userData = JSON.parse(
+          sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+        );
+        const currentEmpId = userData.employee_id || userData.userName || userData._id;
+        const currentEmpName = userData.employeeName || userData.name || "";
+
+        if (currentEmpId || currentEmpName) {
+          filtered = filtered.filter((report) => {
+            if (
+              currentEmpId &&
+              (String(report.employee_id) === String(currentEmpId) ||
+                String(report.userName) === String(currentEmpId) ||
+                String(report.user_id) === String(currentEmpId))
+            ) {
+              return true;
+            }
+            if (
+              currentEmpName &&
+              report.employee_name?.trim().toLowerCase() ===
+                currentEmpName?.trim().toLowerCase()
+            ) {
+              return true;
+            }
+            return false;
+          });
+        }
+      } catch (err) {
+        console.error("Error filtering work reports for logged in user:", err);
+      }
+    }
+
+    // Filter by employee if selected
     if (selectedEmployee !== "all") {
       filtered = filtered.filter(
-        (report) => report.employee_id === selectedEmployee
+        (report) => String(report.employee_id) === String(selectedEmployee)
       );
     }
 
@@ -324,7 +401,7 @@ const Workdone = () => {
     return (
       <>
         {/* Header with Search and Filters */}
-        <div className="flex items-center justify-between p-[0.8vw] border-b border-gray-200">
+        <div className="flex items-center justify-between p-[0.8vw]">
           <div className="flex items-center gap-[0.5vw]">
             <span className="font-medium text-[0.95vw] text-gray-800">
               Work Reports
@@ -384,6 +461,30 @@ const Workdone = () => {
                     </div>
 
 
+
+                    {/* Employee Filter for Admin */}
+                    {isAdmin && (
+                      <div className="mb-[1vw]">
+                        <label className="block text-[0.75vw] font-medium text-gray-700 mb-[0.3vw]">
+                          Employee
+                        </label>
+                        <select
+                          value={selectedEmployee}
+                          onChange={(e) => setSelectedEmployee(e.target.value)}
+                          className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="all">All Employees</option>
+                          {employees.map((emp) => (
+                            <option
+                              key={emp.employee_id || emp.id}
+                              value={emp.employee_id || emp.id}
+                            >
+                              {emp.employee_name || emp.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     {/* Date Range */}
                     <div className="mb-[1vw]">
@@ -479,18 +580,39 @@ const Workdone = () => {
         )}
 
         {/* Table Content */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 flex flex-col p-[0.8vw] overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center h-full min-h-[400px]">
-              <Loader2 className="w-[2vw] h-[2vw] animate-spin text-blue-500" />
+            <div className="flex-1 min-h-0 border border-gray-300 rounded-xl overflow-auto">
+              <table className="w-full border-collapse border border-gray-300">
+                <thead className="bg-[#E2EBFF] sticky top-0 z-10">
+                  <tr>
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[4vw]">S.NO</th>
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[9vw]">Date</th>
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">Employee Name</th>
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[16vw]">Project Name</th>
+                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 10 }).map((_, idx) => (
+                    <tr key={`workdone-skel-${idx}`} className="border-b border-gray-200">
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[40%] animate-shimmer rounded mx-auto" /></td>
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[50%] animate-shimmer rounded mx-auto" /></td>
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[60%] animate-shimmer rounded mx-auto" /></td>
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[70%] animate-shimmer rounded mx-auto" /></td>
+                      <td className="px-[0.7vw] py-[0.55vw] border border-gray-300"><div className="h-[0.9vw] w-[90%] animate-shimmer rounded" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : filteredReports.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
-              <FileText className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300" />
-              <p className="text-[1.1vw] font-medium mb-[0.5vw]">
+            <div className="flex flex-col items-center justify-center flex-1 text-gray-500">
+              <FileText className="w-[4vw] h-[4vw] mb-[0.8vw] text-gray-300" />
+              <p className="text-[1vw] font-medium mb-[0.3vw]">
                 No reports found
               </p>
-              <p className="text-[1vw] text-gray-400">
+              <p className="text-[0.85vw] text-gray-400">
                 {searchTerm ||
                 startDate ||
                 endDate ||
@@ -500,46 +622,46 @@ const Workdone = () => {
               </p>
             </div>
           ) : (
-            <div className="mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto max-h-[60vh]">
+            <div className="flex-1 min-h-0 border border-gray-300 rounded-xl overflow-auto">
               <table className="w-full border-collapse border border-gray-300">
-                <thead className="bg-[#E2EBFF] sticky top-0">
+                <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                   <tr>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[4vw]">
                       S.NO
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[9vw]">
+                      Date
+                    </th>
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[12vw]">
                       Employee Name
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300 w-[16vw]">
                       Project Name
                     </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="px-[0.7vw] py-[0.55vw] text-center text-[0.85vw] font-semibold text-gray-800 border border-gray-300">
                       Description
-                    </th>
-                    <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                      Date
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedReports.map((report, index) => (
-                    <tr key={report.id} className="border-b hover:bg-gray-50">
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-300 text-center">
+                    <tr key={report.id} className="border-b border-gray-200 hover:bg-blue-50/30 transition-colors">
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-900 border border-gray-300 text-center">
                         {startIndex + index + 1}
                       </td>
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-300">
-                        {report.employee_name}
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-900 border border-gray-300 text-center whitespace-nowrap font-medium">
+                        {formatDateToIST(report.created_at)}
                       </td>
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-300">
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] font-medium text-gray-900 border border-gray-300">
+                        {report.employee_name || report.employeeName || report.userName || report.employee_id || "-"}
+                      </td>
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-900 border border-gray-300">
                         {report.project_name}
                       </td>
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.8vw] text-gray-700 border border-gray-300">
-                        <div className="max-w-[30vw] line-clamp-3">
+                      <td className="px-[0.7vw] py-[0.55vw] text-[0.8vw] text-gray-700 border border-gray-300">
+                        <div className="line-clamp-2 hover:line-clamp-none transition-all">
                           {report.description}
                         </div>
-                      </td>
-                      <td className="px-[0.7vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-300 text-center whitespace-nowrap">
-                        {formatDateToIST(report.created_at)}
                       </td>
                     </tr>
                   ))}
@@ -551,8 +673,8 @@ const Workdone = () => {
 
         {/* Pagination */}
         {!loading && filteredReports.length > 0 && (
-          <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] border-t border-gray-200">
-            <div className="text-[0.85vw] text-gray-600">
+          <div className="flex items-center justify-between px-[1vw] py-[0.5vw] shrink-0 bg-white">
+            <div className="text-[0.8vw] text-gray-600">
               Showing {startIndex + 1} to{" "}
               {Math.min(endIndex, filteredReports.length)} of{" "}
               {filteredReports.length} entries
@@ -561,18 +683,18 @@ const Workdone = () => {
               <button
                 onClick={handlePrevious}
                 disabled={currentPage === 1}
-                className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                className="px-[0.8vw] py-[0.3vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.8vw] transition cursor-pointer"
               >
                 <ChevronLeft size={"1vw"} />
                 Previous
               </button>
-              <span className="text-[0.85vw] text-gray-600 px-[0.5vw]">
+              <span className="text-[0.8vw] text-gray-600 px-[0.5vw]">
                 Page {currentPage} of {totalPages}
               </span>
               <button
                 onClick={handleNext}
                 disabled={currentPage === totalPages}
-                className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                className="px-[0.8vw] py-[0.3vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.8vw] transition cursor-pointer"
               >
                 Next
                 <ChevronRight size={"1vw"} />
@@ -585,7 +707,7 @@ const Workdone = () => {
   };
 
   return (
-    <div className="text-black min-h-[92%] max-h-[100%] w-[100%] max-w-[100%] overflow-hidden">
+    <div className="text-black h-[calc(100vh-4.5vw)] w-[100%] max-w-[100%] flex flex-col overflow-hidden">
       {toast && (
         <Notification
           title={toast.title}
@@ -594,46 +716,48 @@ const Workdone = () => {
         />
       )}
 
-      <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
+      <div className="w-[100%] flex-1 min-h-0 flex flex-col gap-[1vh]">
         {/* TOP TABS */}
-        <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[6%] flex-shrink-0">
-          <div className="flex border-b border-gray-200 h-full w-full">
-            <button
-              onClick={() => {
-                setMainTab("reports");
-                clearForm();
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${
-                mainTab === "reports"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <div className="flex items-center gap-[0.4vw]">
-                <FileText size="1vw" />
-                Reports
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                setMainTab("viewReport");
-              }}
-              className={`px-[1.5vw] cursor-pointer font-medium text-[0.9vw] transition-colors ${
-                mainTab === "viewReport"
-                  ? "border-b-2 border-black text-black"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <div className="flex items-center gap-[0.4vw]">
-                <Eye size="1vw" />
-                View Report
-              </div>
-            </button>
+        {!isAdmin ? (
+          <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[2.5vw] flex-shrink-0 border border-gray-100">
+            <div className="flex border-b border-gray-200 h-full w-full">
+              <button
+                onClick={() => {
+                  setMainTab("reports");
+                  clearForm();
+                }}
+                className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
+                  mainTab === "reports"
+                    ? "border-b-2 border-black text-black font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <div className="flex items-center gap-[0.4vw]">
+                  <FileText size="0.9vw" />
+                  Reports
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setMainTab("viewReport");
+                }}
+                className={`px-[1.5vw] cursor-pointer font-medium text-[0.85vw] transition-colors ${
+                  mainTab === "viewReport"
+                    ? "border-b-2 border-black text-black font-semibold"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <div className="flex items-center gap-[0.4vw]">
+                  <Eye size="0.9vw" />
+                  View Report
+                </div>
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {/* Main Content Container */}
-        <div className="bg-white rounded-xl shadow-sm h-[93%] flex flex-col overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm flex-1 min-h-0 flex flex-col overflow-hidden border border-gray-100">
           {mainTab === "reports" && (
             <>
               <div className="flex items-center gap-[0.5vw] p-[1vw] border-b border-gray-200">

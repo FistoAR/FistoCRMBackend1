@@ -7,6 +7,24 @@ const {
   TaskReportsReview,
 } = require("../../Models/DB_Collections");
 
+const getTodayRangeIST = () => {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parseInt(parts.find(p => p.type === "year").value);
+  const month = parseInt(parts.find(p => p.type === "month").value) - 1;
+  const day = parseInt(parts.find(p => p.type === "day").value);
+
+  const start = new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - 5.5 * 60 * 60 * 1000);
+  const end = new Date(Date.UTC(year, month, day, 23, 59, 59, 999) - 5.5 * 60 * 60 * 1000);
+  return { start, end };
+};
+
 router.post("/", async (req, res) => {
   try {
     const { projectId, taskId, activityId, employeeID } = req.body;
@@ -18,25 +36,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const todayEnd = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
+    const { start: todayStart, end: todayEnd } = getTodayRangeIST();
 
     const query = {
       employeeID,
@@ -98,11 +98,7 @@ router.delete("/", async (req, res) => {
       });
     }
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
+    const { start: todayStart, end: todayEnd } = getTodayRangeIST();
 
     const dayReportQuery = {
       employeeID,
@@ -183,11 +179,7 @@ router.get("/employee/:employeeID", async (req, res) => {
       });
     }
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
+    const { start: startOfToday, end: endOfToday } = getTodayRangeIST();
 
     const dayReports = await DayReport.find({
       employeeID,

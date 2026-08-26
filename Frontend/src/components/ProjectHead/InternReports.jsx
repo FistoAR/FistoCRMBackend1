@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,60 @@ const ADMIN_DESIGNATIONS = [
   "SBU",
 ];
 
+const TableSkeleton = ({ isManagement }) => {
+  return (
+    <>
+      {Array.from({ length: 10 }).map((_, index) => (
+        <tr key={`skeleton-${index}`} className="border-b border-gray-200">
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[50%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[80%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[75%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[65%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[55%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+          </td>
+          <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+            <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+          </td>
+          {!isManagement && (
+            <>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[0.9vw] w-[60%] animate-shimmer rounded mx-auto" />
+              </td>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[1.1vw] w-[75%] animate-shimmer rounded-full mx-auto" />
+              </td>
+              <td className="px-[0.5vw] py-[0.7vw] border border-gray-300">
+                <div className="h-[0.9vw] w-[85%] animate-shimmer rounded mx-auto" />
+              </td>
+            </>
+          )}
+        </tr>
+      ))}
+    </>
+  );
+};
+
 const InternReports = () => {
   // ✅ Lazy loading state
   const [allFetchedReports, setAllFetchedReports] = useState([]);
@@ -30,16 +85,12 @@ const InternReports = () => {
   const [currentBatch, setCurrentBatch] = useState(0);
   const [loadedBatches, setLoadedBatches] = useState(new Set([0]));
 
-  const [loading, setLoading] = useState(false);
-  const [fetchingMore, setFetchingMore] = useState(false); // ✅ New state for background loading
   const [loadingAllRecords, setLoadingAllRecords] = useState(false); // Load all records for filtering
   const [reportType, setReportType] = useState("intern"); // ✅ New state for report type
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("all");
   const [toast, setToast] = useState(null);
   const filterRef = useRef(null);
@@ -96,137 +147,100 @@ const InternReports = () => {
     };
   }, []);
 
-  // Fetch employees list
-  useEffect(() => {
-    if (userInfo) {
-      fetchEmployees();
-    }
-  }, [userInfo]);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Initial fetch when user info is loaded
-  useEffect(() => {
-    if (userInfo) {
-      resetAndFetch();
-    }
-  }, [userInfo]);
-
-  // ✅ Reset and refetch when filters or report type change
-  useEffect(() => {
-    if (userInfo) {
-      setSelectedEmployee("all"); // Reset employee filter when switching report types
-      resetAndFetch();
-    }
-  }, [reportType]);
-
-  useEffect(() => {
-    if (userInfo) {
-      resetAndFetch();
-    }
-  }, [searchTerm, startDate, endDate, selectedEmployee]);
-
-  // ✅ All records are now handled by the backend pagination and filtering
-  // loadAllRecordsForFiltering is removed as it's no longer needed and was fragile
-
-
-  const fetchEmployees = async () => {
-    try {
-      if (userInfo?.isAdmin) {
+  const { data: employeesData = [] } = useQuery({
+    queryKey: ["internEmployees", userInfo?.employee_id, userInfo?.isAdmin, userInfo?.isTeamHead],
+    queryFn: async () => {
+      if (!userInfo) return [];
+      if (userInfo.isAdmin) {
         const response = await fetch(`${API_URL}/calendar/employees`);
         const data = await response.json();
-        if (data.status) {
-          setEmployees(data.data || []);
-        }
-      } else if (userInfo?.isTeamHead) {
+        return data.status ? data.data || [] : [];
+      } else if (userInfo.isTeamHead) {
         const response = await fetch(
-          `${API_URL}/intern-reports/team-by-designation/${userInfo?.designation}`,
+          `${API_URL}/intern-reports/team-by-designation/${userInfo.designation}`,
         );
         const data = await response.json();
-        console.log("Fetched Reports Data:", data.reports); // Debug log
-        if (data.success) {
-          setEmployees(data.data || []);
-        }
+        return data.success ? data.data || [] : [];
       }
-    } catch (error) {
-      console.error("Error fetching employees:", error);
-    }
-  };
+      return [];
+    },
+    enabled: !!userInfo,
+  });
+  
+  const employees = employeesData;
 
-  // ✅ Reset everything and fetch first batch
-  const resetAndFetch = () => {
-    setAllFetchedReports([]);
-    setCurrentBatch(0);
-    setLoadedBatches(new Set([0]));
-    setCurrentPage(1);
-    setTotalReportsCount(0);
-    fetchReportsBatch(0, false);
-  };
-
-  // ✅ Fetch a specific batch of reports with all active filters
-  const fetchReportsBatch = async (batchNumber, append = false) => {
-    if (append) {
-      setFetchingMore(true);
-    } else {
-      setLoading(true);
-    }
-
-    try {
-      const offset = batchNumber * FETCH_BATCH_SIZE;
-      let url = "";
-      
-      // Build common query parameters
+  const { data: reportsQueryData, isLoading: reportsQueryLoading } = useQuery({
+    queryKey: ["internReports", userInfo?.employee_id, reportType, selectedEmployee, searchTerm, startDate, endDate, currentBatch],
+    queryFn: async () => {
+      if (!userInfo) return { reports: [], total: 0 };
+      const offset = currentBatch * FETCH_BATCH_SIZE;
       const params = new URLSearchParams({
         limit: FETCH_BATCH_SIZE,
-        offset: offset
+        offset: offset,
       });
-      
+
       if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
       if (searchTerm) params.append("search", searchTerm);
 
+      let url = "";
       if (reportType === "management") {
         url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
-      } else if (userInfo?.isAdmin) {
+      } else if (userInfo.isAdmin) {
         url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
-      } else if (userInfo?.isTeamHead) {
+      } else if (userInfo.isTeamHead) {
         params.append("designation", userInfo.designation);
         params.append("isTeamHead", "true");
         url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
       } else {
-        url = `${API_URL}/intern-reports/reports/${userInfo?.employee_id}?${params.toString()}`;
+        url = `${API_URL}/intern-reports/reports/${userInfo.employee_id}?${params.toString()}`;
       }
 
       const response = await fetch(url);
       const data = await response.json();
+      return {
+        reports: data.success ? data.reports || [] : [],
+        total: data.success ? (data.total || (data.reports?.length || 0)) : 0
+      };
+    },
+    enabled: !!userInfo,
+  });
 
-      if (data.success) {
-        const newReports = data.reports || [];
+  const loading = reportsQueryLoading && allFetchedReports.length === 0;
+  const fetchingMore = reportsQueryLoading && allFetchedReports.length > 0;
 
-        if (append) {
-          setAllFetchedReports((prev) => {
-            // Avoid duplicates if same batch is fetched twice
-            const existingKeys = new Set(prev.map(r => `${r.employee_id}_${r.report_date}`));
-            const uniqueNew = newReports.filter(r => !existingKeys.has(`${r.employee_id}_${r.report_date}`));
-            return [...prev, ...uniqueNew];
-          });
-        } else {
-          setAllFetchedReports(newReports);
-          setTotalReportsCount(data.total || newReports.length);
-        }
-
-        setLoadedBatches((prev) => new Set([...prev, batchNumber]));
-      }
-    } catch (error) {
-      console.error("Error fetching reports:", error);
-      showToast("Error", "Failed to fetch reports");
-    } finally {
-      if (append) {
-        setFetchingMore(false);
+  useEffect(() => {
+    if (reportsQueryData) {
+      const newReports = reportsQueryData.reports;
+      if (currentBatch > 0) {
+        setAllFetchedReports((prev) => {
+          const existingKeys = new Set(
+            prev.map((r) => `${r.employee_id}_${r.report_date}`)
+          );
+          const uniqueNew = newReports.filter(
+            (r) => !existingKeys.has(`${r.employee_id}_${r.report_date}`)
+          );
+          return [...prev, ...uniqueNew];
+        });
       } else {
-        setLoading(false);
+        setAllFetchedReports(newReports);
+        setTotalReportsCount(reportsQueryData.total);
       }
+      setLoadedBatches((prev) => new Set([...prev, currentBatch]));
     }
-  };
+  }, [reportsQueryData, currentBatch]);
+
+  // Reset batch and paging state when filters change
+  useEffect(() => {
+    setAllFetchedReports([]);
+    setCurrentBatch(0);
+    setLoadedBatches(new Set([0]));
+    setCurrentPage(1);
+    setTotalReportsCount(0);
+  }, [reportType, selectedEmployee, searchTerm, startDate, endDate]);
 
   // ✅ loadAllRecordsForFiltering is no longer needed as the backend handles filtering
 
@@ -315,14 +329,13 @@ const InternReports = () => {
   // ✅ Calculate total pages based on server total, not filtered length
   const totalPages = Math.ceil(totalReportsCount / RECORDS_PER_PAGE);
 
-
   // ✅ Smart page change handler
   const handlePageChange = async (newPage) => {
     const firstRecordNeeded = (newPage - 1) * RECORDS_PER_PAGE;
     const batchNeeded = Math.floor(firstRecordNeeded / FETCH_BATCH_SIZE);
 
     if (!loadedBatches.has(batchNeeded)) {
-      await fetchReportsBatch(batchNeeded, true);
+      setCurrentBatch(batchNeeded);
     }
 
     setCurrentPage(newPage);
@@ -519,7 +532,7 @@ const InternReports = () => {
       )}
 
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
-        <div className="bg-white rounded-xl shadow-sm h-[100%] flex flex-col overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm h-[100%] flex flex-col overflow-hidden relative">
           {/* Header */}
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
             <div className="flex items-center gap-[0.5vw]">
@@ -534,7 +547,12 @@ const InternReports = () => {
               {userInfo?.isAdmin && (
                 <div className="flex bg-gray-100 p-[0.2vw] rounded-full border border-gray-200">
                   <button
-                    onClick={() => setReportType("intern")}
+                    onClick={() => {
+                      if (reportType !== "intern") {
+                        setSelectedEmployee("all");
+                        setReportType("intern");
+                      }
+                    }}
                     className={`px-[1.2vw] py-[0.35vw] rounded-full text-[0.75vw] font-semibold transition-all duration-300 cursor-pointer flex items-center gap-[0.3vw] ${
                       reportType === "intern"
                         ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5"
@@ -544,7 +562,12 @@ const InternReports = () => {
                     Employees
                   </button>
                   <button
-                    onClick={() => setReportType("management")}
+                    onClick={() => {
+                      if (reportType !== "management") {
+                        setSelectedEmployee("all");
+                        setReportType("management");
+                      }
+                    }}
                     className={`px-[1.2vw] py-[0.35vw] rounded-full text-[0.75vw] font-semibold transition-all duration-300 cursor-pointer flex items-center gap-[0.3vw] ${
                       reportType === "management"
                         ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5"
@@ -802,13 +825,8 @@ const InternReports = () => {
           )}
 
           {/* Table Content */}
-          <div className="flex-1 min-h-0">
-            {loading && allFetchedReports.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-                <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600 mb-4"></div>
-                <p className="text-gray-600 text-[0.9vw]">Loading reports...</p>
-              </div>
-            ) : filteredReports.length === 0 && !loading ? (
+          <div className="flex-1 min-h-0 relative">
+            {filteredReports.length === 0 && !loading ? (
               <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
                 <svg
                   className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300"
@@ -893,7 +911,10 @@ const InternReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedReports.map((report, reportIndex) => {
+                    {loading ? (
+                      <TableSkeleton isManagement={reportType === "management"} />
+                    ) : (
+                      displayedReports.map((report, reportIndex) => {
                       const tasks = report.tasks || [];
                       const hasTasks = tasks.length > 0;
                       const attendanceTasks = tasks.filter(
@@ -1138,7 +1159,8 @@ const InternReports = () => {
                           )}
                         </React.Fragment>
                       );
-                    })}
+                    })
+                  )}
                   </tbody>
                 </table>
               </div>
@@ -1173,7 +1195,7 @@ const InternReports = () => {
                 <span className="text-[0.85vw] text-gray-600 px-[0.5vw] flex items-center gap-[0.3vw]">
                   Page {currentPage} of {totalPages}
                   {fetchingMore && (
-                    <div className="animate-spin rounded-full h-[0.9vw] w-[0.9vw] border-b-2 border-blue-600"></div>
+                    <span className="text-[0.7vw] text-blue-600 animate-pulse font-semibold ml-1">Loading...</span>
                   )}
                 </span>
                 <button

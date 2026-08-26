@@ -33,6 +33,44 @@ const getEffectiveDeadline = (project) => {
   return projectDeadline;
 };
 
+const getEffectiveProjectPercentage = (project, projectTasks = []) => {
+  if (!projectTasks || projectTasks.length === 0) {
+    return project?.percentage || 0;
+  }
+  const activeTasks = projectTasks.filter((t) => t && t.status !== "Cancelled");
+  if (activeTasks.length === 0) {
+    return project?.percentage || 0;
+  }
+
+  let tasksSum = 0;
+  let completedTaskCount = 0;
+
+  for (const task of activeTasks) {
+    let taskPercentage = task.percentage || 0;
+    if (task.activities && Array.isArray(task.activities) && task.activities.length > 0) {
+      const activeActivities = task.activities.filter((act) => act && act.status !== "Cancelled");
+      if (activeActivities.length > 0) {
+        const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
+        taskPercentage = Math.round(activitiesSum / activeActivities.length);
+      } else {
+        taskPercentage = 0;
+      }
+    }
+
+    tasksSum += taskPercentage;
+    if (taskPercentage >= 100) {
+      completedTaskCount++;
+    }
+  }
+
+  let calculatedPercentage = Math.round(tasksSum / activeTasks.length);
+  if (calculatedPercentage >= 100 && completedTaskCount < activeTasks.length) {
+    calculatedPercentage = 99;
+  }
+
+  return calculatedPercentage;
+};
+
 const calculateHoldDuration = (statusHistory) => {
   if (!statusHistory || !Array.isArray(statusHistory)) return 0;
   let totalHoldMs = 0;
@@ -107,8 +145,8 @@ router.get("/overview", async (req, res) => {
     };
 
     const projectsWithStatus = projectsFromDb.map((project) => {
-      const projectPercentage = project.percentage || 0;
       const projectTasks = tasksByProject[project._id.toString()] || [];
+      const projectPercentage = getEffectiveProjectPercentage(project, projectTasks);
 
       let projectStatus = "Not Started";
 
@@ -262,7 +300,7 @@ router.get("/project/:projectId", async (req, res) => {
     ]);
 
     let projectStatus = "Not Started";
-    const projectPercentage = project.percentage || 0;
+    const projectPercentage = getEffectiveProjectPercentage(project, projectTasks);
 
     if (projectPercentage === 100) {
       const allTaskReports = taskReports.filter((r) => !r.activityId);
@@ -568,7 +606,7 @@ router.get("/project/:projectId", async (req, res) => {
           projectDescription: project.projectDescription,
           colorCode: project.colorCode,
           priority: project.priority,
-          percentage: project.percentage,
+          percentage: projectPercentage,
           employees: assignedEmployees,
           startDate: projectStartDate,
           endDate: projectEndDate,
@@ -604,9 +642,19 @@ router.get("/timeline", async (req, res) => {
       });
     }
 
-    const [allReports] = await Promise.all([
+    const [allReports, allTasks] = await Promise.all([
       TaskReports.find().lean(),
+      Tasks.find().lean(),
     ]);
+
+    const tasksByProject = (allTasks || []).reduce((acc, task) => {
+      const projectId = task.projectId ? task.projectId.toString() : null;
+      if (projectId) {
+        if (!acc[projectId]) acc[projectId] = [];
+        acc[projectId].push(task);
+      }
+      return acc;
+    }, {});
 
     // const outcomeMap = new Map(allOutcomes.map((o) => [o.clientId, o]));
 
@@ -667,7 +715,10 @@ router.get("/timeline", async (req, res) => {
       let delayed = 0;
 
       projects.forEach((project) => {
-        const projectPercentage = project.percentage || 0;
+        const projectPercentage = getEffectiveProjectPercentage(
+          project,
+          tasksByProject[project._id.toString()] || []
+        );
 
         if (projectPercentage !== 100) {
           return;
@@ -910,8 +961,8 @@ router.get("/team-members", async (req, res) => {
     };
 
     const projectsWithDetails = projectsFromDb.map((project) => {
-      const projectPercentage = project.percentage || 0;
       const projectTasks = tasksByProject[project._id.toString()] || [];
+      const projectPercentage = getEffectiveProjectPercentage(project, projectTasks);
       const startDate = project.startDate || null;
       const endDate = getEffectiveDeadline(project);
 
@@ -1385,7 +1436,7 @@ router.get("/employee-tasks", async (req, res) => {
       }
 
       if (projectTasks.length > 0) {
-        const projectPercentage = project.percentage || 0;
+        const projectPercentage = getEffectiveProjectPercentage(project, projectTasks);
         let projectStatus = "Not Started";
 
         let statusDate=null;
@@ -1400,7 +1451,9 @@ router.get("/employee-tasks", async (req, res) => {
           const projectDeadline = getEffectiveDeadline(project);
 
           if (projectPercentage === 100) {
-            const projectTaskIds = tasks.map((t) => t._id.toString());
+            const projectTaskIds = tasks
+              .filter((t) => t.status !== "Cancelled")
+              .map((t) => t._id.toString());
             const reportsForProject = allReports.filter((r) =>
               projectTaskIds.includes(r.taskId)
             );

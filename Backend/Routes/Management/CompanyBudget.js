@@ -41,7 +41,7 @@ router.get("/entries", (req, res) => {
   let sql = `
     SELECT 
       cb.id,
-      cb.date,
+      DATE_FORMAT(cb.date, '%Y-%m-%d') AS date,
       cb.payment_method AS paymentMethod,
       cb.credited_amount AS creditedAmount,
       cb.debited_amount AS debitedAmount,
@@ -51,8 +51,8 @@ router.get("/entries", (req, res) => {
       cb.updated_by AS updatedBy,
       cb.created_at AS createdAt,
       cb.updated_at AS updatedAt,
-      gm.employee_name AS givenMemberName,
-      rm.employee_name AS receivedMemberName,
+      COALESCE(gm.employee_name, cb.given_member) AS givenMemberName,
+      COALESCE(rm.employee_name, cb.received_member) AS receivedMemberName,
       ub.employee_name AS updatedByName
     FROM company_budget cb
     LEFT JOIN employees_details gm ON cb.given_member = gm.employee_id
@@ -65,13 +65,13 @@ router.get("/entries", (req, res) => {
 
   // Date range filter
   if (fromDate && toDate) {
-    sql += ` AND cb.date BETWEEN ? AND ?`;
+    sql += ` AND DATE_FORMAT(cb.date, '%Y-%m-%d') BETWEEN ? AND ?`;
     params.push(fromDate, toDate);
   } else if (fromDate) {
-    sql += ` AND cb.date = ?`;
+    sql += ` AND DATE_FORMAT(cb.date, '%Y-%m-%d') = ?`;
     params.push(fromDate);
   } else if (toDate) {
-    sql += ` AND cb.date <= ?`;
+    sql += ` AND DATE_FORMAT(cb.date, '%Y-%m-%d') <= ?`;
     params.push(toDate);
   }
 
@@ -190,8 +190,8 @@ router.post("/entries", (req, res) => {
           cb.updated_by AS updatedBy,
           cb.created_at AS createdAt,
           cb.updated_at AS updatedAt,
-          gm.employee_name AS givenMemberName,
-          rm.employee_name AS receivedMemberName,
+          COALESCE(gm.employee_name, cb.given_member) AS givenMemberName,
+          COALESCE(rm.employee_name, cb.received_member) AS receivedMemberName,
           ub.employee_name AS updatedByName
         FROM company_budget cb
         LEFT JOIN employees_details gm ON cb.given_member = gm.employee_id
@@ -311,8 +311,8 @@ router.put("/entries/:id", (req, res) => {
           cb.updated_by AS updatedBy,
           cb.created_at AS createdAt,
           cb.updated_at AS updatedAt,
-          gm.employee_name AS givenMemberName,
-          rm.employee_name AS receivedMemberName,
+          COALESCE(gm.employee_name, cb.given_member) AS givenMemberName,
+          COALESCE(rm.employee_name, cb.received_member) AS receivedMemberName,
           ub.employee_name AS updatedByName
         FROM company_budget cb
         LEFT JOIN employees_details gm ON cb.given_member = gm.employee_id
@@ -389,13 +389,13 @@ router.get("/stats", (req, res) => {
   const params = [];
 
   if (fromDate && toDate) {
-    sql += ` AND date BETWEEN ? AND ?`;
+    sql += ` AND DATE(date) BETWEEN ? AND ?`;
     params.push(fromDate, toDate);
   } else if (fromDate) {
-    sql += ` AND date = ?`;
+    sql += ` AND DATE(date) = ?`;
     params.push(fromDate);
   } else if (toDate) {
-    sql += ` AND date <= ?`;
+    sql += ` AND DATE(date) <= ?`;
     params.push(toDate);
   }
 

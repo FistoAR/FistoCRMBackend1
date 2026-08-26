@@ -1,18 +1,51 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import HandIcon from "../assets/ProjectPages/rightHand.png";
 import searchIcon from "../assets/ProjectPages/search.webp";
 import filterIcon from "../assets/ProjectPages/filter.webp";
 import clearFilter from "../assets/ProjectPages/overview/clear-filter.webp";
+
+const TableSkeleton = () => (
+  <>
+    {Array.from({ length: 8 }).map((_, idx) => (
+      <tr key={`skeleton-${idx}`} className="border-b border-gray-200">
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[75%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[60%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[65%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[65%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[80%] animate-shimmer rounded" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1vw] w-[50%] animate-shimmer rounded mx-auto" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1.2vw] w-[70%] animate-shimmer rounded-full mx-auto" />
+        </td>
+        <td className="px-[0.7vw] py-[0.8vw] border border-gray-300">
+          <div className="h-[1.2vw] w-[60%] animate-shimmer rounded-full mx-auto" />
+        </td>
+      </tr>
+    ))}
+  </>
+);
 
 const Projects = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const tableBodyRef = useRef(null);
 
-  const [allProjects, setAllProjects] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 
   const [projectStatus, setProjectStatus] = useState("In Progress");
   const [indicatorStyle, setIndicatorStyle] = useState({});
@@ -22,11 +55,33 @@ const Projects = () => {
   const [itemsPerPage, setItemsPerPage] = useState(6);
 
   const [loggedEmpDetails, setloggedEmpDetails] = useState({});
-
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [showYoursOnly, setShowYoursOnly] = useState(true);
   const [selectedPercentageRange, setSelectedPercentageRange] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState("");
+
+  const empIDParam = !["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)
+    ? loggedEmpDetails.id
+    : selectedEmployee || "";
+
+  const { data: allProjectsData, isLoading: queryLoading } = useQuery({
+    queryKey: ["projects", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+    queryFn: async () => {
+      if (!loggedEmpDetails.id) return [];
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
+      );
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch projects");
+      }
+      return data.data || [];
+    },
+    enabled: !!loggedEmpDetails.id,
+  });
+
+  const allProjects = allProjectsData || [];
+  const loading = queryLoading;
   const [employeeList, setEmployeeList] = useState([]);
   const filterRef = useRef(null);
 
@@ -152,12 +207,16 @@ const Projects = () => {
   }, [loggedEmpDetails.id, loggedEmpDetails.role]);
 
   useEffect(() => {
-    if (loggedEmpDetails.id) fetchProjects();
-  }, [searchTerm, loggedEmpDetails.id, selectedEmployee]);
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 500); // 500ms debounce delay
 
-  useEffect(() => {
-    if (isBaseRoute && loggedEmpDetails.id) fetchProjects();
-  }, [location.pathname]);
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchTerm]);
+
+
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -246,31 +305,7 @@ const Projects = () => {
     return actualStatus;
   };
 
-  const fetchProjects = async () => {
-    if (!loggedEmpDetails.id) return;
-    setLoading(true);
-    try {
-      let empIDParam = null;
-      if (!["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)) {
-        empIDParam = loggedEmpDetails.id;
-      } else if (
-        ["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role) &&
-        selectedEmployee
-      ) {
-        empIDParam = selectedEmployee;
-      }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project?search=${searchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
-      );
-      const data = await response.json();
-      if (data.success) setAllProjects(data.data || []);
-      setLoading(false);
-    } catch (error) {
-      console.error("Error fetching projects:", error);
-      setLoading(false);
-    }
-  };
 
   const getFilteredProjects = () => {
     let filteredProjects = [...allProjects];
@@ -747,10 +782,10 @@ const Projects = () => {
   };
 
   return (
-    <div className="text-black min-h-[92%] max-h-[92%] w-[100%] max-w-[100%] overflow-hidden">
+    <div className="text-black h-[calc(100vh-4.5vw)] w-[100%] max-w-[100%] flex flex-col overflow-hidden">
       {isBaseRoute ? (
         <>
-          <div className="w-[100%] h-[88vh] flex flex-col gap-[1.5vh] mt-[1vw]">
+          <div className="w-[100%] flex-1 min-h-0 flex flex-col gap-[1vh] mt-[0.3vw]">
             <div className="flex justify-between bg-white rounded-full shadow-sm p-[0.5vw] gap-[0.8vw] items-center w-full">
               <div className="relative flex gap-[0.8vw] w-full justify-between">
                 {/* Status tabs */}
@@ -840,7 +875,7 @@ const Projects = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm h-[94%] flex flex-col overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm flex-1 min-h-0 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
                 <div className="flex items-center gap-[0.5vw]">
                   <div className="flex gap-[0.4vw] items-center ml-[0.35vw]">
@@ -865,8 +900,29 @@ const Projects = () => {
                       placeholder="Search"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-[2vw] pr-[1vw] py-[0.4vw] rounded-full text-[0.8vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500"
+                      className="pl-[2vw] pr-[2.2vw] py-[0.4vw] rounded-full text-[0.8vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500 w-[14vw]"
                     />
+                    {searchTerm && (
+                      <button
+                        onClick={() => setSearchTerm("")}
+                        className="absolute right-[0.6vw] top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer flex items-center justify-center"
+                      >
+                        <svg
+                          className="w-[0.9vw] h-[0.9vw]"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M6 18L18 6M6 6l12 12"
+                          ></path>
+                        </svg>
+                      </button>
+                    )}
                   </div>
 
                   <div className="relative" ref={filterRef}>
@@ -1057,12 +1113,8 @@ const Projects = () => {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 max-h-[84%]">
-                {loading ? (
-                  <div className="flex items-center justify-center h-full min-h-[400px]">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  </div>
-                ) : paginatedProjects.length === 0 ? (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {!loading && paginatedProjects.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
                     <svg
                       className="w-16 h-16 mb-4 text-gray-300"
@@ -1097,7 +1149,7 @@ const Projects = () => {
                     )}
                   </div>
                 ) : (
-                  <div className="h-full mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
+                  <div className="h-[calc(100%-0.5vw)] max-h-full mr-[0.8vw] mb-[0.4vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
                     <table className="w-full border-collapse border border-gray-300">
                       <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                         <tr>
@@ -1143,7 +1195,9 @@ const Projects = () => {
                         </tr>
                       </thead>
                       <tbody ref={tableBodyRef}>
-                        {Object.keys(paginatedGroupedProjects).length === 0 ? (
+                        {loading ? (
+                          <TableSkeleton />
+                        ) : Object.keys(paginatedGroupedProjects).length === 0 ? (
                           <tr>
                             <td colSpan="8" className="text-center py-4">
                               No projects
@@ -1373,7 +1427,7 @@ const Projects = () => {
               </div>
 
               {!loading && paginatedProjects.length > 0 && (
-                <div className="flex items-center justify-between p-[1.7vw] h-[5%] flex-shrink-0">
+                <div className="flex items-center justify-between py-[0.4vw] px-[1.2vw] shrink-0 bg-white ">
                   <button
                     onClick={handlePreviousPage}
                     disabled={currentPage === 1}

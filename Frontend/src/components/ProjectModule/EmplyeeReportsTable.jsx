@@ -1334,7 +1334,7 @@ export default function EmployeeTaskTable({
                   const isDisabled =
                     task.status === "Completed" ||
                     task.status === "underReview" ||
-                    task.status === "Hold" ||
+                    (task.status === "Hold" && !isInTodayReport(task)) ||
                     ["Hold", "Canceled"].includes(projectTab);
                   const isReportDisabled = isInTodayReport(task);
                   const addReport = isReportDisabled && !isDisabled;
@@ -1353,7 +1353,7 @@ export default function EmployeeTaskTable({
                       }`}
                     >
                       <td className="px-[0.6vw] py-[0.6vw] border border-gray-300">
-                        {index + 1}
+                        {startIndex + index + 1}
                       </td>
                       <td className="px-[0.6vw] py-[0.6vw] max-w-[5vw] border border-gray-300 text-left">
                         {task.isActivityReport ? (
@@ -2554,29 +2554,10 @@ export default function EmployeeTaskTable({
                     Previous Reports
                   </h4>
                   {loadingHistory ? (
-                    <div className="flex items-center justify-center gap-[0.4vw] h-[13.5vw]">
-                      <svg
-                        className="animate-spin h-[1vw] w-[1vw] text-black"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      <p className="text-[0.75vw] text-gray-500 py-[1vw]">
-                        Loading records...
-                      </p>
+                    <div className="space-y-[0.5vw] py-[0.5vw] h-[13.5vw]">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="h-[2vw] animate-shimmer rounded-lg w-full" />
+                      ))}
                     </div>
                   ) : historyReports.length > 0 ? (
                     <>

@@ -908,10 +908,26 @@ const Maid = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="flex flex-col items-center gap-[1vw]">
-          <Loader2 className="w-[3vw] h-[3vw] text-purple-600 animate-spin" />
-          <span className="text-[1vw] text-gray-600">Loading maid attendance...</span>
+      <div className="flex flex-col h-full w-full p-4 space-y-4 animate-pulse bg-white rounded-xl">
+        {/* Header / Tabs Skeleton */}
+        <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+          <div className="flex gap-2">
+            <div className="h-9 w-28 bg-gray-200 rounded-lg" />
+            <div className="h-9 w-28 bg-gray-200 rounded-lg" />
+          </div>
+          <div className="h-9 w-36 bg-gray-200 rounded-lg" />
+        </div>
+        {/* Table / Grid Skeleton */}
+        <div className="flex-1 space-y-3">
+          <div className="h-10 bg-gray-200 rounded-lg w-full" />
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="h-12 bg-gray-100 rounded-lg w-full flex items-center px-4 gap-4">
+              <div className="h-4 bg-gray-200 rounded w-1/6" />
+              <div className="h-4 bg-gray-200 rounded w-1/4" />
+              <div className="h-4 bg-gray-200 rounded w-1/5" />
+              <div className="h-4 bg-gray-200 rounded w-1/6" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -937,7 +953,7 @@ const Maid = () => {
   }
 
   return (
-    <>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
       {/* Header bar */}
       <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
         <div className="flex items-center gap-[0.5vw]">
@@ -1633,7 +1649,7 @@ const Maid = () => {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

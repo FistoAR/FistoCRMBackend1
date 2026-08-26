@@ -1,4 +1,12 @@
 require("dotenv").config();
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (err, origin) => {
+  console.error(`❌ Caught exception: ${err}\n` + `Exception origin: ${origin}`);
+});
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -43,7 +51,10 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://pspc32l5-5174.inc1.devtunnels.ms",
-      "https://www.fist-o.com"
+      "https://pvkwh5mp-5173.inc1.devtunnels.ms",
+      "https://www.fist-o.com",
+      "https://fistocrmbackend1-2.onrender.com",
+      "https://fistocrmbackend1-1-n61p.onrender.com"
     ],
     credentials: true,
   })
@@ -70,8 +81,8 @@ app.use(
   })
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use("/Images", express.static(path.join(__dirname, "Images")));
 
 app.set("io", io);
@@ -345,6 +356,7 @@ const dailyReportRoute = require("./Routes/Intern/DailyReport");
 const internReportsRoute = require("./Routes/ProjectHead/InternReports");
 const AddClientManagement = require("./Routes/Management/AddClient");
 const ManagementFollowup = require("./Routes/Management/followups");
+const managementAnalyticsRoute = require("./Routes/Management/Analytics");
 const notificationRoutes = require("./Routes/Notification/Notification");
 const reportsRoutes = require("./Routes/Employees/reports");
 const stickyNotesRoute = require("./Routes/StickyNotes");
@@ -393,6 +405,7 @@ app.use("/api/daily-report", dailyReportRoute);
 app.use("/api/intern-reports", internReportsRoute);
 app.use("/api/clientAddManagement", AddClientManagement);
 app.use("/api/ManagementFollowups", ManagementFollowup);
+app.use("/api/management/analytics", managementAnalyticsRoute);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/sticky-notes", stickyNotesRoute);
@@ -419,6 +432,8 @@ app.use("/api/projectLinks", ProjectLink);
 app.use("/api/drive", driveRoutes);
 app.use("/api/drive/access", driveAccess);
 app.use("/api/notes", OthersResource);
+app.use("/api/role-access", require("./Routes/RoleAccess"));
+app.use("/api/documents", require("./Routes/Management/pdfDocuments"));
 
 
 
@@ -464,6 +479,15 @@ mongoose
   });
 
 const PORT = process.env.PORT || 5000;
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`❌ Port ${PORT} is already in use. Please terminate the process using port ${PORT} or check if another instance of server.js is running.`);
+    process.exit(1);
+  } else {
+    console.error("❌ Server error:", err);
+  }
+});
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);

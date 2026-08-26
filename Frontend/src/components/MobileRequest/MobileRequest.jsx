@@ -37,6 +37,7 @@ const EmployeeRequest = () => {
     toTime: "",
     permissionDuration: "",
     reasonPermission: "",
+    leaveDurationType: "full",
   });
 
   const [toast, setToast] = useState(null);
@@ -78,18 +79,24 @@ const EmployeeRequest = () => {
 
   // Auto-calculate number of days
   useEffect(() => {
-    if (formData.fromDate && formData.toDate) {
-      const from = new Date(formData.fromDate);
-      const to = new Date(formData.toDate);
-      const diffTime = to - from;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      if (diffDays > 0) {
-        setFormData((prev) => ({ ...prev, numberOfDays: diffDays.toString() }));
+    if (formData.fromDate) {
+      let days = "1";
+      if (formData.leaveDurationType === "full") {
+        if (formData.toDate) {
+          const from = new Date(formData.fromDate);
+          const to = new Date(formData.toDate);
+          const diffTime = to - from;
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          days = diffDays > 0 ? diffDays.toString() : "1";
+        } else {
+          days = "1";
+        }
+      } else {
+        days = "0.5";
       }
-    } else if (formData.fromDate) {
-      setFormData((prev) => ({ ...prev, numberOfDays: "1" }));
+      setFormData((prev) => ({ ...prev, numberOfDays: days }));
     }
-  }, [formData.fromDate, formData.toDate]);
+  }, [formData.fromDate, formData.toDate, formData.leaveDurationType]);
 
   // Time duration calculations
   useEffect(() => {
@@ -123,6 +130,7 @@ const EmployeeRequest = () => {
     setFormData({
       leaveType: "", customLeaveType: "", fromDate: "", toDate: "", numberOfDays: "", reasonForLeave: "",
       permissionDate: "", fromTime: "", toTime: "", permissionDuration: "", reasonPermission: "",
+      leaveDurationType: "full"
     });
     setSelectedEmployee("");
   };
@@ -153,13 +161,13 @@ const EmployeeRequest = () => {
       if (mainTab === "applyLeave") {
         const leaveTypeValue = formData.leaveType === "Other" ? formData.customLeaveType : formData.leaveType;
 
-        if (!leaveTypeValue || !formData.fromDate || !formData.numberOfDays || !formData.reasonForLeave.trim()) {
+        if (!leaveTypeValue || !formData.fromDate || !formData.leaveDurationType || !formData.numberOfDays || !formData.reasonForLeave.trim()) {
           showToast("Error", "Please fill all required fields");
           setIsSubmitting(false);
           return;
         }
 
-        if (parseInt(formData.numberOfDays) > 1 && !formData.toDate) {
+        if (formData.leaveDurationType === "full" && parseFloat(formData.numberOfDays) > 1 && !formData.toDate) {
           showToast("Error", "Please select To Date for multiple days leave");
           setIsSubmitting(false);
           return;
@@ -175,8 +183,9 @@ const EmployeeRequest = () => {
           body: JSON.stringify({
             leave_type: leaveTypeValue,
             from_date: formData.fromDate,
-            to_date: formData.toDate || null,
-            number_of_days: parseInt(formData.numberOfDays),
+            to_date: formData.leaveDurationType === "full" ? (formData.toDate || null) : null,
+            number_of_days: parseFloat(formData.numberOfDays),
+            duration_type: formData.leaveDurationType,
             reason: formData.reasonForLeave.trim(),
           }),
         });
@@ -339,9 +348,29 @@ const EmployeeRequest = () => {
                   value={formData.toDate}
                   onChange={handleInputChange}
                   min={formData.fromDate}
-                  disabled={!formData.fromDate}
+                  disabled={!formData.fromDate || formData.leaveDurationType !== "full"}
                   className="px-3 py-2.5 md:px-4 md:py-3 text-sm md:text-base border border-gray-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
                 />
+              </div>
+            </div>
+
+            {/* Leave Duration */}
+            <div className="flex flex-col">
+              <label className="text-sm md:text-base font-semibold text-gray-700 mb-2">Leave Duration <span className="text-red-500">*</span></label>
+              <div className="flex flex-wrap gap-4">
+                {[["full", "Full Day(s)"], ["morning", "Morning Half"], ["afternoon", "Afternoon Half"]].map(([val, label]) => (
+                  <label key={val} className="flex items-center gap-2 cursor-pointer text-sm md:text-base">
+                    <input
+                      type="radio"
+                      name="leaveDurationType"
+                      value={val}
+                      checked={formData.leaveDurationType === val}
+                      onChange={handleInputChange}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
               </div>
             </div>
 
@@ -350,7 +379,7 @@ const EmployeeRequest = () => {
               <label className="text-sm md:text-base font-semibold text-gray-700 mb-2">Number of Days</label>
               <input
                 type="text"
-                value={formData.numberOfDays ? `${formData.numberOfDays} ${parseInt(formData.numberOfDays) === 1 ? "day" : "days"}` : ""}
+                value={formData.numberOfDays ? `${formData.numberOfDays} ${parseFloat(formData.numberOfDays) === 1 ? "day" : "days"}` : ""}
                 readOnly
                 className="px-3 py-2.5 md:px-4 md:py-3 text-sm md:text-base border border-gray-300 rounded-lg bg-gray-50"
               />

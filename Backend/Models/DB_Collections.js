@@ -17,7 +17,7 @@ const statusHistorySchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["In Progress", "Hold", "Canceled"],
+      enum: ["In Progress", "Hold", "Canceled", "Completed"],
       required: true,
     },
     changedBy: { type: String },
@@ -34,6 +34,7 @@ const Project_details = new mongoose.Schema(
     department: { type: [String], required: true, default: [] },
     startDate: { type: String, required: true },
     endDate: { type: String, required: true },
+    reviewDate: { type: String, default: "" },
     description: { type: String, default: "" },
     employeeID: { type: String, default: "" },
     percentage: { type: Number, default: 0 },
@@ -48,7 +49,7 @@ const Project_details = new mongoose.Schema(
     correctionDate: [correction_date],
     status: {
       type: String,
-      enum: ["In Progress", "Hold", "Canceled"],
+      enum: ["In Progress", "Hold", "Canceled", "Completed"],
       default: "In Progress",
     },
     statusHistory: {
@@ -67,6 +68,7 @@ const Project_request = new mongoose.Schema(
     department: { type: [String], required: true, default: [] },
     startDate: { type: String, default: "" },
     endDate: { type: String, default: "" },
+    reviewDate: { type: String, default: "" },
     description: { type: String, default: "" },
     employeeID: { type: String, default: "" },
     status: { type: String, default: "Requested" },

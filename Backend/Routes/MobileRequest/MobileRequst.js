@@ -91,7 +91,7 @@ router.post("/leave-requests", async (req, res) => {
     
     console.log(`📝 Request for Employee: ${employee_name} (${employee_id})`);
     
-    const { leave_type, from_date, to_date, number_of_days, reason } = req.body;
+    const { leave_type, from_date, to_date, number_of_days, duration_type, reason } = req.body;
 
     if (!leave_type || !from_date || !number_of_days || !reason?.trim()) {
       return res.status(400).json({ success: false, error: "Missing required fields" });
@@ -100,9 +100,9 @@ router.post("/leave-requests", async (req, res) => {
     // ✅ STORES SELECTED EMPLOYEE ID IN DB
     const result = await queryWithRetry(
       `INSERT INTO leave_requests 
-       (employee_id, leave_type, from_date, to_date, number_of_days, reason, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [employee_id, leave_type, from_date, to_date || null, parseInt(number_of_days), reason.trim()]
+       (employee_id, leave_type, from_date, to_date, number_of_days, duration_type, reason, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [employee_id, leave_type, from_date, to_date || null, parseFloat(number_of_days), duration_type || null, reason.trim()]
     );
 
     console.log(`✅ Leave request created for ${employee_name} (${employee_id}) with ID: ${result.insertId}`);

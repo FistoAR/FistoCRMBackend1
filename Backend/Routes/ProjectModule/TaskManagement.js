@@ -9,6 +9,28 @@ const {
 } = require("../../Models/DB_Collections");
 const { queryWithRetry } = require("../../dataBase/connection");
 
+const getTodayRangeIST = () => {
+  const date = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parseInt(parts.find((p) => p.type === "year").value);
+  const month = parseInt(parts.find((p) => p.type === "month").value) - 1;
+  const day = parseInt(parts.find((p) => p.type === "day").value);
+
+  const start = new Date(
+    Date.UTC(year, month, day, 0, 0, 0, 0) - 5.5 * 60 * 60 * 1000
+  );
+  const end = new Date(
+    Date.UTC(year, month, day, 23, 59, 59, 999) - 5.5 * 60 * 60 * 1000
+  );
+  return { start, end };
+};
+
 const formatDate = (date) => {
   const d = new Date(date);
   const day = String(d.getDate()).padStart(2, "0");
@@ -110,27 +132,39 @@ const calculateTaskPercentage = (activities) => {
     return 0;
   }
 
-  const totalPercentage = activities.reduce((sum, activity) => {
+  const activeActivities = activities.filter((act) => act.status !== "Cancelled");
+  if (activeActivities.length === 0) {
+    return 0;
+  }
+
+  const totalPercentage = activeActivities.reduce((sum, activity) => {
     return sum + (activity.percentage || 0);
   }, 0);
 
-  return Math.round(totalPercentage / activities.length);
+  return Math.round(totalPercentage / activeActivities.length);
 };
 
 const updateProjectPercentage = async (projectId) => {
   try {
     const allTasks = await Tasks.find({ projectId }).lean();
+    const activeTasks = allTasks.filter((task) => task.status !== "Cancelled");
 
-    if (!allTasks || allTasks.length === 0) {
+    if (!activeTasks || activeTasks.length === 0) {
       await Project_Details.findByIdAndUpdate(projectId, { percentage: 0 });
       return;
     }
 
-    const totalPercentage = allTasks.reduce((sum, task) => {
-      return sum + (task.percentage || 0);
+    let completedTaskCount = 0;
+    const totalPercentage = activeTasks.reduce((sum, task) => {
+      const taskPct = task.percentage || 0;
+      if (taskPct >= 100) completedTaskCount++;
+      return sum + taskPct;
     }, 0);
 
-    const projectPercentage = Math.round(totalPercentage / allTasks.length);
+    let projectPercentage = Math.round(totalPercentage / activeTasks.length);
+    if (projectPercentage >= 100 && completedTaskCount < activeTasks.length) {
+      projectPercentage = 99;
+    }
 
     await Project_Details.findByIdAndUpdate(projectId, {
       percentage: projectPercentage,
@@ -597,10 +631,7 @@ router.post("/create", async (req, res) => {
 
 router.get("/dashboard", async (req, res) => {
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
+    const { start: todayStart, end: todayEnd } = getTodayRangeIST();
 
     const [allTasks, unscheduledTask, dayTask] = await Promise.all([
       Tasks.find().lean(),
@@ -621,77 +652,93 @@ router.get("/dashboard", async (req, res) => {
     const employees = await queryWithRetry(adminQuery);
 
     // Enrich today's day reports with task/activity/project details
-    const enrichedDayTask = await Promise.all(
-      dayTask.map(async (day) => {
-        let taskDetails = null;
-        let activityDetails = null;
-        let projectName = "";
-        let startDate = "";
-        let endDate = "";
-        let startTime = "";
-        let endTime = "";
+    const enrichedDayTaskPromises = dayTask.map(async (day) => {
+      let taskDetails = null;
+      let activityDetails = null;
+      let projectName = "";
+      let startDate = "";
+      let endDate = "";
+      let startTime = "";
+      let endTime = "";
 
-        if (day.taskId) {
-          const task = await Tasks.findById(day.taskId).lean();
-          if (task) {
-            taskDetails = {
-              taskName: task.taskName,
-              description: task.description,
-              startDate: task.startDate,
-              endDate: task.endDate,
-              startTime: task.startTime,
-              endTime: task.endTime,
-            };
+      if (day.taskId) {
+        const task = await Tasks.findById(day.taskId).lean();
+        if (!task) return null; // Skip if task was deleted!
 
-            startDate = task.startDate;
-            endDate = task.endDate;
-            startTime = task.startTime;
-            endTime = task.endTime;
+        taskDetails = {
+          taskName: task.taskName,
+          description: task.description,
+          startDate: task.startDate,
+          endDate: task.endDate,
+          startTime: task.startTime,
+          endTime: task.endTime,
+        };
 
-            // If activityId exists → it's an activity report
-            if (day.activityId) {
-              const activity = task.activities?.find(
-                (act) => act._id.toString() === day.activityId.toString()
-              );
-              if (activity) {
-                activityDetails = {
-                  activityName: activity.activityName,
-                  description: activity.description,
-                  startDate: activity.startDate,
-                  endDate: activity.endDate,
-                  startTime: activity.startTime,
-                  endTime: activity.endTime,
-                };
-                startDate = activity.startDate;
-                endDate = activity.endDate;
-                startTime = activity.startTime;
-                endTime = activity.endTime;
-              }
-            }
+        startDate = task.startDate;
+        endDate = task.endDate;
+        startTime = task.startTime;
+        endTime = task.endTime;
 
-            if (task.projectId) {
-              const project = await Project_Details.findById(task.projectId)
-                .select("projectName")
-                .lean();
-              if (project) {
-                projectName = project.projectName;
-              }
-            }
-          }
+        // If activityId exists → it's an activity report
+        if (day.activityId) {
+          const activity = task.activities?.find(
+            (act) => act._id.toString() === day.activityId.toString()
+          );
+          if (!activity) return null; // Skip if activity was deleted!
+
+          activityDetails = {
+            activityName: activity.activityName,
+            description: activity.description,
+            startDate: activity.startDate,
+            endDate: activity.endDate,
+            startTime: activity.startTime,
+            endTime: activity.endTime,
+          };
+          startDate = activity.startDate;
+          endDate = activity.endDate;
+          startTime = activity.startTime;
+          endTime = activity.endTime;
         }
 
-        return {
-          ...day,
-          taskDetails,
-          activityDetails,
-          projectName,
-          startDate,
-          endDate,
-          startTime,
-          endTime,
-        };
-      })
-    );
+        if (task.projectId) {
+          const project = await Project_Details.findById(task.projectId)
+            .select("projectName")
+            .lean();
+          if (project) {
+            projectName = project.projectName;
+          }
+        }
+      }
+
+      return {
+        ...day,
+        taskDetails,
+        activityDetails,
+        projectName,
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+      };
+    });
+
+    const enrichedDayTaskResults = await Promise.all(enrichedDayTaskPromises);
+    const enrichedDayTask = enrichedDayTaskResults.filter(Boolean);
+
+    // Fetch approved leave requests for today
+    const todayDateStr = new Date().toLocaleDateString('en-CA');
+    const leaveQuery = `
+      SELECT employee_id, leave_type, from_date, to_date, reason, status, management_status, team_head_status
+      FROM leave_requests
+      WHERE (status = 'approved' OR management_status = 'approved' OR team_head_status = 'approved')
+        AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))
+    `;
+    let approvedLeaves = [];
+    try {
+      approvedLeaves = await queryWithRetry(leaveQuery, [todayDateStr]);
+    } catch (lErr) {
+      console.error("Error fetching approved leaves for dashboard:", lErr);
+    }
 
     res.json({
       success: true,
@@ -699,6 +746,7 @@ router.get("/dashboard", async (req, res) => {
       unscheduledTask,
       dayTask: enrichedDayTask,
       employees,
+      approvedLeaves,
     });
   } catch (error) {
     console.error("Error fetching dashboard:", error);
@@ -977,6 +1025,9 @@ router.delete("/:taskId", async (req, res) => {
     }
 
     await updateProjectPercentage(deletedTask.projectId);
+
+    // Clean up associated day reports
+    await DayReport.deleteMany({ taskId });
 
     // 🔔 Broadcast to all users in the project that task was deleted
     console.log(`📢 Broadcasting task_deleted event to project room: project_${deletedTask.projectId}`);

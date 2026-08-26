@@ -1,15 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useNotification } from "../NotificationContext";
-import searchIcon from "../../assets/ProjectPages/search.webp"
+import searchIcon from "../../assets/ProjectPages/search.webp";
 
 const DayTask = () => {
   const { notify } = useNotification();
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [todayItems, setTodayItems] = useState([]);
-  const [dayReports, setDayReports] = useState([]);
   const [processingItems, setProcessingItems] = useState(new Set());
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -21,67 +17,53 @@ const DayTask = () => {
   const employeeId = userObj?.userName || "";
   const designation = userObj?.designation;
 
-  useEffect(() => {
-    if (employeeId) {
-      fetchEmployeeTasks();
-      fetchDayReports();
-    }
-  }, [employeeId]);
-
-  const fetchDayReports = async () => {
-    try {
+  const { data: tasksData, isLoading: tasksLoading, error: tasksError } = useQuery({
+    queryKey: ["employeeTasks", employeeId],
+    queryFn: async () => {
+      if (!employeeId) throw new Error("Employee ID not found");
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${employeeId}`
+        `${import.meta.env.VITE_API_BASE_URL}/project/employee-tasks/${employeeId}`,
       );
-
       const data = await response.json();
-
-      if (data.success) {
-        setDayReports(data.data);
-        const items = data.data.map((report) => {
-          if (report.activityId) {
-            return `activity-${report.activityId}`;
-          } else {
-            return `task-${report.taskId}`;
-          }
-        });
-        setTodayItems(items);
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch tasks");
       }
-    } catch (err) {
-      console.error("Error fetching day reports:", err);
-    }
-  };
+      return data.data || [];
+    },
+    enabled: !!employeeId,
+  });
 
-  const fetchEmployeeTasks = async () => {
-    if (!employeeId) {
-      setError("Employee ID not found");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
+  const { data: dayReportsData, isLoading: dayReportsLoading, refetch: refetchDayReports } = useQuery({
+    queryKey: ["dayReports", employeeId],
+    queryFn: async () => {
+      if (!employeeId) return [];
       const response = await fetch(
-        `${
-          import.meta.env.VITE_API_BASE_URL
-        }/project/employee-tasks/${employeeId}`
+        `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${employeeId}`,
       );
-
       const data = await response.json();
-
-      if (data.success) {
-        setTasks(data.data);
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch day reports");
       }
-    } catch (err) {
-      notify({
-        title: "Error",
-        message: `Error fetching tasks: ${err}`,
-      });
-      setError(err.response?.data?.message || "Failed to fetch tasks");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data.data || [];
+    },
+    enabled: !!employeeId,
+  });
+
+  const tasks = tasksData || [];
+  const dayReports = dayReportsData || [];
+  const loading = tasksLoading || dayReportsLoading;
+  const error = tasksError;
+
+  const todayItems = useMemo(() => {
+    if (!dayReportsData) return [];
+    return dayReportsData.map((report) => {
+      if (report.activityId) {
+        return `activity-${report.activityId}`;
+      } else {
+        return `task-${report.taskId}`;
+      }
+    });
+  }, [dayReportsData]);
 
   const handleAddToToday = async (type, id, task, activity = null) => {
     const itemKey = `${type}-${id}`;
@@ -102,14 +84,14 @@ const DayTask = () => {
               taskId: task.taskId,
               activityId: type === "activity" ? id : null,
             }),
-          }
+          },
         );
 
         const data = await response.json();
 
         if (response.ok) {
           if (data.success) {
-            setTodayItems(todayItems.filter((item) => item !== itemKey));
+            refetchDayReports();
             notify({
               title: "Success",
               message: "Day report deleted successfully",
@@ -150,13 +132,13 @@ const DayTask = () => {
               "Content-Type": "application/json",
             },
             body: JSON.stringify(dayReportData),
-          }
+          },
         );
 
         const data = await response.json();
 
         if (data.success) {
-          setTodayItems([...todayItems, itemKey]);
+          refetchDayReports();
           notify({
             title: "Success",
             message: "Day report created successfully",
@@ -304,7 +286,10 @@ const DayTask = () => {
           !matchesDateFilter(task.startDate, task.endDate)
         ) {
           // Skip?
-        } else if (task.status === "Hold" || task.status === "Cancelled") {
+        } else if (
+          task.taskStatus === "Hold" ||
+          task.taskStatus === "Cancelled"
+        ) {
           // Completely avoid hold tasks in day task
           return;
         } else {
@@ -312,7 +297,7 @@ const DayTask = () => {
 
           if (isTaskAddedToday) {
             const report = dayReports.find(
-              (r) => r.taskId === task.taskId && !r.activityId
+              (r) => r.taskId === task.taskId && !r.activityId,
             );
             if (report && isToday(report.createdAt)) {
               todayTasks.push(taskObj);
@@ -336,7 +321,10 @@ const DayTask = () => {
             !matchesDateFilter(activity.startDate, activity.endDate)
           ) {
             // Skip
-          } else if (activity.status === "Hold" || activity.status === "Cancelled") {
+          } else if (
+            activity.status === "Hold" ||
+            activity.status === "Cancelled"
+          ) {
             // Completely avoid hold activities in day task
             return;
           } else {
@@ -349,7 +337,7 @@ const DayTask = () => {
 
             if (isActivityAddedToday) {
               const report = dayReports.find(
-                (r) => r.activityId === activity._id
+                (r) => r.activityId === activity._id,
               );
               if (report && isToday(report.createdAt)) {
                 todayTasks.push(activityObj);
@@ -445,7 +433,7 @@ const DayTask = () => {
           {task.project.priority && (
             <span
               className={`text-[0.8vw] font-normal ${getPriorityColor(
-                task.project.priority
+                task.project.priority,
               )}`}
             >
               {task.project.priority}
@@ -512,9 +500,7 @@ const DayTask = () => {
                   ? "opacity-50 cursor-not-allowed"
                   : "cursor-pointer hover:bg-green-200"
               }`}
-              disabled={
-                isItemProcessing
-              }
+              disabled={isItemProcessing}
               onClick={() =>
                 handleAddToToday("activity", activity._id, task, activity)
               }
@@ -541,9 +527,7 @@ const DayTask = () => {
                   ></path>
                 </svg>
               )}
-              {isAddedToday("activity", activity._id)
-                ? "Remove"
-                : "Start now"}
+              {isAddedToday("activity", activity._id) ? "Remove" : "Start now"}
             </button>
           </div>
         ) : (
@@ -594,9 +578,7 @@ const DayTask = () => {
                   ? "opacity-50 cursor-not-allowed"
                   : "cursor-pointer hover:bg-green-200"
               }`}
-              disabled={
-                isItemProcessing
-              }
+              disabled={isItemProcessing}
               onClick={() => handleAddToToday("task", task.taskId, task)}
             >
               {isItemProcessing && (
@@ -686,7 +668,7 @@ const DayTask = () => {
     <div className="h-full">
       <div className="flex justify-between px-[0.4vw] py-[0.2vw]  bg-white rounded-xl items-center mb-[0.5vw]">
         <div className="flex gap-[0.3vw] text-[0.9vw] text-gray-500 py-[0.4vw] px-[0.3vw] ">
-            <NavLink
+          <NavLink
             to={`${getProjectsPath(designation)}`}
             end
             className="cursor-pointer hover:text-[#3B82F6]"
@@ -777,7 +759,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {todayTasks.map((task) =>
-                    renderTaskCard(task, "border-green-400")
+                    renderTaskCard(task, "border-green-400"),
                   )}
                 </div>
               </div>
@@ -790,7 +772,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {actualTodayTasks.map((task) =>
-                    renderTaskCard(task, "border-blue-400")
+                    renderTaskCard(task, "border-blue-400"),
                   )}
                 </div>
               </div>
@@ -803,7 +785,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {previousTasks.map((task) =>
-                    renderTaskCard(task, "border-red-400")
+                    renderTaskCard(task, "border-red-400"),
                   )}
                 </div>
               </div>
@@ -816,7 +798,7 @@ const DayTask = () => {
                 </h2>
                 <div className="space-y-[1vw]">
                   {upcomingTasks.map((task) =>
-                    renderTaskCard(task, "border-gray-300")
+                    renderTaskCard(task, "border-gray-300"),
                   )}
                 </div>
               </div>

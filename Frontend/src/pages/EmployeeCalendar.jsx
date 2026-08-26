@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,17 +10,77 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+const CalendarSkeleton = () => (
+  <div className="relative min-h-[77vh] max-h-[77vh] overflow-y-auto">
+    {Array.from({ length: 5 }).map((_, weekIndex) => (
+      <div
+        key={`skel-week-${weekIndex}`}
+        className="grid grid-cols-7"
+        style={{ minHeight: "11vh" }}
+      >
+        {Array.from({ length: 7 }).map((_, dayIndex) => (
+          <div
+            key={`skel-day-${weekIndex}-${dayIndex}`}
+            className={`border-b border-r border-gray-200 p-[0.5vw] relative flex flex-col gap-[0.4vw] ${
+              dayIndex === 6 ? "border-r-0" : ""
+            }`}
+            style={{ minHeight: "18vh" }}
+          >
+            <div className="h-[1.4vw] w-[1.4vw] animate-shimmer rounded-full mb-[0.2vw]" />
+            <div className="h-[1.5vw] w-[90%] animate-shimmer rounded-full" />
+            <div className="h-[1.5vw] w-[75%] animate-shimmer rounded-full" />
+            {weekIndex % 2 === 0 && (
+              <div className="h-[1.5vw] w-[80%] animate-shimmer rounded-full" />
+            )}
+          </div>
+        ))}
+      </div>
+    ))}
+  </div>
+);
+
 const EmployeeCalendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("");
   const [userRole, setUserRole] = useState(null);
   const [userName, setUserName] = useState(null);
   const [userId, setUserId] = useState(null);
   const [teamHead, setTeamHead] = useState(false);
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const { data: employeesData = [], isLoading: queryEmployeesLoading } = useQuery({
+    queryKey: ["activeEmployees"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
+      );
+      const data = await response.json();
+      if (data.employees && Array.isArray(data.employees)) {
+        return data.employees.filter(
+          (emp) =>
+            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) &&
+            emp.employment_type === "On Role",
+        );
+      }
+      return [];
+    },
+  });
+
+  const { data: tasksData = [], isLoading: queryTasksLoading } = useQuery({
+    queryKey: ["employeeCalendarTasks", selectedEmployee],
+    queryFn: async () => {
+      if (!selectedEmployee) return [];
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/employee-calendar-tasks/${selectedEmployee}`,
+      );
+      const data = await response.json();
+      return data.success ? data.data || [] : [];
+    },
+    enabled: !!selectedEmployee,
+  });
+
+  const employees = employeesData;
+  const tasks = tasksData;
+  const loading = queryTasksLoading;
+  const employeesLoading = queryEmployeesLoading;
   const [hoveredTask, setHoveredTask] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({
     x: 0,
@@ -48,7 +109,6 @@ const EmployeeCalendar = () => {
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   useEffect(() => {
-    fetchEmployees();
     try {
       const stored =
         localStorage.getItem("user") || sessionStorage.getItem("user");
@@ -76,53 +136,7 @@ const EmployeeCalendar = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (selectedEmployee) {
-      fetchEmployeeTasks(selectedEmployee);
-    } else {
-      setTasks([]);
-    }
-  }, [selectedEmployee, currentDate]);
 
-  const fetchEmployees = async () => {
-    setEmployeesLoading(true);
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
-      );
-      const data = await response.json();
-      if (data.employees && Array.isArray(data.employees)) {
-        const filteredEmployees = data.employees.filter(
-          (emp) =>
-            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) &&
-            emp.employment_type === "On Role",
-        );
-        setEmployees(filteredEmployees);
-      }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
-    } finally {
-      setEmployeesLoading(false);
-    }
-  };
-
-  const fetchEmployeeTasks = async (employeeId) => {
-    setLoading(true);
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project/employee-calendar-tasks/${employeeId}`,
-      );
-      const data = await response.json();
-      if (data.success) {
-        setTasks(data.data || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch tasks:", error);
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();
@@ -434,7 +448,19 @@ const EmployeeCalendar = () => {
         document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const filteredEmployees = employees.filter((emp) =>
+    const [activeTab, setActiveTab] = useState("Active");
+
+    const isEmployeeActive = (emp) => {
+      const status = (emp.working_status || "").trim().toLowerCase();
+      return status === "working" || status === "active" || status === "";
+    };
+
+    const activeEmployees = employees.filter((emp) => isEmployeeActive(emp));
+    const inactiveEmployees = employees.filter((emp) => !isEmployeeActive(emp));
+
+    const currentTabEmployees = activeTab === "Active" ? activeEmployees : inactiveEmployees;
+
+    const filteredEmployees = currentTabEmployees.filter((emp) =>
       emp.employee_name.toLowerCase().includes(search.toLowerCase()),
     );
 
@@ -457,7 +483,7 @@ const EmployeeCalendar = () => {
         </div>
 
         {open && (
-          <div className="absolute right-[0vw] mt-[0.4vw] w-[15vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
+          <div className="absolute right-[0vw] mt-[0.4vw] w-[16.5vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
             <div className="flex items-center px-[0.4vw] py-[0.2vw] rounded-full border-b border-gray-200 bg-gray-100">
               <Search className="w-[1vw] h-[1vw] text-gray-500 mr-[0.7vw]" />
               <input
@@ -468,6 +494,52 @@ const EmployeeCalendar = () => {
                 className="w-full bg-transparent outline-none text-[0.9vw] text-gray-700"
               />
             </div>
+
+            {/* Active / Inactive Tabs */}
+            <div className="flex border-b border-gray-200 mt-[0.3vw]">
+              <button
+                type="button"
+                onClick={() => setActiveTab("Active")}
+                className={`flex-1 text-center py-[0.25vw] text-[0.8vw] font-medium transition-colors cursor-pointer flex items-center justify-center gap-[0.3vw] ${
+                  activeTab === "Active"
+                    ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <span>Active</span>
+                <span
+                  className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                    activeTab === "Active"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {activeEmployees.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("Inactive")}
+                className={`flex-1 text-center py-[0.25vw] text-[0.8vw] font-medium transition-colors cursor-pointer flex items-center justify-center gap-[0.3vw] ${
+                  activeTab === "Inactive"
+                    ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <span>Inactive</span>
+                <span
+                  className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                    activeTab === "Inactive"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {inactiveEmployees.length}
+                </span>
+              </button>
+            </div>
+
             <div className="max-h-[20vw] overflow-y-auto mt-[0.2vw]">
               {filteredEmployees.length > 0 ? (
                 filteredEmployees.map((employee) => (
@@ -500,8 +572,8 @@ const EmployeeCalendar = () => {
                   </div>
                 ))
               ) : (
-                <div className="text-gray-500 text-[1vw] p-2">
-                  No results found
+                <div className="text-gray-500 text-[0.9vw] p-2 text-center">
+                  No {activeTab.toLowerCase()} employees found
                 </div>
               )}
             </div>
@@ -510,6 +582,8 @@ const EmployeeCalendar = () => {
       </div>
     );
   }
+
+
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -617,9 +691,7 @@ const EmployeeCalendar = () => {
           {!["Admin", "SBU", "Project Head"].includes(userRole) && !teamHead ? (
             <span></span>
           ) : employeesLoading ? (
-            <div className="text-[0.8vw] text-gray-500">
-              Loading employees...
-            </div>
+            <div className="h-[1.8vw] w-[10vw] animate-shimmer rounded-full" />
           ) : (
             <CustomSelect
               employees={employees}
@@ -646,10 +718,7 @@ const EmployeeCalendar = () => {
         </div>
 
         {loading ? (
-          <div className="p-[3vw] text-center text-gray-500 min-h-[77vh] flex flex-col justify-center items-center">
-            <div className="animate-spin w-[2vw] h-[2vw] border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-[0.5vw]" />
-            <div className="text-[0.9vw]">Loading tasks...</div>
-          </div>
+          <CalendarSkeleton />
         ) : !selectedEmployee ? (
           <div className="p-[3vw] text-center text-gray-500 min-h-[77vh] flex flex-col justify-center items-center">
             <User className="w-[3vw] h-[3vw] mx-auto mb-[0.5vw] opacity-50" />

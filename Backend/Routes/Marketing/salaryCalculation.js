@@ -714,6 +714,112 @@ router.post("/update-leave", async (req, res) => {
 });
 
 
+// ========== GET SALARY REPORTS ==========
+router.get("/reports", async (req, res) => {
+  console.log("✅ GET SALARY REPORTS HIT!");
+  try {
+    const { employeeId, fromMonth, fromYear, toMonth, toYear, status } = req.query;
+
+    let joinOnConditions = [];
+    let joinQueryParams = [];
+
+    if (fromYear && fromMonth && toYear && toMonth) {
+      joinOnConditions.push("(sc.year > ? OR (sc.year = ? AND sc.month >= ?))");
+      joinQueryParams.push(parseInt(fromYear), parseInt(fromYear), parseInt(fromMonth));
+
+      joinOnConditions.push("(sc.year < ? OR (sc.year = ? AND sc.month <= ?))");
+      joinQueryParams.push(parseInt(toYear), parseInt(toYear), parseInt(toMonth));
+    } else if (fromYear && fromMonth) {
+      joinOnConditions.push("sc.year = ? AND sc.month = ?");
+      joinQueryParams.push(parseInt(fromYear), parseInt(fromMonth));
+    } else if (toYear && toMonth) {
+      joinOnConditions.push("(sc.year < ? OR (sc.year = ? AND sc.month <= ?))");
+      joinQueryParams.push(parseInt(toYear), parseInt(toYear), parseInt(toMonth));
+    }
+
+    const joinClause = joinOnConditions.length > 0 
+      ? `AND ${joinOnConditions.join(" AND ")}` 
+      : "";
+
+    let whereClause = "WHERE 1=1";
+    if (status === "Inactive") {
+      whereClause += " AND ed.working_status != 'Active'";
+    } else if (status === "all") {
+      // No working_status filter
+    } else {
+      // Default: Active
+      whereClause += " AND ed.working_status = 'Active'";
+    }
+
+    let whereQueryParams = [];
+
+    if (employeeId && employeeId !== "all") {
+      whereClause += " AND ed.employee_id = ?";
+      whereQueryParams.push(employeeId);
+    }
+
+    const query = `
+      SELECT 
+        ed.employee_id,
+        ed.employee_name,
+        ed.profile_url,
+        ed.designation,
+        ed.employment_type,
+        sc.id as salary_id,
+        sc.month,
+        sc.year,
+        sc.basic_salary,
+        sc.total_leave_days,
+        sc.paid_leave_days,
+        sc.deduction_amount,
+        sc.total_deduction_days,
+        sc.incentive,
+        sc.bonus,
+        sc.medical,
+        sc.other_allowance,
+        sc.total_salary,
+        sc.created_at as salary_date
+      FROM employees_details ed
+      INNER JOIN salary_calculation sc ON ed.employee_id = sc.employee_id ${joinClause}
+      ${whereClause}
+      ORDER BY sc.year DESC, sc.month DESC, ed.employee_name ASC
+    `;
+
+    const allParams = [...joinQueryParams, ...whereQueryParams];
+    const results = await queryWithRetry(query, allParams);
+
+    const reports = results.map((row) => ({
+      employeeId: row.employee_id,
+      employeeName: row.employee_name,
+      profile_url: row.profile_url || null,
+      designation: row.designation,
+      jobRole: row.employment_type || 'On Role',
+      month: row.month || null,
+      year: row.year || null,
+      hasSalary: row.salary_id ? true : false,
+      salaryData: row.salary_id ? {
+        id: row.salary_id,
+        basicSalary: parseFloat(row.basic_salary || 0),
+        totalLeaveDays: row.total_leave_days !== null ? parseFloat(row.total_leave_days) : 0,
+        paidLeaveDays: row.paid_leave_days !== null ? parseFloat(row.paid_leave_days) : 0,
+        deductionAmount: parseFloat(row.deduction_amount || 0),
+        totalDeductionDays: row.total_deduction_days || 0,
+        incentive: parseFloat(row.incentive || 0),
+        bonus: parseFloat(row.bonus || 0),
+        medical: parseFloat(row.medical || 0),
+        otherAllowance: parseFloat(row.other_allowance || 0),
+        totalSalary: parseFloat(row.total_salary || 0)
+      } : null
+    }));
+
+    console.log(`✅ Reports fetched: ${reports.length} records`);
+    res.json({ success: true, reports });
+  } catch (err) {
+    console.error("Get reports error:", err);
+    res.status(500).json({ success: false, error: "Failed to fetch salary reports" });
+  }
+});
+
 // ========== TEST ROUTE ==========
 router.get("/test", (req, res) => {
   console.log("✅ SALARY CALCULATION TEST ROUTE WORKS!");
@@ -722,3 +828,4 @@ router.get("/test", (req, res) => {
 
 module.exports = router;
 console.log("✅ Salary Calculation Route EXPORTED!");
+

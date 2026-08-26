@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import CreateTask from "./AddTask";
 import Timeline from "./Timeline";
@@ -17,6 +18,91 @@ import assEmpIcon from "../../assets/ProjectPages/overview/assEmp.webp";
 import crownIcon from "../../assets/ProjectPages/overview/crown.svg";
 import addEmp from "../../assets/ProjectPages/overview/addEmp.svg";
 import { CorrectionDateStrip } from "./Correctiondatesection";
+
+const calculateHoldDuration = (statusHistory) => {
+  if (!statusHistory || !Array.isArray(statusHistory)) return 0;
+  let totalHoldMs = 0;
+  let holdStartTime = null;
+
+  statusHistory.forEach((historyItem) => {
+    if (historyItem.status === "Hold" && !holdStartTime) {
+      holdStartTime = new Date(historyItem.createdAt);
+    } else if (historyItem.status !== "Hold" && holdStartTime) {
+      const holdEndTime = new Date(historyItem.createdAt);
+      totalHoldMs += holdEndTime.getTime() - holdStartTime.getTime();
+      holdStartTime = null;
+    }
+  });
+
+  if (holdStartTime) {
+    const now = new Date();
+    totalHoldMs += now.getTime() - holdStartTime.getTime();
+  }
+
+  return totalHoldMs;
+};
+
+const OverviewSkeleton = () => (
+  <div className="min-h-screen h-[100%] max-h-[100%] space-y-[0.5vw]">
+    {/* Top 6 Stats Cards */}
+    <div className="flex justify-between w-[100%]">
+      {Array.from({ length: 6 }).map((_, idx) => (
+        <div
+          key={`stat-skel-${idx}`}
+          className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]"
+        >
+          <div className="flex items-center justify-between">
+            <div className="h-[1.2vw] w-[40%] animate-shimmer rounded" />
+            <div className="w-[1.5vw] h-[1.5vw] animate-shimmer rounded-full" />
+          </div>
+          <div className="h-[0.8vw] w-[60%] animate-shimmer rounded" />
+        </div>
+      ))}
+    </div>
+
+    {/* Middle Section */}
+    <div className="flex mt-[0.5vw] mb-[0.5vw] w-[100%] justify-between h-[18%]">
+      {/* Left Project Info Card */}
+      <div className="bg-white p-[0.8vw] rounded-lg shadow-sm w-[55.2%] flex flex-col justify-between">
+        <div className="flex justify-between items-center">
+          <div className="h-[1vw] w-[50%] animate-shimmer rounded" />
+          <div className="h-[1.5vw] w-[25%] animate-shimmer rounded-full" />
+        </div>
+        <div className="h-[0.8vw] w-[80%] animate-shimmer rounded" />
+        <div className="h-[0.8vw] w-[95%] animate-shimmer rounded" />
+      </div>
+
+      {/* Right Team/Correction Section */}
+      <div className="flex flex-col w-[44%] justify-between gap-[0.5vw]">
+        <div className="flex h-[47%] justify-between">
+          <div className="bg-white p-[0.8vw] rounded-lg shadow-sm w-[49%] flex flex-col justify-center gap-[0.4vw]">
+            <div className="h-[0.8vw] w-[70%] animate-shimmer rounded mx-auto" />
+          </div>
+          <div className="bg-white p-[0.8vw] rounded-lg shadow-sm w-[49%] flex flex-col justify-center gap-[0.4vw]">
+            <div className="h-[0.8vw] w-[70%] animate-shimmer rounded mx-auto" />
+            <div className="h-[1.2vw] w-[50%] animate-shimmer rounded-full mx-auto" />
+          </div>
+        </div>
+        <div className="bg-white p-[0.5vw] rounded-lg shadow-sm h-[48%] flex items-center">
+          <div className="h-[1vw] w-[90%] animate-shimmer rounded" />
+        </div>
+      </div>
+    </div>
+
+    {/* Main Bottom Section Skeleton */}
+    <div className="bg-white rounded-xl shadow-sm p-[1vw] h-[60vh] w-full flex flex-col gap-[0.8vw]">
+      <div className="flex justify-between items-center">
+        <div className="h-[1.5vw] w-[20%] animate-shimmer rounded" />
+        <div className="h-[1.5vw] w-[15%] animate-shimmer rounded-full" />
+      </div>
+      <div className="space-y-[0.6vw] mt-[0.5vw]">
+        {Array.from({ length: 5 }).map((_, idx) => (
+          <div key={`main-skel-${idx}`} className="h-[3.5vw] animate-shimmer rounded-lg w-full" />
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
 export default function Overview() {
   const location = useLocation();
@@ -36,23 +122,42 @@ export default function Overview() {
     projectTab,
     statusHistory,
   } = location.state || {};
-  const [projectData, setProjectData] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [buttonLoading, setbuttonLoading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
-  const [error, setError] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
-
-
-  const [stats, setStats] = useState({
-    total: 0,
-    completed: 0,
-    ongoing: 0,
-    delayed: 0,
-    overdue: 0,
+  const { data: projectData, isLoading: loading, error, refetch } = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: async () => {
+      if (!projectId) throw new Error("No project ID provided");
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to load project data");
+      }
+      return data.data;
+    },
+    enabled: !!projectId,
   });
+
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      refetch();
+    }
+  }, [refreshTrigger, refetch]);
+
+  useEffect(() => {
+    const handleRefresh = () => refetch();
+    window.addEventListener("RefreshLoad", handleRefresh);
+    return () => window.removeEventListener("RefreshLoad", handleRefresh);
+  }, [refetch]);
+
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
 
   const handleShow = (view) => {
     setTableShow(view);
@@ -126,6 +231,10 @@ export default function Overview() {
           }
         }
 
+        if (task.status === "Cancelled") {
+          return;
+        }
+
         total++;
         const percentage = task.percentage || 0;
         const endDate = new Date(task.endDate);
@@ -133,10 +242,13 @@ export default function Overview() {
         const [endHour, endMinute] = endTime.split(":").map(Number);
         endDate.setHours(endHour, endMinute, 59, 999);
 
+        const holdPeriodMs = calculateHoldDuration(task.statusHistory);
+        const effectiveEndDate = new Date(endDate.getTime() + holdPeriodMs);
+
         if (percentage === 100) {
           if (task.latestReportDate) {
             const completionDate = new Date(task.latestReportDate);
-            if (completionDate > endDate) {
+            if (completionDate > effectiveEndDate) {
               delayed++;
             } else {
               completed++;
@@ -144,7 +256,7 @@ export default function Overview() {
           } else {
             completed++;
           }
-        } else if (currentDate > endDate) {
+        } else if (currentDate > effectiveEndDate) {
           overdue++;
         } else if (percentage > 0) {
           ongoing++;
@@ -162,6 +274,10 @@ export default function Overview() {
             }
           }
 
+          if (activity.status === "Cancelled") {
+            return;
+          }
+
           total++;
           const percentage = activity.percentage || 0;
           const endDate = new Date(activity.endDate);
@@ -169,11 +285,16 @@ export default function Overview() {
           const [endHour, endMinute] = endTime.split(":").map(Number);
           endDate.setHours(endHour, endMinute, 59, 999);
 
+          const holdPeriodMs = calculateHoldDuration(
+            activity.statusHistory || task.statusHistory,
+          );
+          const effectiveEndDate = new Date(endDate.getTime() + holdPeriodMs);
+
           if (percentage === 100) {
             const completionDate =
               activity.completedDate || activity.latestReportDate;
             if (completionDate) {
-              if (new Date(completionDate) > endDate) {
+              if (new Date(completionDate) > effectiveEndDate) {
                 delayed++;
               } else {
                 completed++;
@@ -181,7 +302,7 @@ export default function Overview() {
             } else {
               completed++;
             }
-          } else if (currentDate > endDate) {
+          } else if (currentDate > effectiveEndDate) {
             overdue++;
           } else if (percentage > 0) {
             ongoing++;
@@ -216,82 +337,32 @@ export default function Overview() {
   }, [showCreateTask]);
 
   useEffect(() => {
-    if (showEmployeeModal) return;
+    const userData =
+      sessionStorage.getItem("user") || localStorage.getItem("user");
+    const userObj = userData ? JSON.parse(userData) : null;
+    const userRole = userObj?.designation || "";
+    const userId = userObj?.userName || "";
+    const isTeamHead = userObj?.teamHead || "";
 
-    const loadData = async () => {
-      const userData =
-        sessionStorage.getItem("user") || localStorage.getItem("user");
-      const userObj = userData ? JSON.parse(userData) : null;
-      const userRole = userObj?.designation || "";
-      const userId = userObj?.userName || "";
-      const isTeamHead = userObj?.teamHead || "";
-
-      setRole(userRole);
-      setTeamHead(isTeamHead);
-      setCurrentUserId(userId);
-
-      if (!projectId) {
-        setError("No project ID provided");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        if (!showEmployeeModal && refreshTrigger != 0) {
-          setLoading(false);
-        } else {
-          setLoading(true);
-        }
-        const response = await fetch(
-          `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}`,
-        );
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (data.success) {
-          setProjectData(data.data);
-        } else {
-          throw new Error(data.message || "Failed to load project data");
-        }
-      } catch (error) {
-        console.error("Error fetching projects:", error);
-        setError(error.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    window.addEventListener("RefreshLoad", loadData);
-
-    loadData();
-
-    return () => {
-      window.removeEventListener("RefreshLoad", loadData);
-    };
-  }, [projectId, refreshTrigger, showEmployeeModal]);
-
-  useEffect(() => {
-    if (projectData) {
-      const tasks = projectData.tasks || [];
-      const calculatedStats = calculateStats(
-        tasks,
-        showYours ? currentUserId : null,
-      );
-      setStats(calculatedStats);
+    setRole(userRole);
+    setTeamHead(isTeamHead);
+    setCurrentUserId(userId);
+    if (["Admin", "SBU", "Project Head"].includes(userRole)) {
+      setShowYours(false);
     } else {
-      setStats({
-        total: 0,
-        completed: 0,
-        ongoing: 0,
-        delayed: 0,
-        overdue: 0,
-      });
+      setShowYours(true);
     }
-  }, [projectData, refreshTrigger, showYours, role, currentUserId]);
+  }, [showEmployeeModal]);
+
+  const stats = useMemo(() => {
+    if (!projectData) {
+      return { total: 0, completed: 0, ongoing: 0, delayed: 0, overdue: 0 };
+    }
+    return calculateStats(
+      projectData.tasks || [],
+      showYours ? currentUserId : null,
+    );
+  }, [projectData, showYours, currentUserId, projectTab, statusHistory]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -617,13 +688,7 @@ export default function Overview() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-[1.8vw] w-[1.8vw] border-b-2 border-blue-600 mx-auto"></div>
-        </div>
-      </div>
-    );
+    return <OverviewSkeleton />;
   }
 
   if (error || !projectData) {
@@ -653,7 +718,7 @@ export default function Overview() {
   };
 
   return (
-    <div className={` min-h-screen h-[100%] max-h-[100%]`}>
+    <div className="w-full h-[calc(100vh-1.5vw)] flex flex-col min-h-0 pb-[1.5vw]">
       {!["Admin", "SBU", "Project Head"].includes(role) && (
         <div
           className={`flex justify-end mb-[0.5vw] absolute top-[6vw] right-[1.8vw]`}
@@ -834,7 +899,7 @@ export default function Overview() {
           </p>
         </div>
 
-        <div className=" flex flex-col w-[44%] h-[100%] max-[100%] justify-between gap-[0.5vw]"> 
+        <div className=" flex flex-col w-[44%] h-[100%] max-[100%] justify-between gap-[0.5vw]">
           <div className="flex h-[47%] justify-between">
             <TeamHeadCarousel
               teamHeads={projectData.teamHead}

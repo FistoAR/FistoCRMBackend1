@@ -5,6 +5,21 @@ const uploadProjectDocuments = require("../../middleware/projectBudgetUpload");
 const fs = require("fs");
 const path = require("path");
 
+const ensureArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === "object") return [val];
+  if (typeof val === "string") {
+    try {
+      const p = JSON.parse(val);
+      return Array.isArray(p) ? p : [p];
+    } catch (e) {
+      return [{ path: val, name: val.split("/").pop() }];
+    }
+  }
+  return [];
+};
+
 // helper: ensure every document has a stable docId
 const ensureDocIds = (docs, type) => {
   return (docs || []).map((doc, index) => ({
@@ -30,11 +45,11 @@ router.post("/projects", (req, res) => {
   }
 
   const sql = `
-    INSERT INTO dummy_projects (company_name, customer_name, project_name, project_category)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO projects (client_id, project_name, project_category, start_date, end_date, budget_status, onboard_status)
+    VALUES (0, ?, ?, CURDATE(), CURDATE(), 'pending', 'In progress')
   `;
 
-  db.pool.query(sql, [companyName, customerName, projectName, projectCategory], (err, result) => {
+  db.pool.query(sql, [projectName, projectCategory], (err, result) => {
     if (err) {
       console.error("Error creating project:", err);
       return res.status(500).json({
@@ -47,12 +62,12 @@ router.post("/projects", (req, res) => {
     const fetchNewProject = `
       SELECT 
         id,
-        company_name AS companyName,
-        customer_name AS customerName,
+        project_name AS companyName,
+        project_name AS customerName,
         project_name AS projectName,
         project_category AS projectCategory,
         created_at AS createdAt
-      FROM dummy_projects 
+      FROM projects 
       WHERE id = ?
     `;
 
@@ -74,20 +89,34 @@ router.post("/projects", (req, res) => {
   });
 });
 
-// GET all projects from dummy_projects table
+// GET all projects from projects table — single JOIN query (O(1))
 router.get("/projects", (req, res) => {
-  console.log("GET /api/budget/projects called");
-
   const sql = `
-    SELECT 
-      id,
-      company_name AS companyName,
-      customer_name AS customerName,
-      project_name AS projectName,
-      project_category AS projectCategory,
-      created_at AS createdAt
-    FROM dummy_projects
-    ORDER BY created_at DESC
+    SELECT
+      p.id,
+      p.client_id        AS clientId,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      COALESCE(c.customer_name, p.project_name) AS customerName,
+      p.project_name     AS projectName,
+      p.project_category AS projectCategory,
+      p.start_date       AS startDate,
+      p.end_date         AS endDate,
+      p.budget_status    AS budget_status,
+      p.budget_status    AS budgetStatus,
+      p.onboard_status   AS onboardStatus,
+      p.onboard_status   AS onboard_status,
+      p.created_at       AS createdAt,
+      p.updated_at       AS updatedAt,
+      p.updated_at       AS updated_at,
+      pb.total_budget     AS totalBudget,
+      pb.starting_date    AS budgetStartingDate,
+      pb.completion_date  AS budgetComplicationDate,
+      pb.updated_at       AS budgetUpdatedAt
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
+    LEFT JOIN project_budgets pb ON pb.project_id = p.id
+    WHERE LOWER(p.onboard_status) = 'onboarded'
+    ORDER BY COALESCE(pb.updated_at, p.updated_at, p.created_at) DESC
   `;
 
   db.pool.query(sql, (err, projects) => {
@@ -99,29 +128,46 @@ router.get("/projects", (req, res) => {
       });
     }
 
+    // Shape each row so budget fields mirror the detail endpoint structure
+    const shaped = projects.map((p) => ({
+      ...p,
+      budget: p.totalBudget != null ? {
+        totalBudget:      p.totalBudget,
+        startingDate:     p.budgetStartingDate,
+        complicationDate: p.budgetComplicationDate,
+      } : null,
+    }));
+
     res.status(200).json({
       success: true,
       message: "Projects fetched successfully",
-      projects: projects,
+      projects: shaped,
     });
   });
 });
 
+
 // GET single project by ID with all details
 router.get("/projects/:id", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   const { id } = req.params;
-  console.log(`GET /api/budget/projects/${id} called`);
 
   const projectQuery = `
     SELECT 
-      id,
-      company_name AS companyName,
-      customer_name AS customerName,    
-      project_name AS projectName,
-      project_category AS projectCategory,
-      created_at AS createdAt
-    FROM dummy_projects
-    WHERE id = ?
+      p.id,
+      p.client_id AS clientId,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      COALESCE(c.customer_name, p.project_name) AS customerName,    
+      p.project_name AS projectName,
+      p.project_category AS projectCategory,
+      p.start_date AS startDate,
+      p.end_date AS endDate,
+      p.created_at AS createdAt
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
+    WHERE p.id = ?
   `;
 
   db.pool.query(projectQuery, [id], (err, projects) => {
@@ -167,7 +213,7 @@ router.get("/projects/:id", (req, res) => {
 
       let budgetData = null;
       let paymentsData = [];
-      let documentsData = { po: [], invoice: [] };
+      let documentsData = { po: [], invoice: [], quotation: [] };
 
       if (budgets.length > 0) {
         const budget = budgets[0];
@@ -177,12 +223,11 @@ router.get("/projects/:id", (req, res) => {
 
           let rawDocuments = budget.documents
             ? JSON.parse(budget.documents)
-            : { po: [], invoice: [] };
+            : { po: [], invoice: [], quotation: [] };
 
           documentsData = {
-            po: (rawDocuments.po || []).map((doc) => ({
+            po: ensureArray(rawDocuments.po).map((doc) => ({
               ...doc,
-              // keep existing docId, only ensure path/name/size
               path:
                 doc.path ||
                 (doc.fileName
@@ -192,12 +237,23 @@ router.get("/projects/:id", (req, res) => {
               size: doc.size || 0,
               uploadedAt: doc.uploadedAt || new Date().toISOString(),
             })),
-            invoice: (rawDocuments.invoice || []).map((doc) => ({
+            invoice: ensureArray(rawDocuments.invoice).map((doc) => ({
               ...doc,
               path:
                 doc.path ||
                 (doc.fileName
                   ? `/Images/ProjectBudget/Invoice/${doc.fileName}`
+                  : null),
+              name: doc.name || doc.originalName || "Unknown Document",
+              size: doc.size || 0,
+              uploadedAt: doc.uploadedAt || new Date().toISOString(),
+            })),
+            quotation: ensureArray(rawDocuments.quotation).map((doc) => ({
+              ...doc,
+              path:
+                doc.path ||
+                (doc.fileName
+                  ? `/Images/ProjectBudget/Quotation/${doc.fileName}`
                   : null),
               name: doc.name || doc.originalName || "Unknown Document",
               size: doc.size || 0,
@@ -218,18 +274,122 @@ router.get("/projects/:id", (req, res) => {
         };
       }
 
-      console.log("✅ Documents with paths:", documentsData);
+      const pId = projects[0].id || 0;
+      const cId = projects[0].clientId || 0;
+      const compName = (projects[0].companyName || "").trim();
+      const custName = (projects[0].customerName || "").trim();
 
-      res.status(200).json({
-        success: true,
-        message: "Project details fetched successfully",
-        project: {
-          ...projects[0],
-          budget: budgetData,
-          payments: paymentsData,
-          documents: documentsData,
-        },
-      });
+      // Fetch quotation documents submitted during followups (Management & Marketing)
+      const followupDocsQuery = `
+        SELECT mf.id AS followupId, mf.clientID, mf.marketing_client_id, mf.projectId,
+               mf.quotation_path, mf.created_at AS followupDate,
+               c.company_name AS mgtCompany, c.customer_name AS mgtCustomer,
+               mc.company_name AS mktCompany, mc.customer_name AS mktCustomer
+        FROM ManagementFollowup mf
+        LEFT JOIN ClientsDataManagement c ON mf.clientID = c.id
+        LEFT JOIN ClientsData mc ON mf.marketing_client_id = mc.id
+        WHERE ( ? > 0 AND (mf.clientID = ? OR mf.marketing_client_id = ? OR mf.projectId = ?) )
+           OR ( ? <> '' AND LOWER(TRIM(c.company_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(mc.company_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(c.customer_name)) = LOWER(TRIM(?)) )
+           OR ( ? <> '' AND LOWER(TRIM(mc.customer_name)) = LOWER(TRIM(?)) )
+        ORDER BY mf.id DESC
+      `;
+
+      db.pool.query(
+        followupDocsQuery,
+        [
+          cId, cId, cId, pId,
+          compName, compName,
+          compName, compName,
+          custName, custName,
+          custName, custName,
+        ],
+        (followupErr, followupRows) => {
+          let followupDocuments = [];
+          if (followupErr) {
+            console.error("Error fetching followup quotation docs:", followupErr);
+          } else if (followupRows) {
+            followupRows.forEach((row) => {
+              const val = row.quotation_path;
+              if (val) {
+                let extractedDocs = [];
+                try {
+                  const parsed = typeof val === "string" ? JSON.parse(val) : val;
+                  if (Array.isArray(parsed)) {
+                      extractedDocs = parsed;
+                    } else if (typeof parsed === "object" && parsed !== null) {
+                      extractedDocs = [parsed];
+                    } else if (typeof parsed === "string") {
+                      extractedDocs = [{ path: parsed, name: parsed.split("/").pop() }];
+                    }
+                  } catch (e) {
+                    if (typeof val === "string") {
+                      extractedDocs = [{ path: val, name: val.split("/").pop() }];
+                    }
+                  }
+
+                  extractedDocs.forEach((doc) => {
+                    let relPath = doc.path || doc.filePath || doc.previewUrl || doc.driveUrl || (doc.filename ? `Images/Management/Quotation/${doc.filename}` : null);
+                    if (relPath && !relPath.startsWith("http") && !relPath.startsWith("/")) {
+                      relPath = `/${relPath}`;
+                    }
+                    const docName = doc.originalName || doc.name || (relPath ? relPath.split("/").pop() : "Followup Quotation");
+                    const docObj = {
+                      followupId: row.followupId,
+                      docId: `followup-${row.followupId}-${doc.convertedName || doc.filename || docName}`,
+                      name: docName,
+                      convertedName: doc.convertedName || doc.name || doc.originalName,
+                      path: relPath,
+                      size: doc.size || 0,
+                      uploadedAt: doc.uploadedAt || row.followupDate || new Date().toISOString(),
+                      type: "quotation",
+                      isFollowup: true,
+                    };
+                    const exists = followupDocuments.some(
+                      (d) => (d.path && relPath && d.path === relPath) || (d.name && docName && d.name === docName)
+                    );
+                    if (!exists) {
+                      followupDocuments.push(docObj);
+                    }
+                  });
+                }
+            });
+          }
+
+          // Keep modal-uploaded documents in documentsData
+          const cleanDocumentsData = {
+            po: (documentsData.po || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+            invoice: (documentsData.invoice || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+            quotation: (documentsData.quotation || []).filter(
+              (doc) => !doc.isFollowup && (!doc.path || !doc.path.includes("/Images/Management/"))
+            ),
+          };
+
+          const latestFollowupDocuments = {
+            quotation: followupDocuments.length > 0 ? followupDocuments[0] : null,
+            po: null,
+            invoice: null,
+            quotations: followupDocuments,
+          };
+
+          res.status(200).json({
+            success: true,
+            message: "Project details fetched successfully",
+            project: {
+              ...projects[0],
+              budget: budgetData,
+              payments: paymentsData,
+              documents: cleanDocumentsData,
+              followupDocuments: latestFollowupDocuments,
+            },
+          });
+        }
+      );
     });
   });
 });
@@ -263,7 +423,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
       console.error("Error fetching existing documents:", getErr);
     }
 
-    let existingDocuments = { po: [], invoice: [] };
+    let existingDocuments = { po: [], invoice: [], quotation: [] };
 
     if (existingData && existingData.length > 0 && existingData[0].documents) {
       try {
@@ -274,7 +434,7 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
     }
 
     const processNewDocuments = () => {
-      const newDocs = { po: [], invoice: [] };
+      const newDocs = { po: [], invoice: [], quotation: [] };
 
       if (req.files) {
         if (req.files.po) {
@@ -296,6 +456,16 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
             uploadedAt: new Date().toISOString(),
           }));
         }
+
+        if (req.files.quotation) {
+          newDocs.quotation = req.files.quotation.map((file) => ({
+            name: file.originalname,
+            fileName: file.filename,
+            path: `/Images/ProjectBudget/Quotation/${file.filename}`,
+            size: file.size,
+            uploadedAt: new Date().toISOString(),
+          }));
+        }
       }
 
       return newDocs;
@@ -304,14 +474,16 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
     const newDocuments = processNewDocuments();
 
     let mergedDocuments = {
-      po: [...(existingDocuments.po || []), ...newDocuments.po],
-      invoice: [...(existingDocuments.invoice || []), ...newDocuments.invoice],
+      po: [...ensureArray(existingDocuments.po), ...newDocuments.po],
+      invoice: [...ensureArray(existingDocuments.invoice), ...newDocuments.invoice],
+      quotation: [...ensureArray(existingDocuments.quotation), ...newDocuments.quotation],
     };
 
     // ensure docId on all documents
     mergedDocuments = {
       po: ensureDocIds(mergedDocuments.po, "po"),
       invoice: ensureDocIds(mergedDocuments.invoice, "invoice"),
+      quotation: ensureDocIds(mergedDocuments.quotation, "quotation"),
     };
 
     console.log("Existing Documents:", existingDocuments);
@@ -376,12 +548,24 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
               });
             }
 
-            res.status(200).json({
-              success: true,
-              message: "Project budget updated successfully",
-              budgetId: existingBudget[0].id,
-              documents: mergedDocuments,
-            });
+            db.pool.query(
+              `UPDATE projects SET budget_status = 'completed' WHERE id = ?`,
+              [projectId],
+              (statusErr, statusResult) => {
+                if (statusErr) {
+                  console.error("❌ Error updating budget_status:", statusErr);
+                } else {
+                  console.log(`✅ budget_status updated to 'completed' for project ${projectId}`);
+                }
+
+                res.status(200).json({
+                  success: true,
+                  message: "Project budget updated successfully",
+                  budgetId: existingBudget[0].id,
+                  documents: mergedDocuments,
+                });
+              }
+            );
           }
         );
       } else {
@@ -410,12 +594,24 @@ router.post("/save-project", uploadProjectDocuments, (req, res) => {
               });
             }
 
-            res.status(200).json({
-              success: true,
-              message: "Project budget saved successfully",
-              budgetId: result.insertId,
-              documents: mergedDocuments,
-            });
+            db.pool.query(
+              `UPDATE projects SET budget_status = 'completed' WHERE id = ?`,
+              [projectId],
+              (statusErr, statusResult) => {
+                if (statusErr) {
+                  console.error("❌ Error updating budget_status:", statusErr);
+                } else {
+                  console.log(`✅ budget_status updated to 'completed' for project ${projectId}`);
+                }
+
+                res.status(200).json({
+                  success: true,
+                  message: "Project budget saved successfully",
+                  budgetId: result.insertId,
+                  documents: mergedDocuments,
+                });
+              }
+            );
           }
         );
       }
@@ -453,7 +649,7 @@ router.delete("/projects/:projectId/document", (req, res) => {
       });
     }
 
-    let docs = { po: [], invoice: [] };
+    let docs = { po: [], invoice: [], quotation: [] };
 
     try {
       docs = JSON.parse(rows[0].documents);
@@ -545,6 +741,206 @@ router.delete("/projects/:id/budget", (req, res) => {
     res.status(200).json({
       success: true,
       message: "Budget deleted successfully",
+    });
+  });
+});
+
+// DELETE - Remove single document from ManagementFollowups row
+router.delete("/followup-document", (req, res) => {
+  const { followupId, docType, path: docPath } = req.body;
+  if (!followupId || !docType) {
+    return res.status(400).json({ success: false, error: "followupId and docType required" });
+  }
+
+  const columnMap = {
+    quotation: "quotation",
+    purchaseOrder: "purchaseOrder",
+    po: "purchaseOrder",
+    invoice: "invoice",
+  };
+  const dbColumn = columnMap[docType];
+  if (!dbColumn) {
+    return res.status(400).json({ success: false, error: "Invalid document type" });
+  }
+
+  const selectSql = `SELECT ${dbColumn} FROM ManagementFollowups WHERE id = ?`;
+  db.pool.query(selectSql, [followupId], (err, rows) => {
+    if (err || !rows.length) {
+      return res.status(500).json({ success: false, error: "Failed to locate followup" });
+    }
+
+    let docs = [];
+    try {
+      docs = rows[0][dbColumn] ? JSON.parse(rows[0][dbColumn]) : [];
+    } catch (e) {
+      docs = [];
+    }
+
+    // Filter out target document by path or filename
+    const cleanPath = (docPath || "").replace(/^\//, "");
+    const updatedDocs = docs.filter(d => {
+      if (!d) return false;
+      if (d.path && d.path === cleanPath) return false;
+      if (d.convertedName && cleanPath.includes(d.convertedName)) return false;
+      if (d.originalName && cleanPath.includes(d.originalName)) return false;
+      return true;
+    });
+
+    const updateSql = `UPDATE ManagementFollowups SET ${dbColumn} = ? WHERE id = ?`;
+    db.pool.query(updateSql, [JSON.stringify(updatedDocs), followupId], (updateErr) => {
+      if (updateErr) {
+        return res.status(500).json({ success: false, error: "Failed to update followup document" });
+      }
+      res.status(200).json({ success: true, message: "Document removed successfully" });
+    });
+  });
+});
+
+// GET - Overview summary statistics and recent entries
+router.get("/overview-summary", (req, res) => {
+  const monthFilter = req.query.month; // e.g. "2026-08"
+
+  const projectSql = `
+    SELECT 
+      p.id AS projectId,
+      COALESCE(c.customer_name, p.project_name) AS customerName,
+      COALESCE(c.company_name, p.project_name) AS companyName,
+      p.project_name AS projectName,
+      pb.total_budget AS totalBudget,
+      pb.payments AS paymentsJson,
+      DATE_FORMAT(pb.created_at, '%Y-%m') AS budgetMonth
+    FROM projects p
+    LEFT JOIN ClientsDataManagement c ON p.client_id = c.id
+    LEFT JOIN project_budgets pb ON pb.project_id = p.id
+    WHERE LOWER(p.onboard_status) = 'onboarded'
+  `;
+
+  db.pool.query(projectSql, (err, projectRows) => {
+    if (err) {
+      console.error("Error fetching project overview:", err);
+      return res.status(500).json({ success: false, error: "Failed to fetch overview summary" });
+    }
+
+    let totalProjectBudget = 0;
+    let totalReceivedBudget = 0;
+    const allRecentPayments = [];
+    const projectBreakdownMap = {};
+
+    (projectRows || []).forEach((row) => {
+      const projId = row.projectId;
+      const projBudget = parseFloat(row.totalBudget) || 0;
+      // Only count project budget for the selected month (based on pb.created_at)
+      const budgetMonthMatch = !monthFilter || row.budgetMonth === monthFilter;
+
+      if (!projectBreakdownMap[projId]) {
+        projectBreakdownMap[projId] = {
+          projectId: projId,
+          projectName: row.projectName || "Unnamed Project",
+          customerName: row.customerName || "-",
+          companyName: row.companyName || "-",
+          totalBudget: budgetMonthMatch ? projBudget : 0,
+          receivedBudget: 0,
+        };
+      }
+
+      if (budgetMonthMatch) {
+        totalProjectBudget += projBudget;
+      }
+
+      let payments = [];
+      if (row.paymentsJson) {
+        try {
+          payments = typeof row.paymentsJson === "string" ? JSON.parse(row.paymentsJson) : row.paymentsJson;
+        } catch (e) {}
+      }
+
+      (payments || []).forEach((pmt) => {
+        const amt = parseFloat(pmt.receivedAmount || pmt.amount || pmt.received_amount || 0) || 0;
+        const pmtDateStr = pmt.date || pmt.paymentDate || "";
+        
+        let isMonthMatch = true;
+        if (monthFilter && pmtDateStr) {
+          isMonthMatch = pmtDateStr.startsWith(monthFilter);
+        }
+
+        if (isMonthMatch) {
+          totalReceivedBudget += amt;
+          projectBreakdownMap[projId].receivedBudget += amt;
+
+          if (amt > 0 || pmtDateStr) {
+            allRecentPayments.push({
+              customerName: row.customerName || "-",
+              companyName: row.companyName || "-",
+              projectName: row.projectName || "-",
+              amount: amt,
+              date: pmtDateStr || null,
+              paymentMode: pmt.paymentMode || pmt.mode || "Cash",
+            });
+          }
+        }
+      });
+    });
+
+    const projectBreakdown = Object.values(projectBreakdownMap);
+    allRecentPayments.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const recentPayments = allRecentPayments;
+
+    let companySql = `
+      SELECT 
+        cb.id,
+        DATE_FORMAT(cb.date, '%Y-%m-%d') AS date,
+        cb.payment_method AS paymentMethod,
+        cb.credited_amount AS creditedAmount,
+        cb.debited_amount AS debitedAmount,
+        COALESCE(gm.employee_name, cb.given_member) AS givenMemberName,
+        COALESCE(rm.employee_name, cb.received_member) AS receivedMemberName,
+        cb.reason
+      FROM company_budget cb
+      LEFT JOIN employees_details gm ON cb.given_member = gm.employee_id
+      LEFT JOIN employees_details rm ON cb.received_member = rm.employee_id
+    `;
+
+    const companyParams = [];
+    if (monthFilter) {
+      companySql += ` WHERE DATE_FORMAT(cb.date, '%Y-%m') = ? `;
+      companyParams.push(monthFilter);
+    }
+    companySql += ` ORDER BY cb.date DESC, cb.created_at DESC LIMIT 50 `;
+
+    db.pool.query(companySql, companyParams, (companyErr, companyRows) => {
+      if (companyErr) {
+        console.error("Error fetching company overview:", companyErr);
+        return res.status(500).json({ success: false, error: "Failed to fetch overview summary" });
+      }
+
+      let expenseSql = `
+        SELECT 
+          SUM(debited_amount) AS totalExpenses,
+          SUM(credited_amount) AS totalCredited
+        FROM company_budget
+      `;
+      const expenseParams = [];
+      if (monthFilter) {
+        expenseSql += ` WHERE DATE_FORMAT(date, '%Y-%m') = ? `;
+        expenseParams.push(monthFilter);
+      }
+
+      db.pool.query(expenseSql, expenseParams, (expenseErr, expenseStats) => {
+        const companyTotalCredited = parseFloat(expenseStats?.[0]?.totalCredited) || 0;
+        const companyTotalDebited = parseFloat(expenseStats?.[0]?.totalExpenses) || 0;
+
+        res.status(200).json({
+          success: true,
+          totalProjectBudget,
+          totalReceivedBudget,
+          companyTotalExpenses: companyTotalCredited,
+          companyTotalCredited,
+          companyTotalDebited,
+          projectBreakdown,
+          recentPayments,
+          recentCompanyEntries: companyRows || [],
+        });
+      });
     });
   });
 });

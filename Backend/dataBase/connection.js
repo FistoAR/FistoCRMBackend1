@@ -10,7 +10,7 @@ function createPool() {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     waitForConnections: true,
-    connectionLimit: 5,  
+    // connectionLimit: 3,
     queueLimit: 0,
     connectTimeout: 10000,
     acquireTimeout: 10000,
@@ -18,29 +18,29 @@ function createPool() {
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
     idleTimeout: 30000,
-    maxIdle: 2
+    maxIdle: 1,
   });
 
-  pool.on('acquire', (connection) => {
-    console.log('→ Connection %d acquired', connection.threadId);
+  pool.on("acquire", (connection) => {
+    console.log("→ Connection %d acquired", connection.threadId);
   });
 
-  pool.on('release', (connection) => {
-    console.log('← Connection %d released', connection.threadId);
+  pool.on("release", (connection) => {
+    console.log("← Connection %d released", connection.threadId);
   });
 
-  pool.on('error', (err) => {
-    console.error('Pool error:', err.code);
-    if (err.code === 'ER_TOO_MANY_USER_CONNECTIONS') {
-      console.error('❌ MAX CONNECTIONS! Retrying...');
+  pool.on("error", (err) => {
+    console.error("Pool error:", err.code);
+    if (err.code === "ER_TOO_MANY_USER_CONNECTIONS") {
+      console.error("❌ MAX CONNECTIONS! Restart server to clear.");
     }
   });
 
   pool.getConnection((err, connection) => {
     if (err) {
-      console.error('❌ Connection failed:', err.message);
+      console.error("❌ Connection failed:", err.message);
     } else {
-      console.log('✓ Database connected');
+      console.log("✓ Database connected");
       connection.release();
     }
   });
@@ -55,12 +55,17 @@ function queryWithRetry(sql, params = [], retries = 3) {
     const attemptQuery = (attemptsLeft) => {
       pool.query(sql, params, (err, results) => {
         if (err) {
-          if ((err.code === 'ER_TOO_MANY_USER_CONNECTIONS' || err.code === 'ECONNRESET' || err.code === 'PROTOCOL_CONNECTION_LOST') 
-              && attemptsLeft > 0) {
-            console.warn(`[DB Retry] ${err.code}. Retrying... (${attemptsLeft} attempts left)`);
-            setTimeout(() => attemptQuery(attemptsLeft - 1), 1000);
-          } else if (err.code === 'ER_TOO_MANY_USER_CONNECTIONS') {
-            reject(new Error('Database busy. Try again in a moment.'));
+          if (err.code === "ER_TOO_MANY_USER_CONNECTIONS") {
+            reject(new Error("Database busy. Try again in a moment."));
+            return;
+          }
+
+          if (
+            (err.code === "ECONNRESET" ||
+              err.code === "PROTOCOL_CONNECTION_LOST") &&
+            attemptsLeft > 0
+          ) {
+            setTimeout(() => attemptQuery(attemptsLeft - 1), 500);
           } else {
             reject(err);
           }
@@ -78,28 +83,35 @@ function getConnectionWithRetry(retries = 3) {
     const attemptConnection = (attemptsLeft) => {
       pool.getConnection((err, connection) => {
         if (err) {
-          if ((err.code === 'ER_TOO_MANY_USER_CONNECTIONS' || err.code === 'ECONNRESET' || err.code === 'PROTOCOL_CONNECTION_LOST') 
-              && attemptsLeft > 0) {
-            console.warn(`[DB Connection Retry] ${err.code}. Retrying... (${attemptsLeft} attempts left)`);
-            setTimeout(() => attemptConnection(attemptsLeft - 1), 1000);
-          } else if (err.code === 'ER_TOO_MANY_USER_CONNECTIONS') {
-            reject(new Error('Database busy. Try again in a moment.'));
+          if (err.code === "ER_TOO_MANY_USER_CONNECTIONS") {
+            reject(new Error("Database busy. Try again in a moment."));
+            return;
+          }
+
+          if (
+            (err.code === "ECONNRESET" ||
+              err.code === "PROTOCOL_CONNECTION_LOST") &&
+            attemptsLeft > 0
+          ) {
+            setTimeout(() => attemptConnection(attemptsLeft - 1), 500);
           } else {
             reject(err);
           }
         } else {
           // Auto-release after 30 seconds safety
           const safetyTimer = setTimeout(() => {
-            console.warn('⚠ Force releasing connection', connection.threadId);
-            try { connection.release(); } catch(e) {}
+            console.warn("⚠ Force releasing connection", connection.threadId);
+            try {
+              connection.release();
+            } catch (e) {}
           }, 30000);
-          
+
           const originalRelease = connection.release.bind(connection);
-          connection.release = function() {
+          connection.release = function () {
             clearTimeout(safetyTimer);
             originalRelease();
           };
-          
+
           resolve(connection);
         }
       });
@@ -117,9 +129,9 @@ function closePool() {
   });
 }
 
-module.exports = { 
-  pool, 
-  queryWithRetry, 
+module.exports = {
+  pool,
+  queryWithRetry,
   getConnectionWithRetry,
-  closePool
+  closePool,
 };

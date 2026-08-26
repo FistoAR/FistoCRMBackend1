@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle,
   XCircle,
@@ -8,22 +9,137 @@ import {
   Trash2,
   Edit,
   Clock,
+  Copy,
 } from "lucide-react";
 import searchIcon from "../../../assets/Marketing/search.webp";
 import { renderEmployeeCell, formatDate } from "./utils.jsx";
 import ExportHRRequestsPDF from "./ExportHRRequestsPDF";
 import { FileDown, Search, X, User } from "lucide-react";
 
+import { useNotification } from "../../NotificationContext";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+const TooltipCell = ({ text }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+
+  const handleMouseEnter = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCoords({
+      x: rect.left + rect.width / 2,
+      y: rect.top - 6,
+    });
+    setShowTooltip(true);
+  };
+
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (!text)
+    return (
+      <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-400 border border-gray-300 text-center">
+        -
+      </td>
+    );
+
+  return (
+    <td
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => {
+        setShowTooltip(false);
+        setCopied(false);
+      }}
+      className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 max-w-[12vw] truncate relative cursor-pointer"
+    >
+      {text}
+      {showTooltip && (
+        <div
+          className="fixed z-[9999] bg-[#333333] text-white text-[12px] leading-relaxed px-3 py-2 rounded-md shadow-2xl max-w-[260px] font-normal whitespace-normal break-words pointer-events-auto transform -translate-x-1/2 -translate-y-full flex items-start justify-between gap-2.5"
+          style={{ top: `${coords.y}px`, left: `${coords.x}px` }}
+        >
+          <span>{text}</span>
+          <button
+            onClick={handleCopy}
+            className="shrink-0 p-1 hover:bg-white/20 rounded transition text-[11px] text-gray-300 hover:text-white flex items-center gap-1 cursor-pointer mt-0.5"
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <span className="text-emerald-400 font-semibold text-[10px]">
+                Copied!
+              </span>
+            ) : (
+              <Copy size={12} />
+            )}
+          </button>
+          <div className="absolute left-1/2 -bottom-1 -translate-x-1/2 border-4 border-transparent border-t-[#333333]" />
+        </div>
+      )}
+    </td>
+  );
+};
 
 const RequestsTab = ({
   leaveRequests,
   permissionRequests,
-  employees: allEmployees = [],
-  loading,
+  employees: allEmployees,
+  loading: parentLoading,
   fetchAllData,
-  showToast,
+  showToast: parentShowToast,
 }) => {
+  const { notify } = useNotification();
+  const showToast = (type, message) => {
+    if (typeof parentShowToast === "function") {
+      parentShowToast(type, message);
+    } else {
+      notify({ title: type, message });
+    }
+  };
+  const { data: internalLeaveRequests = [], isLoading: leaveLoading, refetch: refetchLeaves } = useQuery({
+    queryKey: ["leaveRequests"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/leave-requests`);
+      const data = await response.json();
+      return data.requests || data.data || [];
+    },
+    enabled: !leaveRequests,
+  });
+
+  const { data: internalPermissionRequests = [], isLoading: permLoading, refetch: refetchPerms } = useQuery({
+    queryKey: ["permissionRequests"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/permission-requests`);
+      const data = await response.json();
+      return data.requests || data.data || [];
+    },
+    enabled: !permissionRequests,
+  });
+
+  const { data: internalEmployees = [], isLoading: empLoading, refetch: refetchEmps } = useQuery({
+    queryKey: ["hrEmployees"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/hr/employees`);
+      const data = await response.json();
+      return data.employees || data.data || (Array.isArray(data) ? data : []);
+    },
+    enabled: !(allEmployees && allEmployees.length > 0),
+  });
+
+  const internalLoading = leaveLoading || permLoading || empLoading;
+
+  const activeLeaveRequests = leaveRequests ?? internalLeaveRequests;
+  const activePermissionRequests =
+    permissionRequests ?? internalPermissionRequests;
+  const activeEmployees =
+    allEmployees && allEmployees.length > 0 ? allEmployees : internalEmployees;
+  const loading = parentLoading ?? internalLoading;
+
   // Get current user designation
   const getCurrentUserDesignation = () => {
     const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
@@ -33,6 +149,13 @@ const RequestsTab = ({
   const getCurrentUserName = () => {
     const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
     return userData.employeeName || userData.userName || "";
+  };
+
+  const handleRefresh = () => {
+    if (typeof fetchAllData === "function") fetchAllData();
+    refetchLeaves();
+    refetchPerms();
+    refetchEmps();
   };
 
   const [requestSubTab, setRequestSubTab] = useState("Leave Request");
@@ -45,7 +168,6 @@ const RequestsTab = ({
     type: null,
   });
 
-
   // Filter States
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -53,11 +175,11 @@ const RequestsTab = ({
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const currentUserDesignation = getCurrentUserDesignation().toLowerCase();
   const isAdmin = currentUserDesignation.includes("admin");
-  const isManagement = 
-    isAdmin || 
-    currentUserDesignation.includes("sbu") || 
-    currentUserDesignation.includes("project head") || 
-    currentUserDesignation.includes("marketing") || 
+  const isManagement =
+    isAdmin ||
+    currentUserDesignation.includes("sbu") ||
+    currentUserDesignation.includes("project head") ||
+    currentUserDesignation.includes("marketing") ||
     currentUserDesignation.includes("hr");
 
   // Update Modal State
@@ -70,7 +192,6 @@ const RequestsTab = ({
   });
 
   const RECORDS_PER_PAGE = 10;
-
 
   useEffect(() => {
     setCurrentPage(1);
@@ -97,13 +218,8 @@ const RequestsTab = ({
         body: JSON.stringify({ approvedBy }),
       });
 
-      if (!response.ok) {
-        showToast("Error", "Failed to update request");
-        return;
-      }
-
       showToast("Success", "Request updated successfully");
-      fetchAllData();
+      handleRefresh();
     } catch (error) {
       console.error("Action error:", error);
       showToast("Error", "Network error");
@@ -174,7 +290,7 @@ const RequestsTab = ({
       }
 
       showToast("Success", "Request deleted successfully");
-      fetchAllData();
+      handleRefresh();
       closeDeleteModal();
     } catch (error) {
       console.error("Delete error:", error);
@@ -208,8 +324,8 @@ const RequestsTab = ({
 
   // Handle Update Submit
   const handleUpdateSubmit = async () => {
-    if (!updateModal.selectedAction || !updateModal.remark.trim()) {
-      showToast("Error", "Please select an action and enter a remark");
+    if (!updateModal.selectedAction) {
+      showToast("Error", "Please select an action");
       return;
     }
 
@@ -252,7 +368,7 @@ const RequestsTab = ({
       }
 
       showToast("Success", "Request updated successfully");
-      fetchAllData();
+      handleRefresh();
       closeUpdateModal();
     } catch (error) {
       console.error("Update error:", error);
@@ -278,9 +394,13 @@ const RequestsTab = ({
   // Get Final Status
   const getFinalStatus = (request) => {
     const { team_head_status, management_status } = request;
-    const emp = allEmployees.find(e => (e.employee_id || e.employeeId || e.userName) === request.employee_id);
+    const emp = (activeEmployees || []).find(
+      (e) =>
+        (e.employee_id || e.employeeId || e.userName) === request.employee_id,
+    );
     const empDesignation = (emp?.designation || "").toLowerCase();
-    const isEmpPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
+    const isEmpPHorSBU =
+      empDesignation.includes("project head") || empDesignation.includes("sbu");
 
     if (isEmpPHorSBU) {
       if (management_status) {
@@ -341,13 +461,22 @@ const RequestsTab = ({
   };
 
   const getFilteredRequests = () => {
-    let baseData = requestSubTab === "Leave Request" ? leaveRequests : permissionRequests;
-    
+    let baseData =
+      (requestSubTab === "Leave Request"
+        ? activeLeaveRequests
+        : activePermissionRequests) || [];
+
     return baseData.filter((req) => {
+      if (!req) return false;
       // Role-based visibility: PH/SBU requests are only visible to Admins
-      const emp = allEmployees.find(e => (e.employee_id || e.employeeId || e.userName) === req.employee_id);
+      const emp = activeEmployees.find(
+        (e) =>
+          (e.employee_id || e.employeeId || e.userName) === req.employee_id,
+      );
       const empDesignation = (emp?.designation || "").toLowerCase();
-      const isPHorSBU = empDesignation.includes("project head") || empDesignation.includes("sbu");
+      const isPHorSBU =
+        empDesignation.includes("project head") ||
+        empDesignation.includes("sbu");
 
       if (isPHorSBU && !isManagement) {
         return false;
@@ -355,32 +484,39 @@ const RequestsTab = ({
 
       // 1. Keyword Search (Name, ID, Reason, Type)
       const keyword = searchTerm.toLowerCase();
-      const matchesSearch = 
+      const matchesSearch =
         req.employee_name?.toLowerCase().includes(keyword) ||
         req.employee_id?.toLowerCase().includes(keyword) ||
         req.leave_type?.toLowerCase().includes(keyword) ||
         req.reason?.toLowerCase().includes(keyword);
 
       // 2. Employee Filter
-      const matchesEmployee = selectedEmployee === "all" || req.employee_id === selectedEmployee;
+      const matchesEmployee =
+        selectedEmployee === "all" || req.employee_id === selectedEmployee;
 
       // 3. Date Filter
-      const targetDate = requestSubTab === "Leave Request" ? req.from_date : req.permission_date;
+      const targetDate =
+        requestSubTab === "Leave Request" ? req.from_date : req.permission_date;
       let requestDate;
-      
-      if (typeof targetDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-        const [year, month, day] = targetDate.split('-').map(Number);
+
+      if (
+        typeof targetDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
+      ) {
+        const [year, month, day] = targetDate.split("-").map(Number);
         requestDate = new Date(year, month - 1, day);
       } else {
         requestDate = new Date(targetDate);
       }
-      
+
       requestDate.setHours(0, 0, 0, 0);
-      
+
       const matchesStartDate = !startDate || requestDate >= new Date(startDate);
       const matchesEndDate = !endDate || requestDate <= new Date(endDate);
 
-      return matchesSearch && matchesEmployee && matchesStartDate && matchesEndDate;
+      return (
+        matchesSearch && matchesEmployee && matchesStartDate && matchesEndDate
+      );
     });
   };
 
@@ -391,16 +527,16 @@ const RequestsTab = ({
         showToast("Error", "No data to export");
         return;
       }
-      
+
       showToast("Info", "Generating PDF...");
       const pdfExporter = new ExportHRRequestsPDF();
       pdfExporter.export(
-        dataToExport, 
-        requestSubTab, 
-        startDate, 
-        endDate, 
+        dataToExport,
+        requestSubTab,
+        startDate,
+        endDate,
         selectedEmployee !== "all" ? dataToExport[0]?.employee_name : "All",
-        allEmployees
+        activeEmployees,
       );
       showToast("Success", "PDF exported successfully");
     } catch (error) {
@@ -410,31 +546,32 @@ const RequestsTab = ({
   };
 
   // Use ONLY passed active employees as requested
-  const employees = allEmployees
-    .filter(emp => {
+  const employees = (activeEmployees || [])
+    .filter((emp) => {
       if (isManagement) return true;
       const des = (emp.designation || "").toLowerCase();
       return !des.includes("project head") && !des.includes("sbu");
     })
-    .map(emp => ({
+    .map((emp) => ({
       id: emp.employee_id || emp.employeeId,
-      name: emp.employee_name || emp.employeeName
+      name: emp.employee_name || emp.employeeName,
     }))
-    .filter(emp => emp.id)
+    .filter((emp) => emp.id)
     .sort((a, b) => a.name.localeCompare(b.name));
-
-
 
   const filteredRequests = getFilteredRequests();
   const hasActiveFilters = startDate || endDate || selectedEmployee !== "all";
-  
+
   // As requested: No pagination if filtered (only keyword search doesn't count as 'applying filters' in typical UX, but user said 'when applying filters don't need pagination')
   const isPaginated = !hasActiveFilters;
-  
-  const totalPages = isPaginated ? (Math.ceil(filteredRequests.length / RECORDS_PER_PAGE) || 1) : 1;
-  const startIndex = isPaginated ? (currentPage - 1) * RECORDS_PER_PAGE : 0;
-  const paginatedRequests = isPaginated ? filteredRequests.slice(startIndex, startIndex + RECORDS_PER_PAGE) : filteredRequests;
 
+  const totalPages = isPaginated
+    ? Math.ceil(filteredRequests.length / RECORDS_PER_PAGE) || 1
+    : 1;
+  const startIndex = isPaginated ? (currentPage - 1) * RECORDS_PER_PAGE : 0;
+  const paginatedRequests = isPaginated
+    ? filteredRequests.slice(startIndex, startIndex + RECORDS_PER_PAGE)
+    : filteredRequests;
 
   const handlePrevious = () => setCurrentPage((prev) => Math.max(prev - 1, 1));
   const handleNext = () =>
@@ -553,7 +690,7 @@ const RequestsTab = ({
 
               <div>
                 <label className="text-[0.85vw] font-semibold text-gray-700 mb-[0.5vw] block">
-                  Remark <span className="text-red-500">*</span>
+                  Remark
                 </label>
                 <textarea
                   value={updateModal.remark}
@@ -636,295 +773,346 @@ const RequestsTab = ({
       )}
 
       {/* Sub-tabs */}
-      <div className="bg-white rounded-xl overflow-hidden shadow-sm h-[6%] flex-shrink-0 mb-[1vh]">
-        <div className="flex border-b border-gray-200 overflow-x-auto h-full">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex-shrink-0 overflow-hidden mb-3">
+        <div className="flex border-b border-gray-200 overflow-x-auto">
           <button
             onClick={() => {
               setRequestSubTab("Leave Request");
               setSearchTerm("");
             }}
-            className={`px-[1.2vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors ${
+            className={`px-[1.2vw] py-[0.8vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors ${
               requestSubTab === "Leave Request"
-                ? "border-b-2 border-blue-600 text-blue-600"
+                ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            Leave Requests ({leaveRequests.length})
+            Leave Requests ({(activeLeaveRequests || []).length})
           </button>
           <button
             onClick={() => {
               setRequestSubTab("Permission Request");
               setSearchTerm("");
             }}
-            className={`px-[1.2vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors ${
+            className={`px-[1.2vw] py-[0.8vw] cursor-pointer font-medium text-[0.85vw] whitespace-nowrap transition-colors ${
               requestSubTab === "Permission Request"
-                ? "border-b-2 border-blue-600 text-blue-600"
+                ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            Permission Requests ({permissionRequests.length})
+            Permission Requests ({(activePermissionRequests || []).length})
           </button>
         </div>
       </div>
 
-      <div className="flex items-center justify-between p-[0.8vw] h-auto flex-shrink-0 bg-white border-b border-gray-200">
-        <div className="flex items-center gap-[1.5vw]">
-          <div className="flex items-center gap-[0.5vw]">
-            <span className="font-medium text-[0.95vw] text-gray-800">
-              {requestSubTab}s
-            </span>
-            <span className="text-[0.8vw] text-gray-400">
-              ({filteredRequests.length} results)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-[1vw]">
-            {/* Employee Filter */}
-            <div className="relative group">
-               <User size="1vw" className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400" />
-               <select 
-                value={selectedEmployee}
-                onChange={(e) => setSelectedEmployee(e.target.value)}
-                className="pl-[1.8vw] pr-[0.8vw] py-[0.25vw] bg-gray-100 border border-gray-200 rounded-lg text-[0.8vw] outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
-               >
-                 <option value="all">All Employees</option>
-                 {employees.map(emp => (
-                   <option key={emp.id} value={emp.id}>{emp.name}</option>
-                 ))}
-               </select>
+      {/* Main Card: Filters + Table + Pagination */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex-1 min-h-0 flex flex-col overflow-hidden">
+        {/* Filters Bar */}
+        <div className="flex items-center justify-between p-[0.8vw] flex-shrink-0 bg-white border-b border-gray-200">
+          <div className="flex items-center gap-[1.5vw]">
+            <div className="flex items-center gap-[0.5vw]">
+              <span className="font-medium text-[0.95vw] text-gray-800">
+                {requestSubTab}s
+              </span>
+              <span className="text-[0.8vw] text-gray-400">
+                ({filteredRequests.length} results)
+              </span>
             </div>
 
-            {/* Date Filters */}
-            <div className="flex items-center gap-[0.5vw]">
-               <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
+            <div className="flex items-center gap-[1vw]">
+              {/* Employee Filter */}
+              <div className="relative group">
+                <User
+                  size="1vw"
+                  className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400"
+                />
+                <select
+                  value={selectedEmployee}
+                  onChange={(e) => setSelectedEmployee(e.target.value)}
+                  className="pl-[1.8vw] pr-[0.8vw] py-[0.25vw] bg-gray-100 border border-gray-200 rounded-lg text-[0.8vw] outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                >
+                  <option value="all">All Employees</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Date Filters */}
+              <div className="flex items-center gap-[0.5vw]">
+                <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
                   <span className="text-[0.7vw] text-gray-500">From</span>
-                  <input 
+                  <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                     className="bg-transparent border-none outline-none text-[0.8vw] p-[0.1vw] cursor-pointer"
                   />
-               </div>
-               <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
+                </div>
+                <div className="flex items-center gap-[0.3vw] bg-gray-100 px-[0.5vw] py-[0.1vw] rounded-lg border border-gray-200">
                   <span className="text-[0.7vw] text-gray-500">To</span>
-                  <input 
+                  <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                     className="bg-transparent border-none outline-none text-[0.8vw] p-[0.1vw] cursor-pointer"
                   />
-               </div>
-               {(startDate || endDate || selectedEmployee !== "all") && (
-                 <button
-                  onClick={() => {
-                    setStartDate("");
-                    setEndDate("");
-                    setSelectedEmployee("all");
-                  }}
-                  className="p-[0.3vw] hover:bg-red-50 text-red-500 rounded-full transition-colors cursor-pointer"
-                  title="Clear Filters"
-                 >
-                   <X size="1vw" />
-                 </button>
-               )}
+                </div>
+                {(startDate || endDate || selectedEmployee !== "all") && (
+                  <button
+                    onClick={() => {
+                      setStartDate("");
+                      setEndDate("");
+                      setSelectedEmployee("all");
+                    }}
+                    className="p-[0.3vw] hover:bg-red-50 text-red-500 rounded-full transition-colors cursor-pointer"
+                    title="Clear Filters"
+                  >
+                    <X size="1vw" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
+
+          <div className="flex items-center gap-[1vw]">
+            <div className="relative">
+              <Search
+                size="1.1vw"
+                className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400"
+              />
+              <input
+                type="text"
+                placeholder="Quick search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-[2.1vw] pr-[1vw] py-[0.25vw] rounded-full text-[0.85vw] bg-gray-100 border border-gray-200 focus:ring-1 focus:ring-blue-500 outline-none w-[15vw] transition-all"
+              />
+            </div>
+
+            <button
+              onClick={handleExportPDF}
+              disabled={filteredRequests.length === 0}
+              className="flex items-center gap-[0.4vw] bg-blue-600 hover:bg-blue-700 text-white px-[1vw] py-[0.3vw] rounded-lg text-[0.85vw] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <FileDown size="1vw" />
+              Export PDF
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-[1vw]">
-          <div className="relative">
-            <Search
-              size="1.1vw"
-              className="absolute left-[0.5vw] top-1/2 transform -translate-y-1/2 text-gray-400"
-            />
-            <input
-              type="text"
-              placeholder="Quick search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-[2.1vw] pr-[1vw] py-[0.25vw] rounded-full text-[0.85vw] bg-gray-100 border border-gray-200 focus:ring-1 focus:ring-blue-500 outline-none w-[15vw] transition-all"
-            />
-          </div>
-          
-          <button
-            onClick={handleExportPDF}
-            disabled={filteredRequests.length === 0}
-            className="flex items-center gap-[0.4vw] bg-blue-600 hover:bg-blue-700 text-white px-[1vw] py-[0.3vw] rounded-lg text-[0.85vw] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            <FileDown size="1vw" />
-            Export PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Table Content */}
-      <div className="flex-1 min-h-0">
-        {loading ? (
-          <div className="flex items-center justify-center h-full min-h-[400px]">
-            <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
-          </div>
-        ) : filteredRequests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
-            <Calendar className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300" />
-            <p className="text-[1.1vw] font-medium mb-[0.5vw]">
-              No requests found
-            </p>
-            <p className="text-[1vw] text-gray-400">
-              {searchTerm
-                ? "Try adjusting your search"
-                : "No requests in this category"}
-            </p>
-          </div>
-        ) : (
-          <div className="h-full mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
-            <table className="w-full border-collapse border border-gray-300">
-              <thead className="bg-[#E2EBFF] sticky top-0">
-                <tr>
-                  {requestSubTab === "Leave Request" ? (
-                    <>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        S.NO
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Employee
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Submitted on
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Leave Type
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        From
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        To
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Duration
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Reason
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        By Project Head
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        By Management
-                      </th>
-                      {/* <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Final Status
-                      </th> */}
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Action
-                      </th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        S.NO
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Employee
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Submitted On
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Date
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        From
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        To
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Duration
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Reason
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Action
-                      </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                        Approve By
-                      </th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedRequests.map((req, index) => (
-                  <tr
-                    key={req.id}
-                    className="hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
-                      {startIndex + index + 1}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                      {renderEmployeeCell(req)}
-                    </td>
-                    <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
-                      {formatDateTime(req.created_at)}
-                    </td>
+        {/* Table Area */}
+        <div className="flex-1 min-h-0 bg-white flex flex-col overflow-hidden">
+          {loading ? (
+            <div className="p-4 space-y-3 animate-pulse">
+              <div className="h-10 bg-gray-200 rounded-lg w-full" />
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="h-12 bg-gray-100 rounded-lg w-full flex items-center px-4 gap-4"
+                >
+                  <div className="h-4 bg-gray-200 rounded w-1/12" />
+                  <div className="h-4 bg-gray-200 rounded w-1/4" />
+                  <div className="h-4 bg-gray-200 rounded w-1/5" />
+                  <div className="h-4 bg-gray-200 rounded w-1/6" />
+                </div>
+              ))}
+            </div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
+              <Calendar className="w-[5vw] h-[5vw] mb-[1vw] text-gray-300" />
+              <p className="text-[1.1vw] font-medium mb-[0.5vw]">
+                No requests found
+              </p>
+              <p className="text-[1vw] text-gray-400">
+                {searchTerm
+                  ? "Try adjusting your search"
+                  : "No requests in this category"}
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-auto px-[0.8vw] pb-[0.8vw] pt-0 bg-white">
+              <table className="w-full border-collapse border border-gray-300 bg-white">
+                <thead className="bg-[#E2EBFF] sticky top-0 z-10">
+                  <tr>
                     {requestSubTab === "Leave Request" ? (
                       <>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {req.leave_type}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {formatDate(req.from_date)}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {formatDate(req.to_date)}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
-                          {getDurationDisplay(
-                            req.number_of_days,
-                            req.duration_type,
-                          )}
-                        </td>
-                        <td
-                          className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 max-w-[12vw] truncate"
-                          title={req.reason}
-                        >
-                          {req.reason}
-                        </td>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          S.NO
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Employee
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Submitted on
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Leave Type
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          From
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          To
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Duration
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Reason
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          By Project Head
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          By Management
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Action
+                        </th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          S.NO
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Employee
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Submitted on
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Permission Date
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          From Time
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          To Time
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Duration
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Reason
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Action
+                        </th>
+                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Approved By
+                        </th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedRequests.map((req, index) => (
+                    <tr
+                      key={req.id}
+                      className="hover:bg-gray-50/80 transition-colors bg-white"
+                    >
+                      <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-medium">
+                        {startIndex + index + 1}
+                      </td>
+                      <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                        {renderEmployeeCell(req)}
+                      </td>
+                      <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
+                        {formatDateTime(req.created_at)}
+                      </td>
+                      {requestSubTab === "Leave Request" ? (
+                        <>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {req.leave_type}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {formatDate(req.from_date)}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {formatDate(req.to_date)}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                            {getDurationDisplay(
+                              req.number_of_days,
+                              req.duration_type,
+                            )}
+                          </td>
+                          <TooltipCell text={req.reason} />
 
-                        {/* BY TEAM HEAD COLUMN */}
-                        <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center text-[0.86vw]">
-                          {(() => {
-                            const emp = allEmployees.find(
-                              (e) => (e.employee_id || e.employeeId || e.userName) === req.employee_id,
-                            );
-                            const empDesignation = (emp?.designation || "").toLowerCase();
-                            if (
-                              empDesignation.includes("project head") ||
-                              empDesignation.includes("sbu")
-                            ) {
-                              return "-";
-                            }
-                            return req.team_head_status ? (
+                          {/* BY TEAM HEAD COLUMN */}
+                          <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center text-[0.86vw]">
+                            {(() => {
+                              const emp = (activeEmployees || []).find(
+                                (e) =>
+                                  (e.employee_id ||
+                                    e.employeeId ||
+                                    e.userName) === req.employee_id,
+                              );
+                              const empDesignation = (
+                                emp?.designation || ""
+                              ).toLowerCase();
+                              if (
+                                empDesignation.includes("project head") ||
+                                empDesignation.includes("sbu")
+                              ) {
+                                return "-";
+                              }
+                              return req.team_head_status ? (
+                                <div
+                                  className="flex flex-col items-center gap-[0.2vw]"
+                                  title={req.team_head_remark || "No remark"}
+                                >
+                                  <span
+                                    className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
+                                      req.team_head_status === "approved"
+                                        ? "bg-green-100 text-green-800"
+                                        : req.team_head_status === "rejected"
+                                          ? "bg-red-100 text-red-800"
+                                          : "bg-yellow-100 text-yellow-800"
+                                    }`}
+                                  >
+                                    {req.team_head_status
+                                      .charAt(0)
+                                      .toUpperCase() +
+                                      req.team_head_status.slice(1)}
+                                  </span>
+                                  {req.team_head_updated_by && (
+                                    <span className="text-[0.7vw] text-gray-500"></span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[0.8vw] text-gray-400">
+                                  Pending
+                                </span>
+                              );
+                            })()}
+                          </td>
+
+                          {/* BY MANAGEMENT COLUMN */}
+                          <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
+                            {req.management_status ? (
                               <div
                                 className="flex flex-col items-center gap-[0.2vw]"
-                                title={req.team_head_remark || "No remark"}
+                                title={req.management_remark || "No remark"}
                               >
                                 <span
                                   className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
-                                    req.team_head_status === "approved"
+                                    req.management_status === "approved"
                                       ? "bg-green-100 text-green-800"
-                                      : req.team_head_status === "rejected"
+                                      : req.management_status === "rejected"
                                         ? "bg-red-100 text-red-800"
                                         : "bg-yellow-100 text-yellow-800"
                                   }`}
                                 >
-                                  {req.team_head_status.charAt(0).toUpperCase() +
-                                    req.team_head_status.slice(1)}
+                                  {req.management_status
+                                    .charAt(0)
+                                    .toUpperCase() +
+                                    req.management_status.slice(1)}
                                 </span>
-                                {req.team_head_updated_by && (
+                                {req.management_updated_by && (
                                   <span className="text-[0.7vw] text-gray-500"></span>
                                 )}
                               </div>
@@ -932,70 +1120,92 @@ const RequestsTab = ({
                               <span className="text-[0.8vw] text-gray-400">
                                 Pending
                               </span>
-                            );
-                          })()}
-                        </td>
+                            )}
+                          </td>
 
-                        {/* BY MANAGEMENT COLUMN */}
-                        <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                          {req.management_status ? (
-                            <div
-                              className="flex flex-col items-center gap-[0.2vw]"
-                              title={req.management_remark || "No remark"}
-                            >
-                              <span
-                                className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
-                                  req.management_status === "approved"
-                                    ? "bg-green-100 text-green-800"
-                                    : req.management_status === "rejected"
-                                      ? "bg-red-100 text-red-800"
-                                      : "bg-yellow-100 text-yellow-800"
-                                }`}
-                              >
-                                {req.management_status.charAt(0).toUpperCase() +
-                                  req.management_status.slice(1)}
-                              </span>
-                              {req.management_updated_by && (
-                                <span className="text-[0.7vw] text-gray-500">
-                                </span>
+                          {/* ACTION COLUMN */}
+                          <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                            <div className="flex justify-center items-center gap-[0.3vw]">
+                              {canUpdate(req) ? (
+                                <>
+                                  <button
+                                    onClick={() => openUpdateModal(req)}
+                                    className="p-[0.4vw] flex items-center justify-center bg-blue-600 text-white rounded-full hover:bg-blue-700 cursor-pointer transition-all"
+                                    title="Update Request"
+                                  >
+                                    <Edit size={"0.8vw"} />
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      openDeleteModal(req.id, "leave")
+                                    }
+                                    disabled={deleting}
+                                    className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Delete Request"
+                                  >
+                                    <Trash2 size={"0.8vw"} />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      openDeleteModal(req.id, "leave")
+                                    }
+                                    disabled={deleting}
+                                    className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Delete Request"
+                                  >
+                                    <Trash2 size={"0.8vw"} />
+                                  </button>
+                                </>
                               )}
                             </div>
-                          ) : (
-                            <span className="text-[0.8vw] text-gray-400">
-                              Pending
-                            </span>
-                          )}
-                        </td>
-
-                        {/* FINAL STATUS COLUMN */}
-                        {/* <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
-                          {(() => {
-                            const finalStatus = getFinalStatus(req);
-                            return (
-                              <span
-                                className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.75vw] font-medium ${finalStatus.color}`}
-                              >
-                                {finalStatus.label}
-                              </span>
-                            );
-                          })()}
-                        </td> */}
-
-                        {/* ACTION COLUMN */}
-                        <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                          <div className="flex justify-center items-center gap-[0.3vw]">
-                            {canUpdate(req) ? (
-                              <>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {formatDate(req.permission_date)}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {req.from_time}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            {req.to_time}
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                            {req.duration_minutes} mins
+                          </td>
+                          <TooltipCell text={req.reason} />
+                          <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                            {req.status === "pending" ? (
+                              <div className="flex justify-center items-center gap-[0.3vw]">
                                 <button
-                                  onClick={() => openUpdateModal(req)}
-                                  className="p-[0.4vw] flex items-center justify-center bg-blue-600 text-white rounded-full hover:bg-blue-700 cursor-pointer transition-all"
-                                  title="Update Request"
+                                  onClick={() =>
+                                    handleAction(
+                                      req.id,
+                                      "approve",
+                                      "permission",
+                                    )
+                                  }
+                                  className="p-[0.4vw] flex items-center justify-center bg-green-600 text-white rounded-full hover:bg-green-700 cursor-pointer transition-all"
+                                  title="Approve Request"
                                 >
-                                  <Edit size={"0.8vw"} />
+                                  <CheckCircle size={"0.8vw"} />
                                 </button>
                                 <button
                                   onClick={() =>
-                                    openDeleteModal(req.id, "leave")
+                                    handleAction(req.id, "reject", "permission")
+                                  }
+                                  className="p-[0.4vw] flex items-center justify-center bg-red-600 text-white rounded-full hover:bg-red-700 cursor-pointer transition-all"
+                                  title="Reject Request"
+                                >
+                                  <XCircle size={"0.8vw"} />
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    openDeleteModal(req.id, "permission")
                                   }
                                   disabled={deleting}
                                   className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1003,12 +1213,22 @@ const RequestsTab = ({
                                 >
                                   <Trash2 size={"0.8vw"} />
                                 </button>
-                              </>
+                              </div>
                             ) : (
-                              <>
+                              <div className="flex justify-center items-center gap-[0.3vw]">
+                                <span
+                                  className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.75vw] font-medium ${
+                                    req.status === "approved"
+                                      ? "bg-green-100 text-green-800"
+                                      : "bg-red-100 text-red-800"
+                                  }`}
+                                >
+                                  {req.status.charAt(0).toUpperCase() +
+                                    req.status.slice(1)}
+                                </span>
                                 <button
                                   onClick={() =>
-                                    openDeleteModal(req.id, "leave")
+                                    openDeleteModal(req.id, "permission")
                                   }
                                   disabled={deleting}
                                   className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1016,132 +1236,54 @@ const RequestsTab = ({
                                 >
                                   <Trash2 size={"0.8vw"} />
                                 </button>
-                              </>
+                              </div>
                             )}
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {formatDate(req.permission_date)}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {req.from_time}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
-                          {req.to_time}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
-                          {req.duration_minutes} mins
-                        </td>
-                        <td
-                          className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 max-w-[12vw] truncate"
-                          title={req.reason}
-                        >
-                          {req.reason}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
-                          {req.status === "pending" ? (
-                            <div className="flex justify-center items-center gap-[0.3vw]">
-                              <button
-                                onClick={() =>
-                                  handleAction(req.id, "approve", "permission")
-                                }
-                                className="p-[0.4vw] flex items-center justify-center bg-green-600 text-white rounded-full hover:bg-green-700 cursor-pointer transition-all"
-                                title="Approve Request"
-                              >
-                                <CheckCircle size={"0.8vw"} />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleAction(req.id, "reject", "permission")
-                                }
-                                className="p-[0.4vw] flex items-center justify-center bg-red-600 text-white rounded-full hover:bg-red-700 cursor-pointer transition-all"
-                                title="Reject Request"
-                              >
-                                <XCircle size={"0.8vw"} />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  openDeleteModal(req.id, "permission")
-                                }
-                                disabled={deleting}
-                                className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Delete Request"
-                              >
-                                <Trash2 size={"0.8vw"} />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex justify-center items-center gap-[0.3vw]">
-                              <span
-                                className={`px-[0.8vw] py-[0.3vw] rounded-full text-[0.75vw] font-medium ${
-                                  req.status === "approved"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-red-100 text-red-800"
-                                }`}
-                              >
-                                {req.status.charAt(0).toUpperCase() +
-                                  req.status.slice(1)}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  openDeleteModal(req.id, "permission")
-                                }
-                                disabled={deleting}
-                                className="p-[0.4vw] flex items-center justify-center bg-gray-600 text-white rounded-full hover:bg-gray-700 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Delete Request"
-                              >
-                                <Trash2 size={"0.8vw"} />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-700 border border-gray-300 text-center">
-                          {req.approved_by || "-"}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          </td>
+                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-700 border border-gray-300 text-center">
+                            {req.approved_by || "-"}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Pagination Footer */}
+        {!loading && filteredRequests.length > 0 && isPaginated && (
+          <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] flex-shrink-0 bg-white border-t border-gray-200">
+            <div className="text-[0.85vw] text-gray-600">
+              Showing {startIndex + 1} to{" "}
+              {Math.min(startIndex + RECORDS_PER_PAGE, filteredRequests.length)}{" "}
+              of {filteredRequests.length} entries
+            </div>
+            <div className="flex items-center gap-[0.5vw]">
+              <button
+                onClick={handlePrevious}
+                disabled={currentPage === 1}
+                className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+              >
+                <ChevronLeft size={"1vw"} />
+                Previous
+              </button>
+              <span className="text-[0.85vw] text-gray-600 px-[0.5vw]">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={handleNext}
+                disabled={currentPage === totalPages}
+                className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+              >
+                Next
+                <ChevronRight size={"1vw"} />
+              </button>
+            </div>
           </div>
         )}
       </div>
-
-      {/* Pagination */}
-      {!loading && filteredRequests.length > 0 && isPaginated && (
-        <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] h-[8%] bg-white border-t border-gray-200">
-          <div className="text-[0.85vw] text-gray-600">
-            Showing {startIndex + 1} to{" "}
-            {Math.min(startIndex + RECORDS_PER_PAGE, filteredRequests.length)}{" "}
-            of {filteredRequests.length} entries
-          </div>
-          <div className="flex items-center gap-[0.5vw]">
-            <button
-              onClick={handlePrevious}
-              disabled={currentPage === 1}
-              className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-            >
-              <ChevronLeft size={"1vw"} />
-              Previous
-            </button>
-            <span className="text-[0.85vw] text-gray-600 px-[0.5vw]">
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              onClick={handleNext}
-              disabled={currentPage === totalPages}
-              className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
-            >
-              Next
-              <ChevronRight size={"1vw"} />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

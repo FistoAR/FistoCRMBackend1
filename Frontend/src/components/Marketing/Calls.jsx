@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Trash2,
   RefreshCw,
@@ -108,6 +109,67 @@ const Followup = ({ type = "Marketing" }) => {
   const tableBodyRef = useRef(null);
   const fetchTimeoutRef = useRef(null);
   const filterRef = useRef(null);
+  
+  const [hoveredRemark, setHoveredRemark] = useState(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [copiedRemark, setCopiedRemark] = useState(false);
+
+  const handleCopyRemark = (text) => {
+    if (!text || text === "-") return;
+    navigator.clipboard.writeText(text);
+    setCopiedRemark(true);
+    setTimeout(() => {
+      setCopiedRemark(false);
+    }, 1500);
+  };
+
+  const renderRemarksTooltip = () => {
+    if (!hoveredRemark || hoveredRemark === "-") return null;
+    const GAP = 12;
+    const tooltipW = 240;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = mousePos.x + GAP;
+    let top = mousePos.y + GAP;
+
+    if (left + tooltipW > vw - 12) left = mousePos.x - tooltipW - GAP;
+    if (left < 12) left = 12;
+
+    const estH = 80;
+    if (top + estH > vh - 12) top = mousePos.y - estH - GAP;
+    if (top < 12) top = 12;
+
+    return createPortal(
+      <div
+        style={{
+          position: "fixed",
+          top,
+          left,
+          backgroundColor: "#1F2937",
+          color: "white",
+          padding: "0.6vw 0.8vw",
+          borderRadius: "0.4vw",
+          fontSize: "0.75vw",
+          zIndex: 99999,
+          boxShadow: "0 0.4vw 1.2vw rgba(0,0,0,0.2)",
+          maxWidth: `${tooltipW}px`,
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          pointerEvents: "none",
+          lineHeight: "1.4",
+        }}
+      >
+        <div className="font-semibold text-[0.7vw] text-gray-400 border-b border-gray-700 pb-[0.2vw] mb-[0.4vw] flex justify-between items-center">
+          <span>Remarks</span>
+          <span className="text-[0.6vw] text-blue-400 font-normal">
+            {copiedRemark ? "Copied!" : "Click cell to copy"}
+          </span>
+        </div>
+        <p className="text-white text-[0.75vw]">{hoveredRemark}</p>
+      </div>,
+      document.body
+    );
+  };
   const [employeeId, setEmployeeId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [userDesignation, setUserDesignation] = useState("");
@@ -378,7 +440,7 @@ const Followup = ({ type = "Marketing" }) => {
           },
           {
             key: "followup",
-            label: "Today Followup",
+            label: "Followup List",
             countKey: "followup",
           },
           {
@@ -443,6 +505,11 @@ const Followup = ({ type = "Marketing" }) => {
     }
 
     return historyRecord?.history?.[0]?.nextFollowupDate || null;
+  };
+
+  const getLatestRemarks = (client) => {
+    const historyRecord = clientsHistory.find((h) => h.clientID === client.id);
+    return historyRecord?.latest_status?.remarks || "-";
   };
 
   const filterByNextFollowupDate = (client) => {
@@ -517,6 +584,22 @@ const Followup = ({ type = "Marketing" }) => {
     setCurrentPage((prev) => Math.min(prev + 1, totalPages));
   };
 
+  const getPageNumbers = () => {
+    const maxVisible = 5;
+    const pages = [];
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage + 1 < maxVisible) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
   const handleEdit = (client) => {
     setEditingClient(client);
     setIsModalOpen(true);
@@ -582,9 +665,17 @@ const Followup = ({ type = "Marketing" }) => {
 
     const normalized = String(dateString).trim().replace(" ", "T");
     const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized);
-    const date = new Date(
-      hasTimezone ? normalized : `${normalized}+05:30`
-    );
+    
+    let date;
+    if (hasTimezone) {
+      date = new Date(normalized);
+    } else {
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname.startsWith("192.168.");
+      date = new Date(isLocalhost ? `${normalized}+05:30` : `${normalized}Z`);
+    }
 
     if (Number.isNaN(date.getTime())) return "-";
 
@@ -776,7 +867,7 @@ const Followup = ({ type = "Marketing" }) => {
         <div
           className={`bg-white rounded-xl shadow-sm ${
             mainTab !== "existing_clients" ? "h-[88%]" : "h-[94%]"
-          } flex flex-col`}
+          } flex flex-col overflow-hidden`}
         >
           <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
             <div className="flex items-center gap-[0.5vw]">
@@ -788,7 +879,7 @@ const Followup = ({ type = "Marketing" }) => {
               </span>
             </div>
             <div className="flex items-center gap-[0.7vw]">
-              <div className="relative">
+              <div className="relative flex items-center">
                 <img
                   src={searchIcon}
                   alt=""
@@ -799,8 +890,17 @@ const Followup = ({ type = "Marketing" }) => {
                   placeholder="Search clients..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-[2.3vw] pr-[1vw] py-[0.24vw] rounded-full text-[0.9vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500"
+                  className="pl-[2.3vw] pr-[2.2vw] py-[0.24vw] rounded-full text-[0.9vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all w-[14vw] focus:w-[18vw]"
                 />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-[0.6vw] top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-300/50 p-[0.1vw] transition cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X size={"0.8vw"} />
+                  </button>
+                )}
               </div>
 
               <div className="relative" ref={filterRef}>
@@ -944,7 +1044,7 @@ const Followup = ({ type = "Marketing" }) => {
               </span>
 
               {(startDate || endDate) && (
-                <div className="flex items-center gap-[0.3vw] bg-blue-50 text-blue-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
+                <div className="flex items-center gap-[0.3vw] bg-blue-5 text-blue-700 px-[0.5vw] py-[0.2vw] rounded-full text-[0.7vw]">
                   <Calendar size={"0.8vw"} />
                   <span>
                     {startDate && endDate
@@ -1010,7 +1110,7 @@ const Followup = ({ type = "Marketing" }) => {
             </div>
           )}
 
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 flex flex-col">
             {loading ? (
               <div className="flex items-center justify-center h-full min-h-[300px]">
                 <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
@@ -1038,68 +1138,72 @@ const Followup = ({ type = "Marketing" }) => {
                   startDate ||
                   endDate ||
                   nextFollowupDate ||
-                  showMissedFollowups ||
                   showMissedFollowups
                     ? "Try adjusting your filters"
                     : "No clients in this category"}
                 </p>
               </div>
             ) : (
-              <div className=" mr-[0.8vw] mb-[0.8vw] ml-[0.8vw] border border-gray-300 rounded-xl overflow-auto">
-                <table className="w-full border-collapse border border-gray-300">
-                  <thead className="bg-[#E2EBFF] sticky top-0">
+              <div className="flex-1 overflow-auto border-t border-gray-200 bg-gray-50/10">
+                <table className="w-full border-collapse">
+                  <thead className="bg-[#E2EBFF] sticky top-0 z-10 shadow-sm">
                     <tr>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="w-[3.5vw] px-[0.2vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-l border-r border-b border-gray-300">
                         S.NO
                       </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Date
                       </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Company
                       </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         Customer
                       </th>
-                      {(mainTab === "followups") && (
+                      {mainTab === "followups" && (
                         <>
-                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                             Contact Person
                           </th>
-                          <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                             Contact Number
                           </th>
                         </>
                       )}
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         City
                       </th>
-                      <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                      <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                         State
                       </th>
                       {mainTab === "followups" && subTab !== "first_followup" && (
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                           Status
                         </th>
                       )}
                       {mainTab === "followups" && !["not_interested", "dropped","project_onboard", "first_followup"].includes(subTab) && (
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                           Next followup date
                         </th>
                       )}
+                      {mainTab === "followups" && (
+                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
+                          Latest Remarks
+                        </th>
+                      )}
                       {mainTab === "followups" && subTab !== "project_onboard" && (
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                           Followup
                         </th>
                       )}
                       {mainTab !== "followups" && mainTab !== "existing_clients" && (
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.4vw] py-[0.56vw] text-center text-[0.85vw] font-semibold text-gray-800 border-r border-b border-gray-300">
                           Actions
                         </th>
                       )}
                     </tr>
                   </thead>
-                  <tbody ref={tableBodyRef}>
+                  <tbody ref={tableBodyRef} className="bg-white">
                     {paginatedClients.map((client, index) => {
                       const latestNextFollowupDate =
                         getLatestNextFollowupDate(client);
@@ -1109,47 +1213,47 @@ const Followup = ({ type = "Marketing" }) => {
                       return (
                         <tr
                           key={client.id}
-                          className={`hover:bg-gray-50 transition-colors `}
+                          className="hover:bg-gray-50/80 transition-colors border-b border-gray-100"
                         >
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                          <td className="w-[3.5vw] px-[0.2vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 text-center">
                             {startIndex + index + 1}
                           </td>
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
-                            <div className="flex justify-center">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
+                            <div className="flex justify-center font-medium">
                               {formatDateToIST(client.created_at)}
                             </div>
                           </td>
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw]  text-gray-900 border border-gray-300">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200 font-medium">
                             {client.company_name}
                           </td>
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                             {client.customer_name}
                           </td>
                           {mainTab === "followups" && (
                             <>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                                 {client.contactPersons?.[0]?.name || "-"}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300">
+                              <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-900 border border-gray-200">
                                 {client.contactPersons?.[0]?.contactNumber || "-"}
                               </td>
                             </>
                           )}
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
                             {client.city}
                           </td>
-                          <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                          <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
                             {client.state}
                           </td>
                           {mainTab === "followups" && subTab !== "first_followup" && (
-                            <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300">
+                            <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-600 border border-gray-200">
                               {getStatusLabel(client.status)}
                             </td>
                           )}
                           {mainTab === "followups" && !["not_interested", "dropped","project_onboard", "first_followup"].includes(subTab) && (
-                            <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] border border-gray-300">
+                            <td className="px-[0.4vw] py-[0.56vw] text-[0.8vw] border border-gray-200">
                               <div className="flex flex-col items-center justify-center gap-[0.2vw]">
-                                <span className="whitespace-nowrap">
+                                <span className="whitespace-nowrap font-medium">
                                   {latestNextFollowupDate
                                     ? latestNextFollowupDate
                                         .split("T")[0]
@@ -1159,32 +1263,47 @@ const Followup = ({ type = "Marketing" }) => {
                                     : "-"}
                                 </span>
                                 {isMissed && (
-                                  <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.3vw] py-[0.1vw] rounded whitespace-nowrap">
+                                  <span className="text-[0.6vw] bg-red-100 text-red-600 px-[0.4vw] py-[0.1vw] rounded font-semibold whitespace-nowrap">
                                     Missed
                                   </span>
                                 )}
                               </div>
                             </td>
                           )}
+                          {mainTab === "followups" && (
+                            <td 
+                              className="px-[0.4vw] py-[0.56vw] text-[0.8vw] text-gray-700 border border-gray-200 cursor-pointer hover:bg-blue-50/50 transition-colors"
+                              onMouseEnter={() => setHoveredRemark(getLatestRemarks(client))}
+                              onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+                              onMouseLeave={() => { setHoveredRemark(null); setCopiedRemark(false); }}
+                              onClick={() => handleCopyRemark(getLatestRemarks(client))}
+                            >
+                              <div className="max-w-[15vw] truncate block font-medium">
+                                {getLatestRemarks(client)}
+                              </div>
+                            </td>
+                          )}
                           {mainTab === "followups" && subTab !== "project_onboard" && (
-                            <td className="px-[0.7vw] py-[0.72vw] border border-gray-300">
-                              <button
-                                onClick={() => handleFollowup(client)}
-                                className="text-[0.85vw] text-blue-600 hover:text-blue-700 font-medium cursor-pointer transition flex items-center gap-[0.3vw]"
-                              >
-                                <PhoneCall size={"0.9vw"} />
-                                Followup
-                              </button>
+                            <td className="px-[0.4vw] py-[0.56vw] border border-gray-200">
+                              <div className="flex justify-center">
+                                <button
+                                  onClick={() => handleFollowup(client)}
+                                  className="text-[0.8vw] text-blue-600 hover:text-blue-700 font-semibold cursor-pointer transition flex items-center gap-[0.3vw] bg-blue-5 hover:bg-blue-100/50 px-[0.6vw] py-[0.25vw] rounded-lg"
+                                >
+                                  <PhoneCall size={"0.8vw"} />
+                                  Followup
+                                </button>
+                              </div>
                             </td>
                           )}
 
                           {mainTab === "clientsData" && (
-                            <td className="px-[0.7vw] py-[0.22vw] border border-gray-300">
+                            <td className="px-[0.7vw] py-[0.22vw] border border-gray-200">
                               {subTab === "deleted" ? (
                                 <button
                                   onClick={() => handleRestore(client.id)}
                                   disabled={restoreInProgressId === client.id}
-                                  className="px-[0.6vw] py-[0.3vw] my-[0.3vw] cursor-pointer flex items-center justify-center bg-green-600 text-white rounded-full text-[0.85vw] hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed transition"
+                                  className="px-[0.6vw] py-[0.3vw] my-[0.3vw] cursor-pointer flex items-center justify-center bg-green-600 text-white rounded-full text-[0.8vw] hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed transition"
                                   title="Restore"
                                 >
                                   {restoreInProgressId === client.id ? (
@@ -1244,31 +1363,43 @@ const Followup = ({ type = "Marketing" }) => {
           </div>
 
           {!loading && filteredClients.length > 0 && (
-            <div className="flex items-center justify-between px-[0.8vw] py-[0.5vw] h-[10%]">
-              <div className="text-[0.85vw] text-gray-600">
-                Showing {startIndex + 1} to{" "}
-                {Math.min(endIndex, filteredClients.length)} of{" "}
-                {filteredClients.length} entries
+            <div className="flex items-center justify-between px-[1vw] py-[0.6vw] border-t border-gray-200 bg-white rounded-b-xl flex-shrink-0 h-[10%]">
+              <div className="text-[0.8vw] text-gray-500 font-medium">
+                Showing <span className="text-gray-800">{startIndex + 1}</span> to{" "}
+                <span className="text-gray-800">{Math.min(endIndex, filteredClients.length)}</span> of{" "}
+                <span className="text-gray-800 font-semibold">{filteredClients.length}</span> entries
               </div>
-              <div className="flex items-center gap-[0.5vw]">
+              <div className="flex items-center gap-[0.6vw]">
                 <button
                   onClick={handlePrevious}
                   disabled={currentPage === 1}
-                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                  className="px-[0.8vw] py-[0.35vw] flex items-center gap-[0.3vw] bg-gray-50 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-[0.8vw] transition-all cursor-pointer font-medium"
                 >
-                  <ChevronLeft size={"1vw"} />
+                  <ChevronLeft size={"0.9vw"} />
                   Previous
                 </button>
-                <span className="text-[0.85vw] text-gray-600 px-[0.5vw]">
-                  Page {currentPage} of {totalPages}
-                </span>
+                <div className="flex items-center gap-[0.3vw]">
+                  {getPageNumbers().map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-[0.6vw] py-[0.35vw] min-w-[2vw] text-center border rounded-lg text-[0.8vw] font-semibold transition-all cursor-pointer ${
+                        currentPage === pageNum
+                          ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                          : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                </div>
                 <button
                   onClick={handleNext}
                   disabled={currentPage === totalPages}
-                  className="px-[0.8vw] py-[0.4vw] flex items-center gap-[0.3vw] bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-[0.85vw] transition cursor-pointer"
+                  className="px-[0.8vw] py-[0.35vw] flex items-center gap-[0.3vw] bg-gray-50 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-[0.8vw] transition-all cursor-pointer font-medium"
                 >
                   Next
-                  <ChevronRight size={"1vw"} />
+                  <ChevronRight size={"0.9vw"} />
                 </button>
               </div>
             </div>
@@ -1299,55 +1430,37 @@ const Followup = ({ type = "Marketing" }) => {
                 Soft Delete will only set the client as inactive, moving it to the Deleted tab where it can be restored later.
               </p>
             </div>
-            <div className="flex flex-wrap gap-[0.8vw] justify-end p-[1.2vw] border-t border-gray-200">
+            
+            <div className="bg-gray-50 px-[1.2vw] py-[0.8vw] flex justify-end gap-[0.6vw]">
               <button
-                type="button"
                 onClick={closeDeleteModal}
-                disabled={deleteInProgressId !== null}
-                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-gray-700 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed transition"
+                className="px-[1vw] py-[0.4vw] border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 text-[0.85vw] transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="button"
                 onClick={() => handleDelete("soft")}
                 disabled={deleteInProgressId !== null}
-                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition"
+                className="px-[1vw] py-[0.4vw] bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-[0.85vw] disabled:bg-gray-400 disabled:cursor-not-allowed transition cursor-pointer"
               >
-                {deleteInProgressId === deleteClientId && deleteInProgressType === "soft" ? (
-                  <>
-                    <RefreshCw
-                      size={"1.02vw"}
-                      className="mr-[0.3vw] animate-spin"
-                    />
-                    Deleting...
-                  </>
-                ) : (
-                  "Soft Delete"
-                )}
+                {deleteInProgressId !== null && deleteInProgressType === "soft"
+                  ? "Soft Deleting..."
+                  : "Soft Delete"}
               </button>
               <button
-                type="button"
                 onClick={() => handleDelete("permanent")}
                 disabled={deleteInProgressId !== null}
-                className="px-[1.1vw] py-[0.55vw] cursor-pointer rounded-lg text-[0.92vw] text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed transition"
+                className="px-[1vw] py-[0.4vw] bg-red-600 text-white rounded-lg hover:bg-red-700 text-[0.85vw] disabled:bg-red-400 disabled:cursor-not-allowed transition cursor-pointer"
               >
-                {deleteInProgressId === deleteClientId && deleteInProgressType === "permanent" ? (
-                  <>
-                    <RefreshCw
-                      size={"1.02vw"}
-                      className="mr-[0.3vw] animate-spin"
-                    />
-                    Deleting...
-                  </>
-                ) : (
-                  "Permanent Delete"
-                )}
+                {deleteInProgressId !== null && deleteInProgressType === "permanent"
+                  ? "Deleting..."
+                  : "Permanent Delete"}
               </button>
             </div>
           </div>
         </div>
       )}
+
       <ClientAddModal
         isOpen={isModalOpen}
         onClose={handleModalClose}
@@ -1369,6 +1482,8 @@ const Followup = ({ type = "Marketing" }) => {
         clientHistory={clientsHistory}
         subTab={getSubTabValue(subTab)}
       />
+
+      {renderRemarksTooltip()}
     </div>
   );
 };

@@ -3,25 +3,234 @@ const router = express.Router();
 const { queryWithRetry } = require("../../dataBase/connection");
 
 // Helper to restrict queries to viewer (creator) or events where viewer is an attendee
-const buildViewerFilter = (viewerId) => {
+const getViewerFilter = async (viewerId) => {
   if (!viewerId) return { clause: '', params: [] };
+
+  const rawViewer = String(viewerId).trim();
+  const identifiers = new Set([rawViewer]);
+
+  try {
+    const empQuery = `
+      SELECT employee_id, intern_id, employee_name, email_official 
+      FROM employees_details 
+      WHERE employee_id = ? OR intern_id = ? OR employee_name = ? OR email_official = ?
+    `;
+    const rows = await queryWithRetry(empQuery, [rawViewer, rawViewer, rawViewer, rawViewer]);
+    if (rows && rows.length > 0) {
+      const emp = rows[0];
+      if (emp.employee_id) identifiers.add(String(emp.employee_id).trim());
+      if (emp.intern_id) identifiers.add(String(emp.intern_id).trim());
+      if (emp.employee_name) identifiers.add(String(emp.employee_name).trim());
+      if (emp.email_official) identifiers.add(String(emp.email_official).trim());
+    }
+  } catch (e) {
+    console.error("Error resolving viewer identifiers:", e);
+  }
+
+  const idList = Array.from(identifiers).filter(Boolean);
+  const conditions = [];
+  const params = [];
+
+  for (const idVal of idList) {
+    conditions.push(`ce.employee_id = ?`);
+    params.push(idVal);
+
+    conditions.push(`(ce.attendees IS NOT NULL AND JSON_VALID(ce.attendees) = 1 AND JSON_CONTAINS(ce.attendees, JSON_QUOTE(?), '$'))`);
+    params.push(idVal);
+
+    conditions.push(`ce.attendees LIKE ?`);
+    params.push(`%${idVal}%`);
+  }
+
+  const subClause = conditions.join(" OR ");
+
   return {
-    clause: ' AND (ce.employee_id = ? OR JSON_CONTAINS(ce.attendees, JSON_QUOTE(?), "$"))',
-    params: [viewerId, viewerId],
+    clause: ` AND (
+      ${subClause}
+      OR LOWER(ce.event_type) IN ('technical presentation', 'technicalpresentation', 'technical_presentation', 'announcement', 'special day', 'specialday', 'special_day', 'fun friday', 'funfriday', 'fun_friday')
+      OR LOWER(ce.subtype) = 'all'
+      OR LOWER(ce.audience) = 'all'
+      OR ce.attendees LIKE '%"All"%'
+      OR ce.attendees LIKE '%All%'
+    )`,
+    params,
   };
 };
 
-// ✅ GET - All employees list for attendee selection
+// Helper to format event response with technical_presentation data
+const formatEventResponse = (event) => {
+  if (!event) return event;
+  let techData = event.technical_presentation;
+  if (typeof techData === "string" && techData.trim()) {
+    try {
+      techData = JSON.parse(techData);
+    } catch (e) {
+      techData = null;
+    }
+  }
+  return {
+    ...event,
+    technical_presentation: techData || null,
+    technicalPresentation: techData || null,
+  };
+};
+
+// Safe helper to enrich event with attendee employee names & objects
+const getEventAttendeesDetails = async (event) => {
+  let rawItems = [];
+  if (event.attendees) {
+    if (Array.isArray(event.attendees)) {
+      rawItems = event.attendees;
+    } else if (typeof event.attendees === "string") {
+      try {
+        const parsed = JSON.parse(event.attendees);
+        if (Array.isArray(parsed)) rawItems = parsed;
+      } catch (e) {
+        rawItems = event.attendees.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+    }
+  }
+
+  // Look up any raw IDs that might be in rawItems
+  const rawIds = rawItems
+    .map((item) =>
+      typeof item === "object"
+        ? item.employee_id || item.intern_id || item.employeeID || item.id || item._id
+        : item
+    )
+    .filter(Boolean);
+
+  let nameMap = new Map();
+  if (rawIds.length > 0) {
+    try {
+      const placeholders = rawIds.map(() => "?").join(",");
+      const attendeeQuery = `
+        SELECT employee_id, intern_id, employee_name 
+        FROM employees_details 
+        WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})
+      `;
+      const params = [...rawIds, ...rawIds];
+      const attendeeDetails = await queryWithRetry(attendeeQuery, params);
+      attendeeDetails.forEach((emp) => {
+        if (emp.employee_id) nameMap.set(String(emp.employee_id).trim(), emp.employee_name);
+        if (emp.intern_id) nameMap.set(String(emp.intern_id).trim(), emp.employee_name);
+      });
+    } catch (e) {}
+  }
+
+  const enrichedAttendees = rawItems.map((item) => {
+    if (typeof item === "object") {
+      const idKey = String(item.employee_id || item.intern_id || item.employeeID || item.id || item._id || "").trim();
+      const name = item.employee_name || item.name || nameMap.get(idKey) || idKey;
+      return {
+        employee_id: idKey || name,
+        employee_name: name,
+      };
+    }
+    const strVal = String(item).trim();
+    const resolvedName = nameMap.get(strVal) || strVal;
+    return {
+      employee_id: strVal,
+      employee_name: resolvedName,
+    };
+  });
+
+  return formatEventResponse({
+    ...event,
+    attendees: enrichedAttendees,
+  });
+};
+
+// Ensure table schema compatibility and migrate attendees column to store employee names
+const initCalendarDb = async () => {
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events MODIFY COLUMN event_type VARCHAR(100) NOT NULL DEFAULT 'Meeting'");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN technical_presentation JSON NULL");
+  } catch (e) {
+    try {
+      await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN technical_presentation LONGTEXT NULL");
+    } catch (err) {}
+  }
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_start_time VARCHAR(100) NULL");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_end_time VARCHAR(100) NULL");
+  } catch (e) {}
+  try {
+    await queryWithRetry("ALTER TABLE calendar_events ADD COLUMN actual_duration VARCHAR(100) NULL");
+  } catch (e) {}
+
+  // Migrate existing DB attendees from raw IDs (employee_id or intern_id) to employee names
+  try {
+    const allEmp = await queryWithRetry("SELECT employee_id, intern_id, employee_name FROM employees_details");
+    const empMap = new Map();
+    allEmp.forEach((e) => {
+      if (e.employee_id) empMap.set(String(e.employee_id).trim(), e.employee_name);
+      if (e.intern_id) empMap.set(String(e.intern_id).trim(), e.employee_name);
+    });
+
+    const eventsWithAttendees = await queryWithRetry(
+      "SELECT id, attendees FROM calendar_events WHERE attendees IS NOT NULL AND attendees != '' AND attendees != '[]'"
+    );
+
+    for (const ev of eventsWithAttendees) {
+      if (!ev.attendees) continue;
+      let rawArr = [];
+      try {
+        rawArr = typeof ev.attendees === "string" ? JSON.parse(ev.attendees) : ev.attendees;
+      } catch (e) {
+        if (typeof ev.attendees === "string") {
+          rawArr = ev.attendees.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+      }
+
+      if (Array.isArray(rawArr) && rawArr.length > 0) {
+        let updated = false;
+        const newAttendees = rawArr.map((item) => {
+          if (typeof item === "string" && empMap.has(item.trim())) {
+            updated = true;
+            return empMap.get(item.trim());
+          } else if (
+            typeof item === "object" &&
+            (item.employee_id || item.intern_id) &&
+            (empMap.has(String(item.employee_id).trim()) || empMap.has(String(item.intern_id).trim()))
+          ) {
+            updated = true;
+            const key = String(item.employee_id || item.intern_id).trim();
+            return item.employee_name || empMap.get(key);
+          }
+          return typeof item === "object" ? item.employee_name || item.employee_id || item : item;
+        });
+
+        if (updated) {
+          await queryWithRetry("UPDATE calendar_events SET attendees = ? WHERE id = ?", [
+            JSON.stringify(newAttendees),
+            ev.id,
+          ]);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Attendees DB migration notice:", err.message);
+  }
+};
+initCalendarDb();
+
+// ✅ GET - All employees & interns list for attendee selection & name mapping
 router.get("/employees", async (req, res) => {
   try {
     const query = `
       SELECT 
         employee_id,
+        intern_id,
         employee_name,
         designation,
-        email_official
+        email_official,
+        working_status
       FROM employees_details
-      WHERE working_status = 'Active'
       ORDER BY employee_name ASC
     `;
 
@@ -81,7 +290,7 @@ router.get("/health", (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const viewerId = req.get('x-employee-id');
-    const filter = buildViewerFilter(viewerId);
+    const filter = await getViewerFilter(viewerId);
     const query = `
       SELECT 
         ce.*,
@@ -93,32 +302,7 @@ router.get("/", async (req, res) => {
     `;
 
     const events = await queryWithRetry(query, filter.params);
-
-    const formattedEvents = await Promise.all(
-      events.map(async (event) => {
-        const attendeeIds = JSON.parse(event.attendees || "[]");
-        
-        if (attendeeIds.length > 0) {
-          const placeholders = attendeeIds.map(() => "?").join(",");
-          const attendeeQuery = `
-            SELECT employee_id, employee_name 
-            FROM employees_details 
-            WHERE employee_id IN (${placeholders})
-          `;
-          const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
-          
-          return {
-            ...event,
-            attendees: attendeeDetails,
-          };
-        }
-        
-        return {
-          ...event,
-          attendees: [],
-        };
-      })
-    );
+    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
 
     res.json(formattedEvents);
   } catch (error) {
@@ -144,7 +328,7 @@ router.get("/range", async (req, res) => {
     }
 
     const viewerId = req.get('x-employee-id');
-    const filter = buildViewerFilter(viewerId);
+    const filter = await getViewerFilter(viewerId);
     const query = `
       SELECT 
         ce.*,
@@ -170,32 +354,7 @@ router.get("/range", async (req, res) => {
     ];
 
     const events = await queryWithRetry(query, params);
-
-    const formattedEvents = await Promise.all(
-      events.map(async (event) => {
-        const attendeeIds = JSON.parse(event.attendees || "[]");
-        
-        if (attendeeIds.length > 0) {
-          const placeholders = attendeeIds.map(() => "?").join(",");
-          const attendeeQuery = `
-            SELECT employee_id, employee_name 
-            FROM employees_details 
-            WHERE employee_id IN (${placeholders})
-          `;
-          const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
-          
-          return {
-            ...event,
-            attendees: attendeeDetails,
-          };
-        }
-        
-        return {
-          ...event,
-          attendees: [],
-        };
-      })
-    );
+    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
 
     res.json(formattedEvents);
   } catch (error) {
@@ -213,7 +372,7 @@ router.get("/date/:date", async (req, res) => {
   try {
     const { date } = req.params;
     const viewerId = req.get('x-employee-id');
-    const filter = buildViewerFilter(viewerId);
+    const filter = await getViewerFilter(viewerId);
     const query = `
       SELECT 
         ce.*,
@@ -226,32 +385,7 @@ router.get("/date/:date", async (req, res) => {
 
     const params = [date, date, date, ...filter.params];
     const events = await queryWithRetry(query, params);
-
-    const formattedEvents = await Promise.all(
-      events.map(async (event) => {
-        const attendeeIds = JSON.parse(event.attendees || "[]");
-        
-        if (attendeeIds.length > 0) {
-          const placeholders = attendeeIds.map(() => "?").join(",");
-          const attendeeQuery = `
-            SELECT employee_id, employee_name 
-            FROM employees_details 
-            WHERE employee_id IN (${placeholders})
-          `;
-          const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
-          
-          return {
-            ...event,
-            attendees: attendeeDetails,
-          };
-        }
-        
-        return {
-          ...event,
-          attendees: [],
-        };
-      })
-    );
+    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
 
     res.json(formattedEvents);
   } catch (error) {
@@ -268,46 +402,19 @@ router.get("/date/:date", async (req, res) => {
 router.get("/employee/:employeeId", async (req, res) => {
   try {
     const { employeeId } = req.params;
-
-    // This route returns events for a specific employee (creator or attendee)
+    const filter = await getViewerFilter(employeeId);
     const query = `
       SELECT 
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
       LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
-      WHERE ce.employee_id = ? 
-         OR JSON_CONTAINS(ce.attendees, JSON_QUOTE(?), '$')
+      WHERE 1=1 ${filter.clause}
       ORDER BY ce.date ASC, ce.start_time ASC
     `;
 
-    const events = await queryWithRetry(query, [employeeId, employeeId]);
-
-    const formattedEvents = await Promise.all(
-      events.map(async (event) => {
-        const attendeeIds = JSON.parse(event.attendees || "[]");
-        
-        if (attendeeIds.length > 0) {
-          const placeholders = attendeeIds.map(() => "?").join(",");
-          const attendeeQuery = `
-            SELECT employee_id, employee_name 
-            FROM employees_details 
-            WHERE employee_id IN (${placeholders})
-          `;
-          const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
-          
-          return {
-            ...event,
-            attendees: attendeeDetails,
-          };
-        }
-        
-        return {
-          ...event,
-          attendees: [],
-        };
-      })
-    );
+    const events = await queryWithRetry(query, filter.params);
+    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
 
     res.json(formattedEvents);
   } catch (error) {
@@ -325,7 +432,7 @@ router.get("/type/:eventtype", async (req, res) => {
   try {
     const { eventtype } = req.params;
     const viewerId = req.get('x-employee-id');
-    const filter = buildViewerFilter(viewerId);
+    const filter = await getViewerFilter(viewerId);
     const query = `
       SELECT 
         ce.*,
@@ -338,32 +445,7 @@ router.get("/type/:eventtype", async (req, res) => {
 
     const params = [eventtype, ...filter.params];
     const events = await queryWithRetry(query, params);
-
-    const formattedEvents = await Promise.all(
-      events.map(async (event) => {
-        const attendeeIds = JSON.parse(event.attendees || "[]");
-        
-        if (attendeeIds.length > 0) {
-          const placeholders = attendeeIds.map(() => "?").join(",");
-          const attendeeQuery = `
-            SELECT employee_id, employee_name 
-            FROM employees_details 
-            WHERE employee_id IN (${placeholders})
-          `;
-          const attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
-          
-          return {
-            ...event,
-            attendees: attendeeDetails,
-          };
-        }
-        
-        return {
-          ...event,
-          attendees: [],
-        };
-      })
-    );
+    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
 
     res.json(formattedEvents);
   } catch (error) {
@@ -432,27 +514,55 @@ router.post("/", async (req, res) => {
 
     let validatedAttendees = [];
     if (attendees && attendees.length > 0) {
-      const placeholders = attendees.map(() => "?").join(",");
-      const validateQuery = `
-        SELECT employee_id FROM employees_details 
-        WHERE employee_id IN (${placeholders})
-      `;
-      const validEmployees = await queryWithRetry(validateQuery, attendees);
+      const rawIds = attendees
+        .map((item) =>
+          typeof item === "object"
+            ? item.employee_id || item.employeeID || item.id || item._id
+            : item
+        )
+        .filter(Boolean);
 
-      if (validEmployees.length !== attendees.length) {
-        return res.status(400).json({
-          status: false,
-          message: "One or more invalid employee IDs in attendees list",
+      if (rawIds.length > 0) {
+        const placeholders = rawIds.map(() => "?").join(",");
+        const validateQuery = `
+          SELECT employee_id, employee_name FROM employees_details 
+          WHERE employee_id IN (${placeholders})
+        `;
+        const validEmployees = await queryWithRetry(validateQuery, rawIds);
+        const nameMap = new Map(
+          validEmployees.map((emp) => [String(emp.employee_id).trim(), emp.employee_name])
+        );
+
+        validatedAttendees = rawIds.map((idStr) => {
+          const key = String(idStr).trim();
+          const foundName = nameMap.get(key);
+          return {
+            employee_id: key,
+            employee_name: foundName || key,
+          };
         });
       }
-      validatedAttendees = attendees;
+    }
+
+    let techPresData = null;
+    if (req.body.technical_presentation || req.body.technicalPresentation) {
+      techPresData = typeof (req.body.technical_presentation || req.body.technicalPresentation) === 'string'
+        ? (req.body.technical_presentation || req.body.technicalPresentation)
+        : JSON.stringify(req.body.technical_presentation || req.body.technicalPresentation);
+    } else if (eventtype === "Technical Presentation" || req.body.meetingType === "Technical Presentation") {
+      techPresData = JSON.stringify({
+        meetingType: "Technical Presentation",
+        presenter1: req.body.presenter1 || { name: req.body.presenter1Name || "", topic: req.body.presenter1Topic || "" },
+        presenter2: req.body.presenter2 || { name: req.body.presenter2Name || "", topic: req.body.presenter2Topic || "" },
+        motivationalQuote: req.body.motivationalQuote || "Learning never exhausts the mind; it empowers the future."
+      });
     }
 
     const insertEventQuery = `
       INSERT INTO calendar_events 
       (employee_id, title, event_type, start_time, end_time, date, end_date, 
-       agenda, link, day, form_type, attendees, priority, subtype, mode, audience, event_status, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       agenda, link, day, form_type, attendees, priority, subtype, mode, audience, event_status, remarks, technical_presentation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const result = await queryWithRetry(insertEventQuery, [
@@ -474,6 +584,7 @@ router.post("/", async (req, res) => {
       audience || null,
       eventStatus || null,
       remarks || null,
+      techPresData,
     ]);
 
     const eventId = result.insertId;
@@ -502,10 +613,10 @@ router.post("/", async (req, res) => {
       attendeeDetails = await queryWithRetry(attendeeQuery, validatedAttendees);
     }
 
-    const responseEvent = {
+    const responseEvent = formatEventResponse({
       ...createdEvent,
       attendees: attendeeDetails,
-    };
+    });
 
     if (req.io) {
       req.io.to("calendar_room").emit("calendar_event_created", {
@@ -552,9 +663,17 @@ router.put("/:id", async (req, res) => {
       "priority",
       "subtype",
       "mode",
+      "technical_presentation",
+      "technicalPresentation",
+      "actual_start_time",
+      "actual_end_time",
+      "actual_duration",
+      "actualStartTime",
+      "actualEndTime",
+      "actualDuration",
       "eventStatus",
+      "event_status",
       "remarks",
-      "audience",
     ];
 
     const updateFields = [];
@@ -563,23 +682,43 @@ router.put("/:id", async (req, res) => {
     for (const field of allowedUpdates) {
       if (req.body[field] !== undefined) {
         if (field === "attendees") {
-          if (req.body.attendees.length > 0) {
-            const placeholders = req.body.attendees.map(() => "?").join(",");
-            const validateQuery = `
-              SELECT employee_id FROM employees_details 
-              WHERE employee_id IN (${placeholders})
-            `;
-            const validEmployees = await queryWithRetry(validateQuery, req.body.attendees);
+          let validatedAttendees = [];
+          if (Array.isArray(req.body.attendees) && req.body.attendees.length > 0) {
+            const rawIds = req.body.attendees
+              .map((item) =>
+                typeof item === "object"
+                  ? item.employee_id || item.employeeID || item.id || item._id
+                  : item
+              )
+              .filter(Boolean);
 
-            if (validEmployees.length !== req.body.attendees.length) {
-              return res.status(400).json({
-                status: false,
-                message: "One or more invalid employee IDs in attendees list",
+            if (rawIds.length > 0) {
+              const placeholders = rawIds.map(() => "?").join(",");
+              const validateQuery = `
+                SELECT employee_id, employee_name FROM employees_details 
+                WHERE employee_id IN (${placeholders})
+              `;
+              const validEmployees = await queryWithRetry(validateQuery, rawIds);
+              const nameMap = new Map(
+                validEmployees.map((emp) => [String(emp.employee_id).trim(), emp.employee_name])
+              );
+
+              validatedAttendees = rawIds.map((idStr) => {
+                const key = String(idStr).trim();
+                const foundName = nameMap.get(key);
+                return {
+                  employee_id: key,
+                  employee_name: foundName || key,
+                };
               });
             }
           }
           updateFields.push("attendees = ?");
-          updateValues.push(JSON.stringify(req.body.attendees));
+          updateValues.push(JSON.stringify(validatedAttendees));
+        } else if (field === "technical_presentation" || field === "technicalPresentation") {
+          updateFields.push("technical_presentation = ?");
+          const val = typeof req.body[field] === 'string' ? req.body[field] : JSON.stringify(req.body[field]);
+          updateValues.push(val);
         } else {
           const dbField =
             field === "eventtype" ? "event_type" :
@@ -587,10 +726,12 @@ router.put("/:id", async (req, res) => {
             field === "endTime" ? "end_time" :
             field === "endDate" ? "end_date" :
             field === "formType" ? "form_type" :
-            field === "eventStatus" ? "event_status" : field;
+            field === "eventStatus" ? "event_status" :
+            field === "actualStartTime" ? "actual_start_time" :
+            field === "actualEndTime" ? "actual_end_time" :
+            field === "actualDuration" ? "actual_duration" : field;
           
           updateFields.push(`${dbField} = ?`);
-          // Convert empty strings for time fields to NULL so DB stores NULL
           let val = req.body[field];
           if ((field === "startTime" || field === "endTime") && (val === "" || val === null)) {
             val = null;
@@ -647,10 +788,10 @@ router.put("/:id", async (req, res) => {
       attendeeDetails = await queryWithRetry(attendeeQuery, attendeeIds);
     }
 
-    const responseEvent = {
+    const responseEvent = formatEventResponse({
       ...updatedEvent,
       attendees: attendeeDetails,
-    };
+    });
 
     if (req.io) {
       req.io.to("calendar_room").emit("calendar_event_updated", {
@@ -743,7 +884,81 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ✅ GET - Single event by ID (MUST be last)
+// ✅ PATCH - Start / End Meeting by Host
+router.patch("/:id/meeting-status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, employeeID } = req.body; // action: 'start' or 'end'
+
+    const getEventQuery = `SELECT * FROM calendar_events WHERE id = ?`;
+    const events = await queryWithRetry(getEventQuery, [id]);
+    if (events.length === 0) {
+      return res.status(404).json({ status: false, message: "Event not found" });
+    }
+    const event = events[0];
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (action === "start") {
+      const updateQuery = `
+        UPDATE calendar_events
+        SET actual_start_time = ?, event_status = 'In Progress'
+        WHERE id = ?
+      `;
+      await queryWithRetry(updateQuery, [nowIso, id]);
+    } else if (action === "end") {
+      let actualStart = event.actual_start_time ? new Date(event.actual_start_time) : null;
+      let actualStartIso = event.actual_start_time;
+
+      if (!actualStart || isNaN(actualStart.getTime())) {
+        const schedDate = event.date ? new Date(event.date) : new Date();
+        const startTimeStr = event.start_time || "09:00";
+        const [sh, sm] = startTimeStr.split(":").map(Number);
+        schedDate.setHours(sh || 0, sm || 0, 0, 0);
+        actualStart = schedDate;
+        actualStartIso = schedDate.toISOString();
+      }
+
+      const diffMs = now.getTime() - actualStart.getTime();
+      const totalMins = Math.max(1, Math.round(diffMs / (1000 * 60)));
+      let durationStr = `${totalMins} mins`;
+      if (totalMins >= 60) {
+        const hrs = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        durationStr = mins > 0 ? `${hrs} hr ${mins} mins` : `${hrs} hr`;
+      }
+
+      const updateQuery = `
+        UPDATE calendar_events
+        SET actual_start_time = ?, actual_end_time = ?, actual_duration = ?, event_status = 'Completed'
+        WHERE id = ?
+      `;
+      await queryWithRetry(updateQuery, [actualStartIso, nowIso, durationStr, id]);
+    } else {
+      return res.status(400).json({ status: false, message: "Invalid action. Use 'start' or 'end'" });
+    }
+
+    const updatedEvents = await queryWithRetry(getEventQuery, [id]);
+    const responseEvent = formatEventResponse(updatedEvents[0]);
+
+    if (req.io) {
+      req.io.to("calendar_room").emit("calendar_event_updated", {
+        status: true,
+        data: responseEvent,
+      });
+    }
+
+    res.json({
+      status: true,
+      message: `Meeting ${action === "start" ? "started" : "ended"} successfully`,
+      data: responseEvent,
+    });
+  } catch (error) {
+    console.error("Meeting status error:", error);
+    res.status(500).json({ status: false, message: "Error updating meeting status", error: error.message });
+  }
+});
 router.get("/:id", async (req, res) => {
   try {
     const query = `

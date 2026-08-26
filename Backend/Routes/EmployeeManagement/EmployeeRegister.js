@@ -4,12 +4,46 @@ const db = require("../../dataBase/connection");
 const uploadFields = require("../../middleware/uploadMiddleware");
 const fs = require("fs");
 const path = require("path");
+const { uploadEmployeeDocToDrive, deleteFromDrive } = require("../../utils/driveService");
+
+const uploadSingleFileToDrive = async (file, docCategory, fallbackFolder) => {
+  if (!file) return null;
+  const tempPath = file.path;
+  const driveResult = await uploadEmployeeDocToDrive({
+    filePath: tempPath,
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    docCategory: docCategory || fallbackFolder || "others",
+  });
+  if (driveResult && driveResult.success) {
+    return driveResult.previewUrl;
+  }
+  return `/Images/${fallbackFolder}/${file.filename}`;
+};
+
+const deleteFileFromStorage = async (filePath) => {
+  if (!filePath) return;
+  try {
+    if (typeof filePath === "string" && (filePath.includes("/api/drive/preview/") || filePath.includes("drive.google.com"))) {
+      await deleteFromDrive(filePath);
+    } else if (typeof filePath === "string") {
+      const fullPath = path.join(__dirname, "../..", filePath);
+      if (fs.existsSync(fullPath)) {
+        fs.unlink(fullPath, (err) => {
+          if (err) console.error("File deletion error:", err);
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Error in deleteFileFromStorage:", err.message);
+  }
+};
 
 router.get("/", (req, res) => {
   const query = `
     SELECT 
       employee_id, intern_id, employee_name, dob, gender,
-      email_personal, email_official, emailPassword, phone_personal, phone_official,
+      email_personal, email_official, phone_personal, phone_official,
       phone_alternative, phone_relation, blood_group,
       account_name, account_number, bank_name, ifsc_code,
       designation, team_head, employment_type, working_status,
@@ -60,7 +94,6 @@ router.get("/", (req, res) => {
         gender: emp.gender,
         email_personal: emp.email_personal,
         email_official: emp.email_official,
-        emailPassword: emp.emailPassword,
         phone_personal: emp.phone_personal,
         phone_official: emp.phone_official,
         phone_alternative: emp.phone_alternative,
@@ -119,7 +152,7 @@ router.get("/check/:username", (req, res) => {
 });
 
 // POST - Insert new employee
-router.post("/", uploadFields, (req, res) => {
+router.post("/", uploadFields, async (req, res) => {
   const data = req.body;
 
   if (!data.userName || !data.employeeName) {
@@ -139,7 +172,7 @@ router.post("/", uploadFields, (req, res) => {
     internId = data.userName;
   }
 
-  const processFiles = (fileType) => {
+  const processFiles = async (fileType) => {
     const fileData = {};
     const files = req.files;
 
@@ -149,25 +182,25 @@ router.post("/", uploadFields, (req, res) => {
       if (files.aadhar) {
         fileData.aadhar = {
           originalName: files.aadhar[0].originalname,
-          path: `/Images/ids/${files.aadhar[0].filename}`,
+          path: await uploadSingleFileToDrive(files.aadhar[0], "ids", "ids"),
         };
       }
       if (files.panCard) {
         fileData.panCard = {
           originalName: files.panCard[0].originalname,
-          path: `/Images/ids/${files.panCard[0].filename}`,
+          path: await uploadSingleFileToDrive(files.panCard[0], "ids", "ids"),
         };
       }
       if (files.voterId) {
         fileData.voterId = {
           originalName: files.voterId[0].originalname,
-          path: `/Images/ids/${files.voterId[0].filename}`,
+          path: await uploadSingleFileToDrive(files.voterId[0], "ids", "ids"),
         };
       }
       if (files.drivingLicense) {
         fileData.drivingLicense = {
           originalName: files.drivingLicense[0].originalname,
-          path: `/Images/ids/${files.drivingLicense[0].filename}`,
+          path: await uploadSingleFileToDrive(files.drivingLicense[0], "ids", "ids"),
         };
       }
     }
@@ -176,59 +209,63 @@ router.post("/", uploadFields, (req, res) => {
       if (files.tenth) {
         fileData.tenth = {
           originalName: files.tenth[0].originalname,
-          path: `/Images/certificates/${files.tenth[0].filename}`,
+          path: await uploadSingleFileToDrive(files.tenth[0], "certificates", "certificates"),
         };
       }
       if (files.twelfth) {
         fileData.twelfth = {
           originalName: files.twelfth[0].originalname,
-          path: `/Images/certificates/${files.twelfth[0].filename}`,
+          path: await uploadSingleFileToDrive(files.twelfth[0], "certificates", "certificates"),
         };
       }
       if (files.degree) {
         fileData.degree = {
           originalName: files.degree[0].originalname,
-          path: `/Images/certificates/${files.degree[0].filename}`,
+          path: await uploadSingleFileToDrive(files.degree[0], "certificates", "certificates"),
         };
       }
       if (files.probation) {
         fileData.probation = {
           originalName: files.probation[0].originalname,
-          path: `/Images/certificates/${files.probation[0].filename}`,
+          path: await uploadSingleFileToDrive(files.probation[0], "certificates", "certificates"),
         };
       }
     }
 
     if (fileType === "others" && files.otherDocs) {
-      return files.otherDocs.map((file) => ({
-        originalName: file.originalname,
-        path: `/Images/others/${file.filename}`,
-      }));
+      const docs = [];
+      for (const file of files.otherDocs) {
+        docs.push({
+          originalName: file.originalname,
+          path: await uploadSingleFileToDrive(file, "others", "others"),
+        });
+      }
+      return docs;
     }
 
     if (fileType === "exit") {
       if (files.paySlip) {
         fileData.paySlip = {
           originalName: files.paySlip[0].originalname,
-          path: `/Images/exit_docs/${files.paySlip[0].filename}`,
+          path: await uploadSingleFileToDrive(files.paySlip[0], "exit_docs", "exit_docs"),
         };
       }
       if (files.experienceLetter) {
         fileData.experienceLetter = {
           originalName: files.experienceLetter[0].originalname,
-          path: `/Images/exit_docs/${files.experienceLetter[0].filename}`,
+          path: await uploadSingleFileToDrive(files.experienceLetter[0], "exit_docs", "exit_docs"),
         };
       }
       if (files.relievingLetter) {
         fileData.relievingLetter = {
           originalName: files.relievingLetter[0].originalname,
-          path: `/Images/exit_docs/${files.relievingLetter[0].filename}`,
+          path: await uploadSingleFileToDrive(files.relievingLetter[0], "exit_docs", "exit_docs"),
         };
       }
       if (files.intershipCertificate) {
         fileData.intershipCertificate = {
           originalName: files.intershipCertificate[0].originalname,
-          path: `/Images/exit_docs/${files.intershipCertificate[0].filename}`,
+          path: await uploadSingleFileToDrive(files.intershipCertificate[0], "exit_docs", "exit_docs"),
         };
       }
     }
@@ -236,32 +273,34 @@ router.post("/", uploadFields, (req, res) => {
     return fileData;
   };
 
-  const idsData = processFiles("ids");
-  const certificatesData = processFiles("certificates");
-  const otherDocsData = processFiles("others");
-  const exitDocsData = processFiles("exit");
+  const idsData = await processFiles("ids");
+  const certificatesData = await processFiles("certificates");
+  const otherDocsData = await processFiles("others");
+  const exitDocsData = await processFiles("exit");
 
   const profileUrl = req.files?.profile
-    ? `/Images/profiles/${req.files.profile[0].filename}`
+    ? await uploadSingleFileToDrive(req.files.profile[0], "profiles", "profiles")
     : null;
   const resumeUrl = req.files?.resume
-    ? `/Images/resumes/${req.files.resume[0].filename}`
+    ? await uploadSingleFileToDrive(req.files.resume[0], "resume", "resumes")
     : null;
   const offerLetterUrl = req.files?.offerLetter
-    ? `/Images/offer_letters/${req.files.offerLetter[0].filename}`
+    ? await uploadSingleFileToDrive(req.files.offerLetter[0], "offer_letters", "offer_letters")
     : null;
   
-  const internOfferLetterUrl = req.files?.InternofferLetter
-    ? JSON.stringify({
-        originalName: req.files.InternofferLetter[0].originalname,
-        path: `/Images/offer_letters/${req.files.InternofferLetter[0].filename}`,
-      })
-    : null;
+  let internOfferLetterUrl = null;
+  if (req.files?.InternofferLetter) {
+    const pathUrl = await uploadSingleFileToDrive(req.files.InternofferLetter[0], "offer_letters", "offer_letters");
+    internOfferLetterUrl = JSON.stringify({
+      originalName: req.files.InternofferLetter[0].originalname,
+      path: pathUrl,
+    });
+  }
 
   const query = `
     INSERT INTO employees_details 
     (employee_id, intern_id, employee_name, dob, gender, 
-     email_personal, email_official, email_password, phone_personal, phone_official,
+     email_personal, email_official, phone_personal, phone_official,
      phone_alternative, phone_relation, blood_group,
      account_name, account_number, bank_name, ifsc_code,
      designation, team_head, employment_type, working_status,
@@ -269,7 +308,7 @@ router.post("/", uploadFields, (req, res) => {
      address, password, profile_url, resume_url, offer_letter_url,
      intern_offer_letter_url,
      ID_url, Certificates_url, otherDocs_url, exit_docs_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.pool.query(
@@ -282,7 +321,6 @@ router.post("/", uploadFields, (req, res) => {
       data.gender || null,
       data.emailPersonal || null,
       data.emailOfficial || null,
-      data.emailPassword || null,
       data.phonePersonal || null,
       data.phoneOfficial || null,
       data.phoneAlternative || null,
@@ -331,7 +369,7 @@ router.post("/", uploadFields, (req, res) => {
 });
 
 
-router.put("/:id", uploadFields, (req, res) => {
+router.put("/:id", uploadFields, async (req, res) => {
   const { id } = req.params;
   const data = req.body;
 
@@ -342,7 +380,7 @@ router.put("/:id", uploadFields, (req, res) => {
   ) {
     console.log("Profile-only update detected");
 
-    const profileUrl = `/Images/profiles/${req.files.profile[0].filename}`;
+    const profileUrl = await uploadSingleFileToDrive(req.files.profile[0], "profiles", "profiles");
 
     const updateQuery = `UPDATE employees_details SET profile_url = ? WHERE employee_id = ?`;
 
@@ -386,7 +424,7 @@ router.put("/:id", uploadFields, (req, res) => {
   });
 });
 
-router.put("/updateEmployee/:id", uploadFields, (req, res) => {
+router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
   const employeeId = req.params.id;
   console.log("Updating employee:", employeeId);
   const data = req.body;
@@ -418,7 +456,7 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
     WHERE employee_id = ?
   `;
 
-  db.pool.query(getExistingQuery, [employeeId], (err, existingData) => {
+  db.pool.query(getExistingQuery, [employeeId], async (err, existingData) => {
     if (err) {
       console.error("Error fetching existing data:", err);
       return res.status(500).json({
@@ -437,7 +475,7 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
 
     const existing = existingData[0];
 
-    const processFiles = (fileType) => {
+    const processFiles = async (fileType) => {
       const fileData = {};
       const files = req.files;
 
@@ -447,25 +485,25 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         if (files.aadhar) {
           fileData.aadhar = {
             originalName: files.aadhar[0].originalname,
-            path: `/Images/ids/${files.aadhar[0].filename}`,
+            path: await uploadSingleFileToDrive(files.aadhar[0], "ids", "ids"),
           };
         }
         if (files.panCard) {
           fileData.panCard = {
             originalName: files.panCard[0].originalname,
-            path: `/Images/ids/${files.panCard[0].filename}`,
+            path: await uploadSingleFileToDrive(files.panCard[0], "ids", "ids"),
           };
         }
         if (files.voterId) {
           fileData.voterId = {
             originalName: files.voterId[0].originalname,
-            path: `/Images/ids/${files.voterId[0].filename}`,
+            path: await uploadSingleFileToDrive(files.voterId[0], "ids", "ids"),
           };
         }
         if (files.drivingLicense) {
           fileData.drivingLicense = {
             originalName: files.drivingLicense[0].originalname,
-            path: `/Images/ids/${files.drivingLicense[0].filename}`,
+            path: await uploadSingleFileToDrive(files.drivingLicense[0], "ids", "ids"),
           };
         }
       }
@@ -474,59 +512,63 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         if (files.tenth) {
           fileData.tenth = {
             originalName: files.tenth[0].originalname,
-            path: `/Images/certificates/${files.tenth[0].filename}`,
+            path: await uploadSingleFileToDrive(files.tenth[0], "certificates", "certificates"),
           };
         }
         if (files.twelfth) {
           fileData.twelfth = {
             originalName: files.twelfth[0].originalname,
-            path: `/Images/certificates/${files.twelfth[0].filename}`,
+            path: await uploadSingleFileToDrive(files.twelfth[0], "certificates", "certificates"),
           };
         }
         if (files.degree) {
           fileData.degree = {
             originalName: files.degree[0].originalname,
-            path: `/Images/certificates/${files.degree[0].filename}`,
+            path: await uploadSingleFileToDrive(files.degree[0], "certificates", "certificates"),
           };
         }
         if (files.probation) {
           fileData.probation = {
             originalName: files.probation[0].originalname,
-            path: `/Images/certificates/${files.probation[0].filename}`,
+            path: await uploadSingleFileToDrive(files.probation[0], "certificates", "certificates"),
           };
         }
       }
 
       if (fileType === "others" && files.otherDocs) {
-        return files.otherDocs.map((file) => ({
-          originalName: file.originalname,
-          path: `/Images/others/${file.filename}`,
-        }));
+        const docs = [];
+        for (const file of files.otherDocs) {
+          docs.push({
+            originalName: file.originalname,
+            path: await uploadSingleFileToDrive(file, "others", "others"),
+          });
+        }
+        return docs;
       }
 
       if (fileType === "exit") {
         if (files.paySlip) {
           fileData.paySlip = {
             originalName: files.paySlip[0].originalname,
-            path: `/Images/exit_docs/${files.paySlip[0].filename}`,
+            path: await uploadSingleFileToDrive(files.paySlip[0], "exit_docs", "exit_docs"),
           };
         }
         if (files.experienceLetter) {
           fileData.experienceLetter = {
             originalName: files.experienceLetter[0].originalname,
-            path: `/Images/exit_docs/${files.experienceLetter[0].filename}`,
+            path: await uploadSingleFileToDrive(files.experienceLetter[0], "exit_docs", "exit_docs"),
           };
         }
         if (files.relievingLetter) {
           fileData.relievingLetter = {
             originalName: files.relievingLetter[0].originalname,
-            path: `/Images/exit_docs/${files.relievingLetter[0].filename}`,
+            path: await uploadSingleFileToDrive(files.relievingLetter[0], "exit_docs", "exit_docs"),
           };
         }
         if (files.intershipCertificate) {
           fileData.intershipCertificate = {
             originalName: files.intershipCertificate[0].originalname,
-            path: `/Images/exit_docs/${files.intershipCertificate[0].filename}`,
+            path: await uploadSingleFileToDrive(files.intershipCertificate[0], "exit_docs", "exit_docs"),
           };
         }
       }
@@ -534,16 +576,15 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
       return fileData;
     };
 
-    const newIdsData = processFiles("ids");
-    const newCertificatesData = processFiles("certificates");
-    const newOtherDocsData = processFiles("others");
-    const newExitDocsData = processFiles("exit");
+    const newIdsData = await processFiles("ids");
+    const newCertificatesData = await processFiles("certificates");
+    const newOtherDocsData = await processFiles("others");
+    const newExitDocsData = await processFiles("exit");
 
     let existingIds = {};
     let existingCerts = {};
     let existingOthers = [];
     let existingExitDocs = {};
-    let existingInternOfferLetter = null;
 
     try {
       existingIds = existing.ID_url ? JSON.parse(existing.ID_url) : {};
@@ -556,9 +597,6 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
       existingExitDocs = existing.exit_docs_url
         ? JSON.parse(existing.exit_docs_url)
         : {};
-      existingInternOfferLetter = existing.intern_offer_letter_url
-        ? JSON.parse(existing.intern_offer_letter_url)
-        : null;
     } catch (parseErr) {
       console.error("Error parsing existing JSON:", parseErr);
     }
@@ -566,24 +604,25 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
     const finalIdsData = { ...existingIds, ...newIdsData };
     const finalCertificatesData = { ...existingCerts, ...newCertificatesData };
     const finalOtherDocsData =
-      newOtherDocsData.length > 0 ? newOtherDocsData : existingOthers;
+      newOtherDocsData.length > 0 ? [...existingOthers, ...newOtherDocsData] : existingOthers;
     const finalExitDocsData = { ...existingExitDocs, ...newExitDocsData };
 
     const profileUrl = req.files?.profile
-      ? `/Images/profiles/${req.files.profile[0].filename}`
+      ? await uploadSingleFileToDrive(req.files.profile[0], "profiles", "profiles")
       : existing.profile_url;
     const resumeUrl = req.files?.resume
-      ? `/Images/resumes/${req.files.resume[0].filename}`
+      ? await uploadSingleFileToDrive(req.files.resume[0], "resume", "resumes")
       : existing.resume_url;
     const offerLetterUrl = req.files?.offerLetter
-      ? `/Images/offer_letters/${req.files.offerLetter[0].filename}`
+      ? await uploadSingleFileToDrive(req.files.offerLetter[0], "offer_letters", "offer_letters")
       : existing.offer_letter_url;
     
     let internOfferLetterUrl = existing.intern_offer_letter_url;
     if (req.files?.InternofferLetter) {
+      const pathUrl = await uploadSingleFileToDrive(req.files.InternofferLetter[0], "offer_letters", "offer_letters");
       internOfferLetterUrl = JSON.stringify({
         originalName: req.files.InternofferLetter[0].originalname,
-        path: `/Images/offer_letters/${req.files.InternofferLetter[0].filename}`,
+        path: pathUrl,
       });
     }
 
@@ -597,7 +636,6 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         gender = ?,
         email_personal = ?,
         email_official = ?,
-        emailPassword = ?,
         phone_personal = ?,
         phone_official = ?,
         phone_alternative = ?,
@@ -638,7 +676,6 @@ router.put("/updateEmployee/:id", uploadFields, (req, res) => {
         data.emailOfficial || null,
         data.phonePersonal || null,
         data.phoneOfficial || null,
-        data.emailPassword || null,
         data.phoneAlternative || null,
         data.phoneRelation || null,
         data.bloodGroup || null,
@@ -707,6 +744,7 @@ router.delete("/deleteFile/:id", (req, res) => {
   }
 
   const fieldMapping = {
+    profile: { column: "profile_url", jsonKey: null },
     resume: { column: "resume_url", jsonKey: null },
     offerLetter: { column: "offer_letter_url", jsonKey: null },
     InternofferLetter: { column: "intern_offer_letter_url", jsonKey: null },
@@ -773,12 +811,7 @@ router.delete("/deleteFile/:id", (req, res) => {
             }
 
             if (filePath) {
-              const fullPath = path.join(__dirname, "../..", filePath);
-              fs.unlink(fullPath, (unlinkErr) => {
-                if (unlinkErr) {
-                  console.error("File deletion error:", unlinkErr);
-                }
-              });
+              deleteFileFromStorage(filePath);
             }
 
             res.json({
@@ -820,12 +853,7 @@ router.delete("/deleteFile/:id", (req, res) => {
               }
 
               if (filePath) {
-                const fullPath = path.join(__dirname, "../..", filePath);
-                fs.unlink(fullPath, (unlinkErr) => {
-                  if (unlinkErr) {
-                    console.error("File deletion error:", unlinkErr);
-                  }
-                });
+                deleteFileFromStorage(filePath);
               }
 
               res.json({
@@ -861,12 +889,7 @@ router.delete("/deleteFile/:id", (req, res) => {
         }
 
         if (filePath) {
-          const fullPath = path.join(__dirname, "../..", filePath);
-          fs.unlink(fullPath, (unlinkErr) => {
-            if (unlinkErr) {
-              console.error("File deletion error:", unlinkErr);
-            }
-          });
+          deleteFileFromStorage(filePath);
         }
 
         res.json({
@@ -882,21 +905,62 @@ router.delete("/:id", (req, res) => {
   const { id } = req.params;
   console.log("Deleting employee:", id);
 
-  const query = "DELETE FROM employees_details WHERE employee_id = ?";
+  const selectQuery = `SELECT profile_url, resume_url, offer_letter_url, intern_offer_letter_url, ID_url, Certificates_url, otherDocs_url, exit_docs_url FROM employees_details WHERE employee_id = ?`;
 
-  db.pool.query(query, [id], (err, result) => {
-    if (err) {
-      console.error("Delete error:", err);
-      return res.status(500).json({
-        status: false,
-        message: "DB error",
-        error: err.message,
-      });
+  db.pool.query(selectQuery, [id], async (selectErr, results) => {
+    if (!selectErr && results && results.length > 0) {
+      const emp = results[0];
+      const filesToDelete = [];
+
+      if (emp.profile_url) filesToDelete.push(emp.profile_url);
+      if (emp.resume_url) filesToDelete.push(emp.resume_url);
+      if (emp.offer_letter_url) filesToDelete.push(emp.offer_letter_url);
+
+      if (emp.intern_offer_letter_url) {
+        try {
+          const parsed = JSON.parse(emp.intern_offer_letter_url);
+          if (parsed?.path) filesToDelete.push(parsed.path);
+        } catch (e) {}
+      }
+
+      const parseAndPush = (jsonStr) => {
+        if (!jsonStr) return;
+        try {
+          const obj = JSON.parse(jsonStr);
+          if (Array.isArray(obj)) {
+            obj.forEach((item) => item?.path && filesToDelete.push(item.path));
+          } else if (typeof obj === "object") {
+            Object.values(obj).forEach((item) => item?.path && filesToDelete.push(item.path));
+          }
+        } catch (e) {}
+      };
+
+      parseAndPush(emp.ID_url);
+      parseAndPush(emp.Certificates_url);
+      parseAndPush(emp.otherDocs_url);
+      parseAndPush(emp.exit_docs_url);
+
+      for (const filePath of filesToDelete) {
+        await deleteFileFromStorage(filePath);
+      }
     }
 
-    res.json({
-      status: true,
-      message: "Employee deleted successfully",
+    const query = "DELETE FROM employees_details WHERE employee_id = ?";
+
+    db.pool.query(query, [id], (err, result) => {
+      if (err) {
+        console.error("Delete error:", err);
+        return res.status(500).json({
+          status: false,
+          message: "DB error",
+          error: err.message,
+        });
+      }
+
+      res.json({
+        status: true,
+        message: "Employee deleted successfully",
+      });
     });
   });
 });
@@ -1103,12 +1167,7 @@ router.delete("/deleteOtherDoc/:id", (req, res) => {
           }
 
           if (filePath) {
-            const fullPath = path.join(__dirname, "../..", filePath);
-            fs.unlink(fullPath, (unlinkErr) => {
-              if (unlinkErr) {
-                console.error("File deletion error:", unlinkErr);
-              }
-            });
+            deleteFileFromStorage(filePath);
           }
 
           res.json({

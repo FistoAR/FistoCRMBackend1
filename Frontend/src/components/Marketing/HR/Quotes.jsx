@@ -46,7 +46,8 @@ const OCCASION_OPTIONS = [
     color: "bg-red-100 text-red-800",
     type: "occasion",
   },
-  { value: "Announcement", label: "Announcement", color: "bg-yellow-100 text-yellow-800", type: "occasion" }
+  { value: "Announcement", label: "Announcement", color: "bg-yellow-100 text-yellow-800", type: "occasion" },
+  { value: "Others", label: "Others", color: "bg-gray-100 text-gray-800", type: "occasion" }
 ];
 
 const Quotes = () => {
@@ -78,6 +79,18 @@ const Quotes = () => {
 
   const API_URL = import.meta.env.VITE_API_BASE_URL;
   const API_URL1 = import.meta.env.VITE_API_BASE_URL1;
+
+  const resolveImageUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+      return url;
+    }
+    if (url.startsWith("/api/")) {
+      const base = (API_URL || "").replace(/\/api\/?$/, "");
+      return `${base}${url}`;
+    }
+    return `${API_URL1 || API_URL || ""}${url}`;
+  };
 
   const fetchQuotes = async () => {
     setLoading(true);
@@ -148,6 +161,8 @@ const Quotes = () => {
     setEditingQuote(null);
     setFormData({
       date: "",
+      end_date: "",
+      title: "",
       quote: "",
       occasion: "",
       image: null,
@@ -161,6 +176,8 @@ const Quotes = () => {
     setEditingQuote(quote);
     setFormData({
       date: formatDateForInput(quote.date),
+      end_date: formatDateForInput(quote.end_date || quote.endDate),
+      title: quote.title || "",
       quote: quote.quote,
       occasion: quote.occasion || "",
       image: null,
@@ -200,7 +217,13 @@ const Quotes = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === "occasion" && value !== "Announcement") {
+        next.end_date = "";
+      }
+      return next;
+    });
     if (errors[name]) {
       setErrors((prev) => {
         const { [name]: removed, ...rest } = prev;
@@ -268,6 +291,11 @@ const Quotes = () => {
     try {
       const submitFormData = new FormData();
       submitFormData.append("name", newImageData.name);
+      if (newImageData.occasion) {
+        submitFormData.append("occasion", newImageData.occasion);
+      } else if (formData.occasion) {
+        submitFormData.append("occasion", formData.occasion);
+      }
       submitFormData.append("image", newImageData.image);
 
       const endpoint = imageUploadType === "employee" 
@@ -309,8 +337,11 @@ const Quotes = () => {
 
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.date) newErrors.date = "Date is required";
-    if (!formData.quote.trim()) newErrors.quote = "Quote is required";
+    if (!formData.date) newErrors.date = "From Date is required";
+    if (formData.end_date && formData.date && formData.end_date < formData.date) {
+      newErrors.end_date = "To Date cannot be earlier than From Date";
+    }
+    if (!formData.quote.trim()) newErrors.quote = "Content is required";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -326,6 +357,12 @@ const Quotes = () => {
     try {
       const submitFormData = new FormData();
       submitFormData.append("date", formData.date);
+      if (formData.end_date) {
+        submitFormData.append("end_date", formData.end_date);
+      }
+      if (formData.title) {
+        submitFormData.append("title", formData.title);
+      }
       submitFormData.append("quote", formData.quote);
       submitFormData.append("occasion", formData.occasion);
 
@@ -366,6 +403,8 @@ const Quotes = () => {
     setEditingQuote(null);
     setFormData({
       date: "",
+      end_date: "",
+      title: "",
       quote: "",
       occasion: "",
       image: null,
@@ -420,7 +459,7 @@ const Quotes = () => {
   const handleNext = () => setCurrentPage((prev) => Math.min(prev + 1, totalPages));
 
   return (
-    <>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
       {/* Header bar */}
       <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
         <div className="flex items-center gap-[0.5vw]">
@@ -448,8 +487,14 @@ const Quotes = () => {
       {/* Content area */}
       <div className="flex-1 min-h-0 overflow-auto p-[0.8vw]">
         {loading ? (
-          <div className="flex items-center justify-center h-full min-h-[400px]">
-            <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+                <div className="h-32 bg-gray-200 rounded-lg w-full" />
+                <div className="h-4 bg-gray-200 rounded w-2/3" />
+                <div className="h-3 bg-gray-100 rounded w-1/3" />
+              </div>
+            ))}
           </div>
         ) : filteredQuotes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
@@ -465,7 +510,7 @@ const Quotes = () => {
               <div key={q.id} className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow duration-300">
                 <div className="relative h-[12vw] overflow-hidden">
                   <img
-                    src={q.image_url?.startsWith("http") ? q.image_url : `${API_URL1}${q.image_url}`}
+                    src={resolveImageUrl(q.image_url)}
                     alt="Quote"
                     className="w-full h-full object-cover"
                   />
@@ -486,12 +531,20 @@ const Quotes = () => {
 
                 <div className="p-[0.8vw]">
                   <div className="flex items-center justify-between mb-[0.5vw]">
-                    <div className="text-[0.75vw] text-gray-500 font-medium">{formatDate(q.date)}</div>
+                    <div className="text-[0.75vw] text-gray-500 font-medium">
+                      {formatDate(q.date)}
+                      {q.end_date && q.end_date !== q.date && ` - ${formatDate(q.end_date)}`}
+                    </div>
                     <button onClick={() => handleDownload(q)} className="text-gray-600 hover:text-blue-600 cursor-pointer">
                       <Download size={"0.9vw"} />
                     </button>
                   </div>
-                  <p className="text-[0.85vw] text-gray-800 font-medium line-clamp-3">"{q.quote}"</p>
+                  {q.title && (
+                    <h4 className="text-[0.9vw] font-bold text-gray-900 mb-[0.2vw] truncate">
+                      {q.title}
+                    </h4>
+                  )}
+                  <p className="text-[0.85vw] text-gray-800 font-medium whitespace-pre-wrap line-clamp-4">{q.quote}</p>
                 </div>
               </div>
             ))}
@@ -545,10 +598,10 @@ const Quotes = () => {
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto flex flex-col">
               <div className="flex-1 overflow-y-auto p-[1.2vw]">
                 <div className="space-y-[1vw]">
-                  <div className="grid grid-cols-2 gap-[1vw]">
+                  <div className="grid grid-cols-3 gap-[1vw]">
                     <div>
                       <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                        Date <span className="text-red-500">*</span>
+                        From Date <span className="text-red-500">*</span>
                       </label>
                       <div className="relative">
                         <Calendar className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
@@ -561,6 +614,25 @@ const Quotes = () => {
                         />
                       </div>
                       {errors.date && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.date}</p>}
+                    </div>
+
+                    <div>
+                      <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                        To Date <span className="text-gray-400 font-normal">{formData.occasion === "Announcement" ? "(Optional)" : "(Announcement Only)"}</span>
+                      </label>
+                      <div className="relative">
+                        <Calendar className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          name="end_date"
+                          type="date"
+                          value={formData.end_date}
+                          onChange={handleInputChange}
+                          disabled={!formData.date || formData.occasion !== "Announcement"}
+                          min={formData.date || undefined}
+                          className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border rounded-full text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black ${errors.end_date ? "border-red-500" : "border-gray-300"} ${!formData.date || formData.occasion !== "Announcement" ? "bg-gray-100 cursor-not-allowed text-gray-400" : ""}`}
+                        />
+                      </div>
+                      {errors.end_date && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.end_date}</p>}
                     </div>
 
                     <div>
@@ -587,15 +659,29 @@ const Quotes = () => {
 
                   <div>
                     <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                      Quote <span className="text-red-500">*</span>
+                      Title / Heading <span className="text-gray-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      name="title"
+                      type="text"
+                      value={formData.title}
+                      onChange={handleInputChange}
+                      placeholder="Enter announcement title or headline..."
+                      className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                      Content <span className="text-red-500">*</span>
                     </label>
                     <textarea
                       name="quote"
                       value={formData.quote}
                       onChange={handleInputChange}
-                      rows={3}
-                      className={`w-full px-[0.8vw] py-[0.6vw] border rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black resize-vertical ${errors.quote ? "border-red-500" : "border-gray-300"}`}
-                      placeholder="Enter your inspirational quote here..."
+                      rows={4}
+                      className={`w-full px-[0.8vw] py-[0.6vw] border rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black resize-vertical whitespace-pre-wrap ${errors.quote ? "border-red-500" : "border-gray-300"}`}
+                      placeholder="Enter announcement text or quote..."
                     />
                     {errors.quote && <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">{errors.quote}</p>}
                   </div>
@@ -619,7 +705,7 @@ const Quotes = () => {
                           >
                             <div className="w-full aspect-square overflow-hidden">
                               <img
-                                src={item.imageUrl?.startsWith("http") ? item.imageUrl : `${API_URL1}${item.imageUrl}`}
+                                src={resolveImageUrl(item.imageUrl)}
                                 alt={item.name}
                                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
                               />
@@ -669,7 +755,7 @@ const Quotes = () => {
                           <div className="space-y-[0.4vw]">
                             <div className="w-[8vw] h-[8vw] mx-auto rounded-lg overflow-hidden border border-gray-200">
                               <img
-                                src={selectedImage?.startsWith("http") || selectedImage?.startsWith("data:") ? selectedImage : `${API_URL1}${selectedImage}`}
+                                src={resolveImageUrl(selectedImage)}
                                 alt="Preview"
                                 className="w-full h-full object-cover"
                               />
@@ -764,6 +850,25 @@ const Quotes = () => {
 
                 <div>
                   <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                    Target HR Resource Subfolder
+                  </label>
+                  <select
+                    name="occasion"
+                    value={newImageData.occasion || ""}
+                    onChange={handleNewImageInputChange}
+                    className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-lg text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black bg-white"
+                  >
+                    <option value="">Default ({imageUploadType === "employee" ? "Birthday" : "Holiday"})</option>
+                    {OCCASION_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
                     Image <span className="text-red-500 ml-[0.2vw]">*</span>
                   </label>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-[1vw] hover:border-blue-400 hover:bg-gray-50 transition">
@@ -828,7 +933,7 @@ const Quotes = () => {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

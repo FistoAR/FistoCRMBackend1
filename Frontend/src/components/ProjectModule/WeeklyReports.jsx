@@ -896,13 +896,10 @@ export default function WeeklyReports() {
 
                         {/* Report List */}
                         {loading ? (
-                            <div style={{ ...styles.empty, minHeight: uploadPanelOpen ? '48vh' : '78vh', maxHeight: uploadPanelOpen ? '48vh' : '78vh' }} className='bg-white rounded-2xl p-[1.6vh] flex justify-center items-center'>
-                                <svg style={{ animation: 'spin 1s linear infinite' }}
-                                    width="2.4vh" height="2.4vh" viewBox="0 0 24 24"
-                                    fill="none" stroke="#1e293b" strokeWidth="2">
-                                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                                </svg>
-                                <span style={{ marginLeft: '0.8vh' }}>Loading reports…</span>
+                            <div style={{ minHeight: uploadPanelOpen ? '48vh' : '78vh', maxHeight: uploadPanelOpen ? '48vh' : '78vh' }} className='bg-white rounded-2xl p-[1.6vh] space-y-[1vh] overflow-hidden'>
+                                {Array.from({ length: 5 }).map((_, idx) => (
+                                    <div key={idx} className="h-[4vh] animate-shimmer rounded-xl w-full" />
+                                ))}
                             </div>
                         ) : currentTabReports.length === 0 ? (
                             <div style={{ ...styles.empty, minHeight: uploadPanelOpen ? '48vh' : '78vh', maxHeight: uploadPanelOpen ? '48vh' : '78vh' }} className='bg-white rounded-2xl p-[1.6vh] flex justify-center items-center' >

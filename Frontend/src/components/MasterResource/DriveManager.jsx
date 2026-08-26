@@ -58,6 +58,159 @@ const Thumbnail = React.memo(({ file, apiUrl }) => {
   );
 });
 
+// ─── Move Modal ───────────────────────────────────────────────────────────────
+function MoveModal({ targets, currentFolderId, sidebarFolders, onClose, onMove }) {
+  const [navHistory, setNavHistory] = useState([]);
+  const [currentNavFolder, setCurrentNavFolder] = useState(null);
+  const [subFolders, setSubFolders] = useState([]);
+  const [selectedFolder, setSelectedFolder] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!currentNavFolder) {
+      setSubFolders(sidebarFolders.filter(f => !targets.some(t => t.id === f.id)));
+      return;
+    }
+    setLoading(true);
+    axios.get(`${API_URL}/files/${currentNavFolder.id}`)
+      .then(res => {
+        const fldrs = (res.data.files || res.data || []).filter(f => f.isFolder && !targets.some(t => t.id === f.id));
+        setSubFolders(fldrs);
+      })
+      .catch(() => setSubFolders([]))
+      .finally(() => setLoading(false));
+  }, [currentNavFolder, sidebarFolders, targets]);
+
+  const navigateTo = (folder) => {
+    if (!folder) {
+      setNavHistory([]);
+      setCurrentNavFolder(null);
+      setSelectedFolder(null);
+    } else {
+      setNavHistory(prev => [...prev, folder]);
+      setCurrentNavFolder(folder);
+      setSelectedFolder(folder);
+    }
+  };
+
+  const navigateBack = () => {
+    if (navHistory.length <= 1) {
+      setNavHistory([]);
+      setCurrentNavFolder(null);
+      setSelectedFolder(null);
+    } else {
+      const newHist = navHistory.slice(0, -1);
+      setNavHistory(newHist);
+      const parent = newHist[newHist.length - 1];
+      setCurrentNavFolder(parent);
+      setSelectedFolder(parent);
+    }
+  };
+
+  const targetFolderId = selectedFolder?.id || currentNavFolder?.id || currentFolderId;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1100]" onClick={onClose}>
+      <div className="bg-white rounded-xl w-[460px] max-w-[95vw] h-[480px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#e0e0e0] shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-[#202124]">
+              Move {targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`}
+            </h3>
+            <p className="text-xs text-[#5f6368]">Choose destination location</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        {/* Breadcrumb Navigation Bar */}
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-[#f8f9fa] border-b border-[#e0e0e0] text-xs text-[#5f6368] shrink-0">
+          {currentNavFolder ? (
+            <button onClick={navigateBack} className="p-1 rounded-full hover:bg-[#e8eaed] text-[#202124] flex items-center gap-1 font-medium cursor-pointer">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+              <span>Back</span>
+            </button>
+          ) : (
+            <span className="font-semibold text-[#202124]">Root Folders</span>
+          )}
+          {currentNavFolder && (
+            <div className="flex items-center gap-1 overflow-x-auto text-[11px] truncate flex-1">
+              <button onClick={() => navigateTo(null)} className="hover:underline text-[#1a73e8] cursor-pointer shrink-0">Root</button>
+              {navHistory.map((h, i) => (
+                <React.Fragment key={h.id}>
+                  <span>›</span>
+                  <span className={i === navHistory.length - 1 ? "font-semibold text-[#202124] truncate" : "text-[#5f6368] truncate"}>{h.name}</span>
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Folder List */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+          {loading ? (
+            <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div>
+          ) : subFolders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center text-[#5f6368] py-8">
+              <div className="text-3xl mb-1 opacity-40">📁</div>
+              <p className="text-sm font-medium">No subfolders here</p>
+              <p className="text-xs text-[#9aa0a6]">Click "Move Here" to move into this folder</p>
+            </div>
+          ) : (
+            subFolders.map(f => {
+              const isSelected = selectedFolder?.id === f.id;
+              return (
+                <div
+                  key={f.id}
+                  onClick={() => setSelectedFolder(f)}
+                  onDoubleClick={() => navigateTo(f)}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition cursor-pointer select-none ${isSelected ? "bg-[#e8f0fe] text-[#1967d2] font-semibold border border-[#c5d8f5]" : "hover:bg-[#f1f3f4] text-[#3c4043]"}`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    {ICONS.folder}
+                    <span className="truncate">{f.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={e => { e.stopPropagation(); navigateTo(f); }}
+                      title="Open folder"
+                      className="p-1 rounded-md hover:bg-black/10 text-[#5f6368] text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Open</span>
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="px-5 py-3 border-t border-[#e0e0e0] flex items-center justify-between shrink-0 bg-[#f8f9fa]">
+          <div className="text-xs text-[#5f6368] truncate max-w-[220px]">
+            Target: <span className="font-semibold text-[#202124]">{selectedFolder?.name || currentNavFolder?.name || "Current folder"}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-[#5f6368] hover:bg-[#e8eaed] font-medium cursor-pointer">
+              Cancel
+            </button>
+            <button
+              onClick={() => onMove(targetFolderId)}
+              disabled={!targetFolderId || targetFolderId === currentFolderId}
+              className="px-4 py-2 rounded-lg text-sm bg-[#1a73e8] text-white hover:bg-[#1557b0] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Move Here
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Access Modal ──────────────────────────────────────────────────────────────
 function AccessModal({ folder, currentUser, onClose, notify, parentGrantedEmployeeIds = [], parentGrantedDesignations = [] }) {
   const isAdmin = ADMIN_ROLES.includes(currentUser.role);
@@ -74,17 +227,17 @@ function AccessModal({ folder, currentUser, onClose, notify, parentGrantedEmploy
   const toggleDesignation = async (designation) => { if (!isAdmin) return; setSaving(true); const ig = accessRecord?.grantedDesignations?.some(g => g.designation === designation); try { if (ig) { await axios.patch(`${ACCESS_URL}/revoke-designation`, { folderId: folder.id, designation }); setAccessRecord(p => ({ ...p, grantedDesignations: p.grantedDesignations.filter(g => g.designation !== designation) })); } else { await axios.patch(`${ACCESS_URL}/grant-designation`, { folderId: folder.id, designation, grantedBy: currentUser.employeeId }); setAccessRecord(p => ({ ...p, grantedDesignations: [...(p.grantedDesignations || []), { designation, grantedBy: currentUser.employeeId, grantedAt: new Date() }] })); } notify?.({ title: "Success", message: ig ? `Revoked ${designation}` : `Granted ${designation}` }); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.message || "Failed" }); } setSaving(false); };
   const toggleEmployee = async (employeeId, employeeName) => { setSaving(true); const ig = accessRecord?.grantedEmployees?.some(g => g.employeeId === String(employeeId)); try { if (ig) { await axios.patch(`${ACCESS_URL}/revoke-employee`, { folderId: folder.id, employeeId: String(employeeId) }); setAccessRecord(p => ({ ...p, grantedEmployees: p.grantedEmployees.filter(g => g.employeeId !== String(employeeId)) })); } else { await axios.patch(`${ACCESS_URL}/grant-employee`, { folderId: folder.id, employeeId: String(employeeId), grantedBy: currentUser.employeeId }); setAccessRecord(p => ({ ...p, grantedEmployees: [...(p.grantedEmployees || []), { employeeId: String(employeeId), grantedBy: currentUser.employeeId, grantedAt: new Date() }] })); } notify?.({ title: "Success", message: ig ? `Revoked ${employeeName}` : `Granted ${employeeName}` }); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.message || "Failed" }); } setSaving(false); };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1100]" onClick={onClose}><div className="bg-white rounded-[0.8vw] w-[32vw] min-w-[420px] max-h-[85vh] flex flex-col shadow-[0_8px_32px_rgba(0,0,0,0.24)]" onClick={e => e.stopPropagation()}>
-      <div className="flex items-center justify-between px-[1.5vw] py-[1.2vh] border-b border-[#e0e0e0] shrink-0"><div><h3 className="text-[1vw] font-medium text-[#202124]">Manage Download Access</h3><p className="text-[0.72vw] text-[#5f6368] truncate max-w-[22vw]">Folder : {folder.name}</p></div><button onClick={onClose} className="p-[0.3vw] rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div>
-      <div className="flex-1 overflow-y-auto px-[1.5vw] py-[1.2vh]">
-        {loading ? <div className="flex items-center justify-center py-[4vh]"><div className="w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px] border-[2px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div> : <>
-          {isAdmin && <div className="mb-[1.5vh]"><p className="text-[0.72vw] font-medium text-[#5f6368] uppercase tracking-wider mb-[0.8vh]">Folder Visibility</p><div className={`flex items-center justify-between px-[0.8vw] py-[0.8vh] rounded-[0.4vw] border ${adminOnly ? "bg-blue-50 border-[#84bef5]" : "bg-[#f8f9fa] border-[#e0e0e0]"}`}><div className="flex items-center gap-[0.6vw]"><div className={adminOnly ? "text-blue-400" : "text-[#5f6368]"}>{adminOnly ? ICONS.eyeOff : ICONS.eye}</div><div><p className="text-[0.82vw] font-medium text-[#3c4043]">{adminOnly ? "Admin Only" : "Visible to All"}</p></div></div><button onClick={toggleAdminOnly} disabled={togglingVisibility} className="relative cursor-pointer disabled:opacity-50"><div className={`w-[2.4vw] min-w-[38px] h-[1.2vw] min-h-[20px] rounded-full transition-colors duration-200 ${adminOnly ? "bg-blue-400" : "bg-[#dadce0]"}`}><div className="absolute bg-white rounded-full shadow transition-transform duration-200" style={{ top: "2px", width: "16px", height: "16px", left: adminOnly ? "calc(100% - 18px)" : "2px" }} /></div></button></div></div>}
-          {isAdmin && <div className="mb-[1.5vh]"><p className="text-[0.72vw] font-medium text-[#5f6368] uppercase tracking-wider mb-[0.8vh]">Designation Access</p>{(() => { const av = designations.filter(d => !parentGrantedDesignations.includes(d)); if (!av.length) return <p className="text-[0.78vw] text-[#9aa0a6] italic py-[1vh]">All have parent access.</p>; return <div className="space-y-[0.4vh] max-h-[22vh] overflow-y-auto">{av.map(desig => { const ig = accessRecord?.grantedDesignations?.some(g => g.designation === desig); return <div key={desig} className={`flex items-center justify-between px-[0.8vw] py-[0.6vh] rounded-[0.4vw] ${ig ? "bg-[#e8f0fe] border border-[#c5d8f5]" : "bg-[#f8f9fa] border border-[#e0e0e0]"}`}><span className="text-[0.8vw] text-[#3c4043]">{desig}</span><button onClick={() => toggleDesignation(desig)} disabled={saving} className={`px-[0.7vw] py-[0.3vh] rounded-[0.3vw] text-[0.72vw] font-medium cursor-pointer disabled:opacity-50 ${ig ? "bg-white border border-[#d93025] text-[#d93025]" : "bg-[#1a73e8] text-white"}`}>{ig ? "Revoke" : "Grant"}</button></div>; })}</div>; })()}</div>}
-          {currentUser.isTeamHead && !isAdmin && <div className="mb-[1.5vh]"><p className="text-[0.72vw] font-medium text-[#5f6368] uppercase tracking-wider mb-[0.8vh]">Team Members</p>{teamMembers.length === 0 ? <p className="text-[0.8vw] text-[#5f6368] py-[2vh] text-center">No members found.</p> : <div className="space-y-[0.4vh] max-h-[28vh] overflow-y-auto">{teamMembers.map(m => { const ig = accessRecord?.grantedEmployees?.some(g => g.employeeId === String(m.id)); return <div key={m.id} className={`flex items-center justify-between px-[0.8vw] py-[0.6vh] rounded-[0.4vw] ${ig ? "bg-[#e8f0fe] border border-[#c5d8f5]" : "bg-[#f8f9fa] border border-[#e0e0e0]"}`}><span className="text-[0.8vw] text-[#3c4043]">{m.name}</span><button onClick={() => toggleEmployee(m.id, m.name)} disabled={saving} className={`px-[0.7vw] py-[0.3vh] rounded-[0.3vw] text-[0.72vw] font-medium cursor-pointer disabled:opacity-50 ${ig ? "bg-white border border-[#d93025] text-[#d93025]" : "bg-[#1a73e8] text-white"}`}>{ig ? "Revoke" : "Grant"}</button></div>; })}</div>}</div>}
-          <div className="border-t border-[#e0e0e0] pt-[1vh] mt-[0.5vh]"><p className="text-[0.72vw] font-medium text-[#5f6368] uppercase tracking-wider mb-[0.6vh]">Currently Granted</p>{!accessRecord?.grantedDesignations?.length && !accessRecord?.grantedEmployees?.length ? <p className="text-[0.78vw] text-[#9aa0a6] italic">None yet.</p> : <div className="flex flex-wrap gap-[0.4vw]">{accessRecord?.grantedDesignations?.map(g => <span key={g.designation} className="px-[0.5vw] py-[0.2vh] bg-[#e8f0fe] text-[#1967d2] rounded-full text-[0.7vw] font-medium">{g.designation}</span>)}{accessRecord?.grantedEmployees?.map(g => <span key={g.employeeId} className="px-[0.5vw] py-[0.2vh] bg-[#e6f4ea] text-[#1e8e3e] rounded-full text-[0.7vw] font-medium">ID:{g.employeeId}</span>)}</div>}</div>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1100]" onClick={onClose}><div className="bg-white rounded-xl w-[480px] max-w-[95vw] max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[#e0e0e0] shrink-0"><div><h3 className="text-base font-semibold text-[#202124]">Manage Download Access</h3><p className="text-xs text-[#5f6368] truncate max-w-[320px]">Folder : {folder.name}</p></div><button onClick={onClose} className="p-1.5 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div>
+      <div className="flex-1 overflow-y-auto px-6 py-3">
+        {loading ? <div className="flex items-center justify-center py-8"><div className="w-6 h-6 border-[2px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div> : <>
+          {isAdmin && <div className="mb-4"><p className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider mb-2">Folder Visibility</p><div className={`flex items-center justify-between px-3.5 py-2.5 rounded-lg border ${adminOnly ? "bg-blue-50 border-[#84bef5]" : "bg-[#f8f9fa] border-[#e0e0e0]"}`}><div className="flex items-center gap-2"><div className={adminOnly ? "text-blue-400" : "text-[#5f6368]"}>{adminOnly ? ICONS.eyeOff : ICONS.eye}</div><div><p className="text-sm font-semibold text-[#3c4043]">{adminOnly ? "Admin Only" : "Visible to All"}</p></div></div><button onClick={toggleAdminOnly} disabled={togglingVisibility} className="relative cursor-pointer disabled:opacity-50"><div className={`w-10 h-5 rounded-full transition-colors duration-200 ${adminOnly ? "bg-blue-400" : "bg-[#dadce0]"}`}><div className="absolute bg-white rounded-full shadow transition-transform duration-200" style={{ top: "2px", width: "16px", height: "16px", left: adminOnly ? "calc(100% - 18px)" : "2px" }} /></div></button></div></div>}
+          {isAdmin && <div className="mb-4"><p className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider mb-2">Designation Access <span className="text-red-500 normal-case font-normal text-[11px] ml-1.5">(Applies to Team Heads only)</span></p>{(() => { const av = designations.filter(d => !parentGrantedDesignations.includes(d)); if (!av.length) return <p className="text-xs text-[#9aa0a6] italic py-2">All have parent access.</p>; return <div className="space-y-1.5 max-h-48 overflow-y-auto">{av.map(desig => { const ig = accessRecord?.grantedDesignations?.some(g => g.designation === desig); return <div key={desig} className={`flex items-center justify-between px-3.5 py-2 rounded-lg ${ig ? "bg-[#e8f0fe] border border-[#c5d8f5]" : "bg-[#f8f9fa] border border-[#e0e0e0]"}`}><span className="text-sm text-[#3c4043]">{desig}</span><button onClick={() => toggleDesignation(desig)} disabled={saving} className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer disabled:opacity-50 ${ig ? "bg-white border border-[#d93025] text-[#d93025]" : "bg-[#1a73e8] text-white"}`}>{ig ? "Revoke" : "Grant"}</button></div>; })}</div>; })()}</div>}
+          {currentUser.isTeamHead && !isAdmin && <div className="mb-4"><p className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider mb-2">Team Members</p>{teamMembers.length === 0 ? <p className="text-sm text-[#5f6368] py-4 text-center">No members found.</p> : <div className="space-y-1.5 max-h-56 overflow-y-auto">{teamMembers.map(m => { const ig = accessRecord?.grantedEmployees?.some(g => g.employeeId === String(m.id)); return <div key={m.id} className={`flex items-center justify-between px-3.5 py-2 rounded-lg ${ig ? "bg-[#e8f0fe] border border-[#c5d8f5]" : "bg-[#f8f9fa] border border-[#e0e0e0]"}`}><span className="text-sm text-[#3c4043]">{m.name}</span><button onClick={() => toggleEmployee(m.id, m.name)} disabled={saving} className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer disabled:opacity-50 ${ig ? "bg-white border border-[#d93025] text-[#d93025]" : "bg-[#1a73e8] text-white"}`}>{ig ? "Revoke" : "Grant"}</button></div>; })}</div>}</div>}
+          <div className="border-t border-[#e0e0e0] pt-3 mt-1.5"><p className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider mb-1.5">Currently Granted</p>{!accessRecord?.grantedDesignations?.length && !accessRecord?.grantedEmployees?.length ? <p className="text-xs text-[#9aa0a6] italic">None yet.</p> : <div className="flex flex-wrap gap-1.5">{accessRecord?.grantedDesignations?.map(g => <span key={g.designation} className="px-2.5 py-0.5 bg-[#e8f0fe] text-[#1967d2] rounded-full text-xs font-medium">{g.designation}</span>)}{accessRecord?.grantedEmployees?.map(g => <span key={g.employeeId} className="px-2.5 py-0.5 bg-[#e6f4ea] text-[#1e8e3e] rounded-full text-xs font-medium">ID:{g.employeeId}</span>)}</div>}</div>
         </>}
       </div>
-      <div className="px-[1.5vw] py-[1vh] border-t border-[#e0e0e0] shrink-0 flex justify-end"><button onClick={onClose} className="px-[1.2vw] py-[0.6vh] rounded-[0.4vw] text-[0.85vw] bg-[#1a73e8] text-white hover:bg-[#1557b0] font-medium cursor-pointer">Done</button></div>
+      <div className="px-6 py-3 border-t border-[#e0e0e0] shrink-0 flex justify-end"><button onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-[#1a73e8] text-white hover:bg-[#1557b0] font-semibold cursor-pointer">Done</button></div>
     </div></div>
   );
 }
@@ -145,7 +298,7 @@ function UploadProgressPanel({ uploadItems, onClose, onCancel }) {
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function DriveManager() {
-  const ROOT = "1sIrTpAIil4pEwhuFRVr6kjFKDpgrWY_D";
+  const ROOT = import.meta.env.VITE_DRIVE_ROOT_ID || "1sIrTpAIil4pEwhuFRVr6kjFKDpgrWY_D";
   const { notify } = useNotification();
   const currentUser = getCurrentUser();
   const isAdmin = ADMIN_ROLES.includes(currentUser.role);
@@ -161,11 +314,34 @@ export default function DriveManager() {
   const [selected, setSelected] = useState(new Set());
   const [detail, setDetail] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [ctx, setCtx] = useState(null);
+  const [bgCtx, setBgCtx] = useState(null);
+  const [hoverTooltip, setHoverTooltip] = useState(null);
+  const [clipboard, setClipboard] = useState(null); // { action: 'cut'|'copy', items: [...] }
+  const [moveModalTargets, setMoveModalTargets] = useState(null);
   const [newMenu, setNewMenu] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [storageInfo, setStorageInfo] = useState(null);
+  const [overallStorage, setOverallStorage] = useState(null);
+  const [folderCountsMap, setFolderCountsMap] = useState({});
   const hasLoadedOnce = useRef(false);
+
+  const handleMouseEnterName = (e, text) => {
+    const el = e.currentTarget;
+    if (el.scrollWidth > el.clientWidth || text.length > 18) {
+      const rect = el.getBoundingClientRect();
+      setHoverTooltip({
+        x: rect.left,
+        y: rect.bottom + 4,
+        text
+      });
+    }
+  };
+
+  const handleMouseLeaveName = () => {
+    setHoverTooltip(null);
+  };
 
   const [uploadItems, setUploadItems] = useState([]);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
@@ -225,8 +401,153 @@ export default function DriveManager() {
   // ─── Selection ─────────────────────────────────────────────────────────────
   const displayed = searchFiles || files;
   const selectedFiles = displayed.filter(f => selected.has(f.id));
-  const hasSelection = selected.size > 0;
+  const hasSelection = selectedFiles.length > 0;
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  // ─── Fetch ─────────────────────────────────────────────────────────────────
+  const fetchFolderCounts = useCallback(async (foldersList) => {
+    const fIds = (foldersList || []).filter(f => f.isFolder).map(f => f.id);
+    if (!fIds.length) return;
+    try {
+      const res = await axios.post(`${API_URL}/bulk-folder-counts`, { folderIds: fIds });
+      if (res.data) {
+        setFolderCountsMap(prev => ({ ...prev, ...res.data }));
+      }
+    } catch (e) {}
+  }, [API_URL]);
+
+  const fetchFiles = useCallback(async (id, silent = true) => { if (!id) return; if (!silent) setInitialLoading(true); try { const r = await axios.get(`${API_URL}/files/${id}`); let all = r.data.files || r.data || []; if (!isAdmin) { const sIds = all.filter(f => f.isFolder).map(f => f.id); if (sIds.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: sIds }); const vm = vr.data.data || {}; all = all.filter(f => !f.isFolder || !vm[f.id]?.adminOnly); } catch { } } } setFiles(all); const subIds = all.filter(f => f.isFolder).map(f => f.id); if (subIds.length) { bulkCheckAccess(subIds); fetchFolderCounts(all); } } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed to load" }); } finally { setInitialLoading(false); } }, [notify, isAdmin, bulkCheckAccess, fetchFolderCounts]);
+  const fetchCrumbs = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/path/${id}`, { params: { rootId: ROOT } }); const cl = (r.data || []).filter(c => c.id !== ROOT); setCrumbs(cl); if (!isAdmin && cl.length) bulkCheckAccess(cl.map(c => c.id)); } catch { setCrumbs([]); } }, [ROOT, isAdmin, bulkCheckAccess]);
+  const fetchStorage = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/storage-info/${id}`); setStorageInfo(r.data); } catch { } }, []);
+  const fetchOverallStorage = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API_URL}/overall-storage`);
+      setOverallStorage(r.data);
+    } catch (e) {
+      console.error("Failed to fetch overall storage:", e);
+    }
+  }, [API_URL]);
+  const fetchSidebarFolders = useCallback(async (autoSelect = true) => { if (!hasLoadedOnce.current) setSidebarLoading(true); try { const r = await axios.get(`${API_URL}/files/${ROOT}`); let folders = (r.data.files || r.data || []).filter(f => f.isFolder); if (!isAdmin && folders.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: folders.map(f => f.id) }); const vm = vr.data.data || {}; folders = folders.filter(f => !vm[f.id]?.adminOnly); } catch { } } setSidebarFolders(folders); if (folders.length) { bulkCheckAccess(folders.map(f => f.id)); fetchFolderCounts(folders); } if (autoSelect && folders.length && !activeSidebarFolder) { setActiveSidebarFolder(folders[0]); setFolderId(folders[0].id); } } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed" }); } setSidebarLoading(false); }, [ROOT, notify, activeSidebarFolder, bulkCheckAccess, isAdmin, fetchFolderCounts]);
+
+  // ─── Clipboard & Move ──────────────────────────────────────────────────────
+  const generateCopyName = (originalName, existingNames = []) => {
+    const nameSet = new Set(existingNames.map(n => n?.toLowerCase()));
+    const lastDotIdx = originalName.lastIndexOf(".");
+    let stem = originalName;
+    let ext = "";
+    if (lastDotIdx > 0 && lastDotIdx < originalName.length - 1) {
+      stem = originalName.substring(0, lastDotIdx);
+      ext = originalName.substring(lastDotIdx);
+    }
+
+    let candidate = `${stem} (copy)${ext}`;
+    if (!nameSet.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+
+    let counter = 1;
+    while (true) {
+      candidate = `${stem} (copy) ${counter}${ext}`;
+      if (!nameSet.has(candidate.toLowerCase())) {
+        return candidate;
+      }
+      counter++;
+    }
+  };
+
+  const handleCopySelection = useCallback((itemsToCopy = selectedFiles) => {
+    if (!itemsToCopy || !itemsToCopy.length) return;
+    setClipboard({ action: "copy", items: itemsToCopy });
+    notify?.({ title: "Copied", message: `Copied ${itemsToCopy.length} item(s) to clipboard` });
+  }, [selectedFiles, notify]);
+
+  const handleCut = useCallback((itemsToCut = selectedFiles) => {
+    if (!itemsToCut || !itemsToCut.length) return;
+    setClipboard({ action: "cut", items: itemsToCut });
+    notify?.({ title: "Cut", message: `Cut ${itemsToCut.length} item(s) to clipboard` });
+  }, [selectedFiles, notify]);
+
+  const pasteClipboard = useCallback(async (targetFolderId = folderId) => {
+    const target = typeof targetFolderId === "string" ? targetFolderId : folderId;
+    if (!clipboard || !clipboard.items || !clipboard.items.length || !target) return;
+
+    let targetFiles = files;
+    if (target !== folderId) {
+      try {
+        const res = await axios.get(`${API_URL}/files/${target}`);
+        targetFiles = res.data.files || res.data || [];
+      } catch {
+        targetFiles = [];
+      }
+    }
+    const existingNames = targetFiles.map(f => f.name);
+
+    if (clipboard.action === "cut") {
+      const fileIds = clipboard.items.map(i => i.id);
+      try {
+        await axios.post(`${API_URL}/move-batch`, { fileIds, targetFolderId: target });
+        notify?.({ title: "Success", message: `Moved ${fileIds.length} item(s)` });
+        setClipboard(null);
+        await fetchFiles(folderId);
+        fetchSidebarFolders(false);
+      } catch (e) {
+        notify?.({ title: "Error", message: e.response?.data?.error || "Move failed" });
+      }
+    } else if (clipboard.action === "copy") {
+      let ok = 0, fail = 0;
+      for (const item of clipboard.items) {
+        try {
+          const newName = generateCopyName(item.name, existingNames);
+          existingNames.push(newName);
+          await axios.post(`${API_URL}/copy/${item.id}`, { newName, folderId: target });
+          ok++;
+        } catch (err) {
+          console.error("Copy paste error:", err);
+          fail++;
+        }
+      }
+      await fetchFiles(folderId);
+      notify?.({ title: fail ? "Warning" : "Success", message: `${ok} item(s) pasted${fail ? `, ${fail} failed` : ""}` });
+    }
+  }, [clipboard, folderId, files, fetchFiles, fetchSidebarFolders, notify]);
+
+  const startMoveModal = useCallback((itemsToMove = selectedFiles) => {
+    if (!itemsToMove || !itemsToMove.length) return;
+    setMoveModalTargets(itemsToMove);
+  }, [selectedFiles]);
+
+  const commitMoveModal = useCallback(async (targetFolderId) => {
+    if (!moveModalTargets || !moveModalTargets.length || !targetFolderId) return;
+    const fileIds = moveModalTargets.map(i => i.id);
+    setMoveModalTargets(null);
+    try {
+      await axios.post(`${API_URL}/move-batch`, { fileIds, targetFolderId });
+      notify?.({ title: "Success", message: `Moved ${fileIds.length} item(s)` });
+      clearSelection();
+      await fetchFiles(folderId);
+      fetchSidebarFolders(false);
+    } catch (e) {
+      notify?.({ title: "Error", message: e.response?.data?.error || "Move failed" });
+    }
+  }, [moveModalTargets, folderId, clearSelection, fetchFiles, fetchSidebarFolders, notify]);
+
+  const doCopyBatch = useCallback(async (itemsToCopy = selectedFiles) => {
+    if (!itemsToCopy || !itemsToCopy.length) return;
+    const existingNames = files.map(f => f.name);
+    let ok = 0, fail = 0;
+    for (const item of itemsToCopy) {
+      try {
+        const newName = generateCopyName(item.name, existingNames);
+        existingNames.push(newName);
+        await axios.post(`${API_URL}/copy/${item.id}`, { newName, folderId });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    await fetchFiles(folderId);
+    notify?.({ title: fail ? "Warning" : "Success", message: `${ok} copied${fail ? `, ${fail} failed` : ""}` });
+  }, [selectedFiles, folderId, files, fetchFiles, notify]);
 
   // Smart click handler: single click = select, double click = open (no select)
   const handleItemClick = useCallback((f, e) => {
@@ -234,7 +555,6 @@ export default function DriveManager() {
     clickCountRef.current++;
     if (clickCountRef.current === 1) {
       clickTimerRef.current = setTimeout(() => {
-        // Single click confirmed → select
         if (e.ctrlKey || e.metaKey) {
           setSelected(prev => { const n = new Set(prev); n.has(f.id) ? n.delete(f.id) : n.add(f.id); return n; });
         } else if (e.shiftKey && selected.size > 0) {
@@ -251,7 +571,6 @@ export default function DriveManager() {
         clickCountRef.current = 0;
       }, 250);
     } else if (clickCountRef.current >= 2) {
-      // Double click confirmed → open (cancel the single-click select)
       clearTimeout(clickTimerRef.current);
       clickCountRef.current = 0;
       if (f.isFolder) {
@@ -262,20 +581,49 @@ export default function DriveManager() {
     }
   }, [selected, displayed]);
 
-  // ─── Fetch ─────────────────────────────────────────────────────────────────
-  const fetchFiles = useCallback(async (id, silent = true) => { if (!id) return; if (!silent) setInitialLoading(true); try { const r = await axios.get(`${API_URL}/files/${id}`); let all = r.data.files || r.data || []; if (!isAdmin) { const sIds = all.filter(f => f.isFolder).map(f => f.id); if (sIds.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: sIds }); const vm = vr.data.data || {}; all = all.filter(f => !f.isFolder || !vm[f.id]?.adminOnly); } catch { } } } setFiles(all); const subIds = all.filter(f => f.isFolder).map(f => f.id); if (subIds.length) bulkCheckAccess(subIds); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed to load" }); } finally { setInitialLoading(false); } }, [notify, isAdmin, bulkCheckAccess]);
-  const fetchCrumbs = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/path/${id}`, { params: { rootId: ROOT } }); const cl = (r.data || []).filter(c => c.id !== ROOT); setCrumbs(cl); if (!isAdmin && cl.length) bulkCheckAccess(cl.map(c => c.id)); } catch { setCrumbs([]); } }, [ROOT, isAdmin, bulkCheckAccess]);
-  const fetchStorage = useCallback(async (id) => { if (!id) return; try { const r = await axios.get(`${API_URL}/storage-info/${id}`); setStorageInfo(r.data); } catch { } }, []);
-  const fetchSidebarFolders = useCallback(async (autoSelect = true) => { if (!hasLoadedOnce.current) setSidebarLoading(true); try { const r = await axios.get(`${API_URL}/files/${ROOT}`); let folders = (r.data.files || r.data || []).filter(f => f.isFolder); if (!isAdmin && folders.length) { try { const vr = await axios.post(`${ACCESS_URL}/bulk-check-visibility`, { folderIds: folders.map(f => f.id) }); const vm = vr.data.data || {}; folders = folders.filter(f => !vm[f.id]?.adminOnly); } catch { } } setSidebarFolders(folders); if (folders.length) bulkCheckAccess(folders.map(f => f.id)); if (autoSelect && folders.length && !activeSidebarFolder) { setActiveSidebarFolder(folders[0]); setFolderId(folders[0].id); } } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Failed" }); } setSidebarLoading(false); }, [ROOT, notify, activeSidebarFolder, bulkCheckAccess, isAdmin]);
-
-  useEffect(() => { fetchSidebarFolders(true); }, []);
-  useEffect(() => { if (folderId) { const isFirst = !hasLoadedOnce.current; fetchFiles(folderId, !isFirst); fetchCrumbs(folderId); fetchStorage(folderId); if (isFirst) hasLoadedOnce.current = true; clearSelection(); } }, [folderId]);
+  useEffect(() => { fetchSidebarFolders(true); fetchOverallStorage(); }, [fetchOverallStorage]);
+  useEffect(() => { if (folderId) { const isFirst = !hasLoadedOnce.current; fetchFiles(folderId, false); fetchCrumbs(folderId); fetchStorage(folderId); fetchOverallStorage(); if (isFirst) hasLoadedOnce.current = true; clearSelection(); } }, [folderId, fetchOverallStorage]);
   useEffect(() => { if (activeSidebarFolder) fetchParentGrantedEmployees(activeSidebarFolder.id); }, [activeSidebarFolder]);
   useEffect(() => { if (inlineCreating && inlineRef.current) { inlineRef.current.focus(); inlineRef.current.select(); } }, [inlineCreating]);
   useEffect(() => { if (sidebarCreating && sidebarInlineRef.current) { sidebarInlineRef.current.focus(); sidebarInlineRef.current.select(); } }, [sidebarCreating]);
   useEffect(() => { if (renamingId) { const ref = renamingContext === "sidebar" ? sidebarRenameRef : renameRef; ref.current?.focus(); ref.current?.select(); } }, [renamingId, renamingContext]);
   useEffect(() => { if (searchTimer.current) clearTimeout(searchTimer.current); if (query.trim()) { searchTimer.current = setTimeout(() => { const q = query.toLowerCase(); setSearchFiles(files.filter(f => f.name?.toLowerCase().includes(q) || f.mimeType?.toLowerCase().includes(q))); }, 200); } else { setSearchFiles(null); } return () => { if (searchTimer.current) clearTimeout(searchTimer.current); }; }, [query, files]);
-  useEffect(() => { const fn = (e) => { if (e.key === "Escape") clearSelection(); if ((e.ctrlKey || e.metaKey) && e.key === "a" && folderId) { e.preventDefault(); setSelected(new Set(displayed.map(f => f.id))); } if (e.key === "Delete" && hasSelection && canWrite()) { setDeleteTargets(selectedFiles); setModalDelete(true); } }; document.addEventListener("keydown", fn); return () => document.removeEventListener("keydown", fn); }, [displayed, hasSelection, selectedFiles, folderId]);
+
+  // Keyboard Shortcuts Handler
+  useEffect(() => {
+    const fn = (e) => {
+      if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+
+      if (e.key === "Escape") clearSelection();
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A") && folderId) {
+        e.preventDefault();
+        setSelected(new Set(displayed.map(f => f.id)));
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C") && hasSelection) {
+        e.preventDefault();
+        handleCopySelection();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X") && hasSelection) {
+        e.preventDefault();
+        handleCut();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V") && folderId && canWrite()) {
+        e.preventDefault();
+        pasteClipboard();
+      }
+
+      if (e.key === "Delete" && hasSelection && canWrite()) {
+        setDeleteTargets(selectedFiles);
+        setModalDelete(true);
+      }
+    };
+    document.addEventListener("keydown", fn);
+    return () => document.removeEventListener("keydown", fn);
+  }, [displayed, hasSelection, selectedFiles, folderId, clipboard, canWrite, handleCopySelection, handleCut, pasteClipboard, clearSelection]);
 
   const goTo = (id) => { setQuery(""); setSearchFiles(null); clearSelection(); setShowDetail(false); setRenamingId(null); setFolderId(id); };
   const selectSidebarFolder = (folder) => { setActiveSidebarFolder(folder); goTo(folder.id); };
@@ -292,12 +640,86 @@ export default function DriveManager() {
 
   // ─── Rename ────────────────────────────────────────────────────────────────
   const startRename = (f, ctx = "main") => { setRenamingId(f.id); setRenameVal(f.name); setRenamingContext(ctx); };
-  const commitRename = async () => { if (!renamingId || !renameVal.trim()) { setRenamingId(null); return; } const all = [...files, ...sidebarFolders]; const old = all.find(f => f.id === renamingId)?.name || ""; if (renameVal.trim() === old) { setRenamingId(null); return; } setFiles(p => p.map(f => f.id === renamingId ? { ...f, name: renameVal.trim() } : f)); setSidebarFolders(p => p.map(f => f.id === renamingId ? { ...f, name: renameVal.trim() } : f)); if (activeSidebarFolder?.id === renamingId) setActiveSidebarFolder(p => ({ ...p, name: renameVal.trim() })); const rid = renamingId, nn = renameVal.trim(); setRenamingId(null); setRenamingContext(null); try { await axios.patch(`${API_URL}/rename/${rid}`, { newName: nn }); await fetchFiles(folderId); fetchSidebarFolders(false); } catch (e) { setFiles(p => p.map(f => f.id === rid ? { ...f, name: old } : f)); setSidebarFolders(p => p.map(f => f.id === rid ? { ...f, name: old } : f)); if (activeSidebarFolder?.id === rid) setActiveSidebarFolder(p => ({ ...p, name: old })); notify?.({ title: "Error", message: e.response?.data?.error || "Rename failed" }); } };
+  const commitRename = async () => {
+    if (!renamingId || !renameVal.trim()) { setRenamingId(null); setRenamingContext(null); return; }
+    const nn = renameVal.trim();
+    const existingList = renamingContext === "sidebar" ? sidebarFolders : files;
+    const old = existingList.find(f => f.id === renamingId)?.name || "";
+
+    if (nn === old) { setRenamingId(null); setRenamingContext(null); return; }
+
+    const isDuplicate = existingList.some(f => f.id !== renamingId && f.name.toLowerCase() === nn.toLowerCase());
+    if (isDuplicate) {
+      notify?.({ title: "Warning", message: `A file or folder named "${nn}" already exists in this location` });
+      setRenamingId(null);
+      setRenamingContext(null);
+      return;
+    }
+
+    setFiles(p => p.map(f => f.id === renamingId ? { ...f, name: nn } : f));
+    setSidebarFolders(p => p.map(f => f.id === renamingId ? { ...f, name: nn } : f));
+    if (activeSidebarFolder?.id === renamingId) setActiveSidebarFolder(p => ({ ...p, name: nn }));
+
+    const rid = renamingId;
+    setRenamingId(null);
+    setRenamingContext(null);
+
+    try {
+      await axios.patch(`${API_URL}/rename/${rid}`, { newName: nn });
+      await fetchFiles(folderId);
+      fetchSidebarFolders(false);
+    } catch (e) {
+      setFiles(p => p.map(f => f.id === rid ? { ...f, name: old } : f));
+      setSidebarFolders(p => p.map(f => f.id === rid ? { ...f, name: old } : f));
+      if (activeSidebarFolder?.id === rid) setActiveSidebarFolder(p => ({ ...p, name: old }));
+      notify?.({ title: "Error", message: e.response?.data?.error || "Rename failed" });
+    }
+  };
   const cancelRename = () => { setRenamingId(null); setRenamingContext(null); };
 
   // ─── Upload ────────────────────────────────────────────────────────────────
+  const activeCancelTokens = useRef(new Set());
   const buildFolderTree = (fileList) => { const folderTree = {}; const rootFiles = []; for (const file of fileList) { const relPath = file.webkitRelativePath || file.name; const parts = relPath.split("/"); if (parts.length > 1) { const fp = parts.slice(0, -1).join("/"); if (!folderTree[fp]) folderTree[fp] = []; folderTree[fp].push(file); } else rootFiles.push(file); } return { folderTree, rootFiles }; };
-  const uploadSingleFile = async (file, targetFolderId, itemIndex) => { const fd = new FormData(); fd.append("file", file); fd.append("folderId", targetFolderId); const cancelToken = axios.CancelToken.source(); currentUploadCancelToken.current = cancelToken; try { await axios.post(`${API_URL}/upload`, fd, { cancelToken: cancelToken.token, onUploadProgress: (p) => { const pct = Math.round((p.loaded * 100) / p.total); setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: pct, status: "uploading" } : item)); } }); setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: 100, status: "done" } : item)); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "cancelled" } : item)); throw e; } setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "error" } : item)); } };
+  const uploadSingleFile = async (file, targetFolderId, itemIndex) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("folderId", targetFolderId);
+    const cancelToken = axios.CancelToken.source();
+    activeCancelTokens.current.add(cancelToken);
+    try {
+      await axios.post(`${API_URL}/upload`, fd, {
+        cancelToken: cancelToken.token,
+        onUploadProgress: (p) => {
+          const pct = Math.round((p.loaded * 100) / p.total);
+          setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: pct, status: "uploading" } : item));
+        }
+      });
+      setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, progress: 100, status: "done" } : item));
+    } catch (e) {
+      if (axios.isCancel(e)) {
+        setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "cancelled" } : item));
+        throw e;
+      }
+      setUploadItems(prev => prev.map((item, i) => i === itemIndex ? { ...item, status: "error" } : item));
+    } finally {
+      activeCancelTokens.current.delete(cancelToken);
+    }
+  };
+
+  const runUploadPool = async (tasks, concurrency = 4) => {
+    const executing = [];
+    for (const task of tasks) {
+      if (uploadCancelledRef.current) break;
+      const p = Promise.resolve().then(() => task());
+      executing.push(p);
+      if (concurrency <= executing.length) {
+        await Promise.race(executing);
+      }
+      p.then(() => executing.splice(executing.indexOf(p), 1))
+       .catch(() => executing.splice(executing.indexOf(p), 1));
+    }
+    await Promise.all(executing);
+  };
 
   const upload = async (list, targetFolderIdOverride) => {
     if (!list?.length) return;
@@ -315,28 +737,91 @@ export default function DriveManager() {
         const folderIdCache = {};
         const sortedPaths = Object.keys(folderTree).sort((a, b) => a.split("/").length - b.split("/").length);
         for (const folderPath of sortedPaths) { if (uploadCancelledRef.current) break; const parts = folderPath.split("/"); let parentId = uploadTarget; for (let depth = 0; depth < parts.length; depth++) { const cp = parts.slice(0, depth + 1).join("/"); if (folderIdCache[cp]) { parentId = folderIdCache[cp]; continue; } try { const r = await axios.post(`${API_URL}/create-folder`, { folderName: parts[depth], parentFolderId: parentId }); if (r.data?.id) { folderIdCache[cp] = r.data.id; parentId = r.data.id; await axios.post(`${ACCESS_URL}/folder`, { folderId: r.data.id, folderName: parts[depth], createdBy: currentUser.employeeId }).catch(() => { }); } } catch { try { const ex = await axios.get(`${API_URL}/files/${parentId}`); const found = (ex.data.files || ex.data || []).find(f => f.isFolder && f.name === parts[depth]); if (found) { folderIdCache[cp] = found.id; parentId = found.id; } } catch { } } } }
-        let fi = 0;
-        for (const file of arr) { if (uploadCancelledRef.current) { setUploadItems(prev => prev.map((item, i) => i >= fi && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } const relPath = file.webkitRelativePath || file.name; const parts = relPath.split("/"); let tid = uploadTarget; if (parts.length > 1) { const fp = parts.slice(0, -1).join("/"); tid = folderIdCache[fp] || uploadTarget; } setUploadItems(prev => prev.map((item, i) => i === fi ? { ...item, status: "uploading", progress: 0 } : item)); try { await uploadSingleFile(file, tid, fi); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, i) => i > fi && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } } fi++; }
+        
+        const tasks = arr.map((file, idx) => {
+          const relPath = file.webkitRelativePath || file.name;
+          const parts = relPath.split("/");
+          let tid = uploadTarget;
+          if (parts.length > 1) {
+            const fp = parts.slice(0, -1).join("/");
+            tid = folderIdCache[fp] || uploadTarget;
+          }
+          return async () => {
+            if (uploadCancelledRef.current) return;
+            setUploadItems(prev => prev.map((item, i) => i === idx ? { ...item, status: "uploading", progress: 0 } : item));
+            try {
+              await uploadSingleFile(file, tid, idx);
+            } catch (e) {
+              if (axios.isCancel(e)) {
+                setUploadItems(prev => prev.map((item, i) => i > idx && item.status === "waiting" ? { ...item, status: "cancelled" } : item));
+              }
+            }
+          };
+        });
+        await runUploadPool(tasks, 4);
       } else {
-        for (let i = 0; i < rootFiles.length; i++) { if (uploadCancelledRef.current) { setUploadItems(prev => prev.map((item, idx) => idx >= i && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } setUploadItems(prev => prev.map((item, idx) => idx === i ? { ...item, status: "uploading", progress: 0 } : item)); try { await uploadSingleFile(rootFiles[i], uploadTarget, i); } catch (e) { if (axios.isCancel(e)) { setUploadItems(prev => prev.map((item, idx) => idx > i && item.status === "waiting" ? { ...item, status: "cancelled" } : item)); break; } } }
+        const tasks = rootFiles.map((file, idx) => {
+          return async () => {
+            if (uploadCancelledRef.current) return;
+            setUploadItems(prev => prev.map((item, i) => i === idx ? { ...item, status: "uploading", progress: 0 } : item));
+            try {
+              await uploadSingleFile(file, uploadTarget, idx);
+            } catch (e) {
+              if (axios.isCancel(e)) {
+                setUploadItems(prev => prev.map((item, i) => i > idx && item.status === "waiting" ? { ...item, status: "cancelled" } : item));
+              }
+            }
+          };
+        });
+        await runUploadPool(tasks, 4);
       }
-      if (folderId === uploadTarget) { await fetchFiles(folderId); fetchStorage(folderId); }
+      if (folderId === uploadTarget) { await fetchFiles(folderId); fetchStorage(folderId); fetchOverallStorage(); }
     } catch { }
   };
 
-  const cancelUpload = () => { uploadCancelledRef.current = true; if (currentUploadCancelToken.current) currentUploadCancelToken.current.cancel("Cancelled"); setUploadItems(prev => prev.map(item => item.status === "waiting" ? { ...item, status: "cancelled" } : item)); };
+  const cancelUpload = () => {
+    uploadCancelledRef.current = true;
+    activeCancelTokens.current.forEach(token => token.cancel("Cancelled"));
+    activeCancelTokens.current.clear();
+    setUploadItems(prev => prev.map(item => item.status === "waiting" || item.status === "uploading" ? { ...item, status: "cancelled" } : item));
+  };
 
   // ─── Delete / Actions ──────────────────────────────────────────────────────
-  const doDelete = async () => { const targets = [...deleteTargets]; setModalDelete(false); const ids = targets.map(f => f.id); setFiles(p => p.filter(f => !ids.includes(f.id))); setSidebarFolders(p => p.filter(f => !ids.includes(f.id))); clearSelection(); setShowDetail(false); let ok = 0, fail = 0; for (const id of ids) { try { await axios.delete(`${API_URL}/delete/${id}`); await axios.delete(`${ACCESS_URL}/folder/${id}`).catch(() => { }); setFolderAccessMap(p => { const n = { ...p }; delete n[id]; return n; }); ok++; } catch { fail++; } } await fetchFiles(folderId); fetchSidebarFolders(false); notify?.({ title: fail ? "Warning" : "Success", message: `${ok} deleted${fail ? `, ${fail} failed` : ""}` }); setDeleteTargets([]); };
+  const doDelete = async () => { const targets = [...deleteTargets]; setModalDelete(false); const ids = targets.map(f => f.id); setFiles(p => p.filter(f => !ids.includes(f.id))); setSidebarFolders(p => p.filter(f => !ids.includes(f.id))); clearSelection(); setShowDetail(false); let ok = 0, fail = 0; for (const id of ids) { try { await axios.delete(`${API_URL}/delete/${id}`); await axios.delete(`${ACCESS_URL}/folder/${id}`).catch(() => { }); setFolderAccessMap(p => { const n = { ...p }; delete n[id]; return n; }); ok++; } catch { fail++; } } await fetchFiles(folderId); fetchSidebarFolders(false); fetchOverallStorage(); notify?.({ title: fail ? "Warning" : "Success", message: `${ok} deleted${fail ? `, ${fail} failed` : ""}` }); setDeleteTargets([]); };
   const doShare = async (f) => { if (!f) return; try { const r = await axios.post(`${API_URL}/share/${f.id}`); setShareLink(r.data.webViewLink || r.data.directLink || ""); setShareTarget(f); setModalShare(true); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Share failed" }); } };
-  const doCopy = async (f) => { if (!f) return; try { await axios.post(`${API_URL}/copy/${f.id}`, { newName: `Copy of ${f.name}`, folderId }); await fetchFiles(folderId); } catch (e) { notify?.({ title: "Error", message: e.response?.data?.error || "Copy failed" }); } };
-  const openDetails = async (f) => { try { const r = await axios.get(`${API_URL}/file/${f.id}`); setDetail(r.data); } catch { setDetail(f); } setShowDetail(true); };
-  const download = (id) => { if (!id?.startsWith("temp_")) { if (!canDownload()) { setRequestAccessModal(activeSidebarFolder || { name: "this folder" }); return; } window.open(`${API_URL}/download/${id}`, "_blank"); } };
+  const doCopy = async (f) => {
+    if (!f) return;
+    try {
+      const existingNames = files.map(x => x.name);
+      const newName = generateCopyName(f.name, existingNames);
+      await axios.post(`${API_URL}/copy/${f.id}`, { newName, folderId });
+      await fetchFiles(folderId);
+      notify?.({ title: "Success", message: `Created copy "${newName}"` });
+    } catch (e) {
+      notify?.({ title: "Error", message: e.response?.data?.error || "Copy failed" });
+    }
+  };
+  const openDetails = async (f) => { setDetailLoading(true); setDetail(f); setShowDetail(true); try { const r = await axios.get(`${API_URL}/file/${f.id}`); setDetail(r.data); } catch { setDetail(f); } finally { setDetailLoading(false); } };
+  const download = (id) => { if (!id?.startsWith("temp_")) { if (!canDownload()) { setRequestAccessModal(activeSidebarFolder || { name: "this folder" }); return; } let iframe = document.getElementById("download-iframe"); if (!iframe) { iframe = document.createElement("iframe"); iframe.id = "download-iframe"; iframe.style.display = "none"; document.body.appendChild(iframe); } iframe.src = `${API_URL}/download/${id}`; } };
   const openDrive = (f) => window.open(f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`, "_blank");
   const openPreview = (f) => { if (["image/", "application/pdf", "video/", "audio/"].some(t => f.mimeType?.startsWith(t))) setModalPreview(f); else openDrive(f); };
   const copyClipboard = (txt) => navigator.clipboard.writeText(txt).then(() => notify?.({ title: "Success", message: "Copied" }));
-  const handleCtx = (e, f) => { e.preventDefault(); e.stopPropagation(); if (!selected.has(f.id)) setSelected(new Set([f.id])); setCtx({ x: e.clientX, y: e.clientY, file: f }); };
-  useEffect(() => { const fn = () => { setCtx(null); setNewMenu(false); }; document.addEventListener("click", fn); return () => document.removeEventListener("click", fn); }, []);
+  
+  const handleCtx = (e, f) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBgCtx(null);
+    if (!selected.has(f.id)) setSelected(new Set([f.id]));
+    setCtx({ x: e.clientX, y: e.clientY, file: f });
+  };
+
+  const handleBgCtx = (e) => {
+    e.preventDefault();
+    setCtx(null);
+    setBgCtx({ x: e.clientX, y: e.clientY });
+  };
+
+  useEffect(() => { const fn = () => { setCtx(null); setBgCtx(null); setNewMenu(false); }; document.addEventListener("click", fn); return () => document.removeEventListener("click", fn); }, []);
   const teamHeadCanManageAccess = useCallback((folder) => { if (!currentUser.isTeamHead || isAdmin) return false; if ((folderAccessMap[folder.id] || {}).hasAccess) return true; if (folderId && (folderAccessMap[folderId] || {}).hasAccess) return true; if (activeSidebarFolder && (folderAccessMap[activeSidebarFolder.id] || {}).hasAccess) return true; return false; }, [currentUser.isTeamHead, isAdmin, folderAccessMap, activeSidebarFolder, folderId]);
   const ctxFile = ctx?.file;
 
@@ -345,14 +830,15 @@ export default function DriveManager() {
     const access = isAdmin ? { hasAccess: true } : folderAccessMap[folder.id] || { hasAccess: false };
     const isActive = activeSidebarFolder?.id === folder.id;
     const isRenaming = renamingId === folder.id && renamingContext === "sidebar";
+    const count = folderCountsMap[folder.id] ?? 0;
     if (isRenaming) return <div className="flex items-center gap-[0.6vw] px-[0.8vw] py-[0.6vh] bg-[#e8f0fe] rounded-r-[2vw] rounded-l-[0.3vw] border-l-[3px] border-[#1967d2]"><div className="shrink-0">{ICONS.folder}</div><input ref={sidebarRenameRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.4vw] py-[0.2vh] text-[0.82vw] text-[#202124] outline-none min-w-0" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /></div>;
     return (
-      <button onClick={() => selectSidebarFolder(folder)} onContextMenu={e => handleCtx(e, folder)} className={`w-full flex items-center gap-[0.6vw] px-[0.8vw] py-[0.8vh] rounded-r-[2vw] rounded-l-[0.3vw] text-[0.82vw] transition-all text-left group cursor-pointer ${isActive ? "bg-[#e8f0fe] text-[#1967d2] font-medium border-l-[3px] border-[#1967d2]" : "text-[#3c4043] hover:bg-[#f1f3f4] border-l-[3px] border-transparent"}`}>
+      <div role="button" tabIndex={0} onClick={() => selectSidebarFolder(folder)} onContextMenu={e => handleCtx(e, folder)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") selectSidebarFolder(folder); }} className={`w-full flex items-center gap-[0.6vw] px-[0.8vw] py-[0.8vh] rounded-r-[2vw] rounded-l-[0.3vw] text-[0.82vw] transition-all text-left group cursor-pointer select-none ${isActive ? "bg-[#e8f0fe] text-[#1967d2] font-medium border-l-[3px] border-[#1967d2]" : "text-[#3c4043] hover:bg-[#f1f3f4] border-l-[3px] border-transparent"}`}>
         <div className="shrink-0">{isActive ? ICONS.folderOpen : ICONS.folder}</div>
-        <span className="flex-1 truncate" title={folder.name}>{folder.name}</span>
+        <span className="flex-1 truncate" onMouseEnter={e => handleMouseEnterName(e, folder.name)} onMouseLeave={handleMouseLeaveName}>{folder.name}</span>
         {!isAdmin && <span className={`shrink-0 ${access.hasAccess ? "text-[#1e8e3e]" : "text-[#9aa0a6]"}`}>{access.hasAccess ? ICONS.unlock : ICONS.lock}</span>}
-        <button onClick={e => { e.stopPropagation(); handleCtx(e, folder); }} className="opacity-0 group-hover:opacity-100 p-[0.15vw] rounded-full hover:bg-[#dadce0] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
-      </button>
+        <button onClick={e => { e.stopPropagation(); handleCtx(e, folder); }} className="p-[0.15vw] rounded-full hover:bg-[#dadce0] text-[#5f6368] shrink-0 cursor-pointer"><svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
+      </div>
     );
   };
 
@@ -367,6 +853,8 @@ export default function DriveManager() {
           <span className="text-[0.85vw] font-medium">{selected.size} selected</span>
         </div>
         <div className="flex items-center gap-[0.3vw]">
+          {canWrite() && <button onClick={() => startMoveModal(selectedFiles)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] hover:bg-white/15 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6" /><path d="M10 14L21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>Move to</button>}
+          {canWrite() && <button onClick={() => doCopyBatch(selectedFiles)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] hover:bg-white/15 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>Make a copy</button>}
           {selectedFiles.some(f => !f.isFolder) && (canDownload() ? <button onClick={() => selectedFiles.filter(f => !f.isFolder).forEach(f => download(f.id))} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] hover:bg-white/15 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>Download</button> : <button onClick={() => setRequestAccessModal(activeSidebarFolder)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] opacity-50 cursor-pointer">{ICONS.lock} No access</button>)}
           {sf && <button onClick={() => doShare(sf)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] hover:bg-white/15 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>Share</button>}
           {sf && canWrite() && <button onClick={() => { startRename(sf, "main"); clearSelection(); }} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.35vh] rounded-[0.3vw] text-[0.78vw] hover:bg-white/15 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Rename</button>}
@@ -379,103 +867,147 @@ export default function DriveManager() {
     );
   };
 
-  // ─── Height: 93vh total (100vh - 7vh header) ──────────────────────────────
-  // sidebar + main both get calc(100vh - 7vh) = 93vh fixed
-
   return (
-    <div className="w-full h-[77vh] flex flex-col rounded-2xl  font-['Google_Sans',_'Segoe_UI',_Roboto,_sans-serif] text-[#202124] overflow-hidden">
-      {/* HEADER — fixed 7vh */}
-      <header className="h-[7vh] min-h-[56px] bg-white border-b border-[#e0e0e0] flex items-center justify-end px-[1.5vw] gap-[1vw] shrink-0 z-30">
-        <div className="flex items-center gap-[0.6vw] min-w-[12vw]">
-          <img src={driveLogo} alt="Drive" className="w-[2.5vw] h-[2.5vw] min-w-[32px] min-h-[32px]" />
-          <span className="text-[1.3vw] font-normal text-[#5f6368]">Drive storage</span>
+    <div className="w-full h-full flex flex-col rounded-2xl font-['Google_Sans',_'Segoe_UI',_Roboto,_sans-serif] text-[#202124] overflow-hidden">
+      {/* HEADER — fixed responsive height */}
+      <header className="h-[6vh] bg-white border-b border-[#e0e0e0] flex items-center justify-end px-[1vw] gap-[0.8vw] shrink-0 z-30">
+        <div className="flex items-center gap-[0.5vw] min-w-[12vw]">
+          <img src={driveLogo} alt="Drive" className="w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px]" />
+          <span className="text-[1.1vw] font-semibold text-[#5f6368]">Drive storage</span>
         </div>
-        <div className="flex items-center justify-end gap-[1vw] flex-1">
-          <div className="flex-1 max-w-[40vw] relative">
-            <svg className="absolute left-[0.8vw] top-1/2 -translate-y-1/2 w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px] text-[#5f6368]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            <input className="w-full py-[0.7vh] pl-[2.8vw] pr-[2.5vw] rounded-[0.5vw] bg-[#f1f3f4] text-[0.9vw] text-[#202124] outline-none focus:bg-white focus:shadow-[0_1px_6px_rgba(32,33,36,0.28)] transition-all" placeholder="Search in current folder..." value={query} onChange={e => setQuery(e.target.value)} />
-            {query && <button onClick={() => setQuery("")} className="absolute right-[0.5vw] top-1/2 -translate-y-1/2 p-[0.3vw] rounded-full hover:bg-[#e8eaed] text-[#5f6368] cursor-pointer"><svg className="w-[1.1vw] h-[1.1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}
+        <div className="flex items-center justify-end gap-[0.8vw] flex-1">
+          <div className="flex-1 max-w-[28vw] relative">
+            <svg className="absolute left-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] min-w-[14px] min-h-[14px] text-[#5f6368]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input className="w-full py-[0.5vh] pl-[2.2vw] pr-[2vw] rounded-lg bg-[#f1f3f4] text-[0.82vw] text-[#202124] outline-none focus:bg-white focus:shadow-[0_1px_6px_rgba(32,33,36,0.28)] transition-all" placeholder="Search in current folder..." value={query} onChange={e => setQuery(e.target.value)} />
+            {query && <button onClick={() => setQuery("")} className="absolute right-[0.5vw] top-1/2 -translate-y-1/2 p-[0.2vw] rounded-full hover:bg-[#e8eaed] text-[#5f6368] cursor-pointer"><svg className="w-[0.8vw] h-[0.8vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}
           </div>
-          <div className="flex bg-[#f1f3f4] rounded-[0.4vw] overflow-hidden">
-            <button onClick={() => setView("grid")} className={`p-[0.5vw] cursor-pointer ${view === "grid" ? "bg-[#e8f0fe] text-[#1967d2]" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg></button>
-            <button onClick={() => setView("list")} className={`p-[0.5vw] cursor-pointer ${view === "list" ? "bg-[#e8f0fe] text-[#1967d2]" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg></button>
+          <div className="flex bg-[#f1f3f4] rounded-lg overflow-hidden">
+            <button onClick={() => setView("grid")} className={`p-2 cursor-pointer ${view === "grid" ? "bg-[#e8f0fe] text-[#1967d2]" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}><svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg></button>
+            <button onClick={() => setView("list")} className={`p-2 cursor-pointer ${view === "list" ? "bg-[#e8f0fe] text-[#1967d2]" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}><svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg></button>
           </div>
           <div className="relative">
-            <div className="flex items-center gap-[1vw]">
-              {canWrite() && <button onClick={e => { e.stopPropagation(); setNewMenu(!newMenu); }} className="h-[5vh] min-h-[40px] flex items-center gap-[0.5vw] px-[1.2vw] rounded-[2vw] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)] hover:shadow-[0_2px_6px_rgba(0,0,0,0.16)] text-[0.85vw] font-medium text-[#3c4043] cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[24px] min-h-[24px]" viewBox="0 0 36 36"><path fill="#000000c7" d="M16 16v14h4V20z" /><path fill="#000000c7" d="M30 16H20l-4 4h14z" /><path fill="#000000c7" d="M6 16v4h10l4-4z" /><path fill="#000000c7" d="M20 16V6h-4v14z" /></svg>New</button>}
-              <button onClick={doRefresh} className="p-[0.4vw] rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className={`w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px] ${refreshing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg></button>
+            <div className="flex items-center gap-3">
+              {canWrite() && <button onClick={e => { e.stopPropagation(); setNewMenu(!newMenu); }} className="h-10 flex items-center gap-1.5 px-4 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)] hover:shadow-[0_2px_6px_rgba(0,0,0,0.16)] text-sm font-semibold text-[#3c4043] cursor-pointer"><svg className="w-5 h-5" viewBox="0 0 36 36"><path fill="#000000c7" d="M16 16v14h4V20z" /><path fill="#000000c7" d="M30 16H20l-4 4h14z" /><path fill="#000000c7" d="M6 16v4h10l4-4z" /><path fill="#000000c7" d="M20 16V6h-4v14z" /></svg>New</button>}
+              <button onClick={doRefresh} className="p-1.5 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className={`w-[18px] h-[18px] ${refreshing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg></button>
             </div>
-            {newMenu && canWrite() && <div className="absolute top-full right-0 mt-[0.3vh] bg-white rounded-[0.5vw] shadow-[0_2px_10px_rgba(0,0,0,0.2)] min-w-[14vw] py-[0.4vh] z-[200]" onClick={e => e.stopPropagation()}><button onClick={() => { setNewMenu(false); startInlineCreate(); }} className="w-full flex items-center gap-[1vw] px-[1.2vw] py-[0.8vh] text-[0.85vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1.3vw] h-[1.3vw] min-w-[18px] min-h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>New folder</button><div className="h-px bg-[#e0e0e0] my-[0.3vh]" /><button onClick={() => { setNewMenu(false); fileRef.current?.click(); }} className="w-full flex items-center gap-[1vw] px-[1.2vw] py-[0.8vh] text-[0.85vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1.3vw] h-[1.3vw] min-w-[18px] min-h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>File upload</button><button onClick={() => { setNewMenu(false); folderRef.current?.click(); }} className="w-full flex items-center gap-[1vw] px-[1.2vw] py-[0.8vh] text-[0.85vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1.3vw] h-[1.3vw] min-w-[18px] min-h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>Folder upload</button></div>}
+            {newMenu && canWrite() && <div className="absolute top-full right-0 mt-1 bg-white rounded-lg shadow-[0_2px_10px_rgba(0,0,0,0.2)] min-w-[200px] py-1 z-[200]" onClick={e => e.stopPropagation()}><button onClick={() => { setNewMenu(false); startInlineCreate(); }} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>New folder</button><div className="h-px bg-[#e0e0e0] my-1" /><button onClick={() => { setNewMenu(false); fileRef.current?.click(); }} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>File upload</button><button onClick={() => { setNewMenu(false); folderRef.current?.click(); }} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>Folder upload</button></div>}
           </div>
         </div>
       </header>
 
-      {/* BODY — exactly 93vh (100vh - 7vh header) */}
-      <div className="flex h-[70vh] overflow-hidden ">
-        {/* SIDEBAR — fixed height = 93vh */}
-        <aside className="w-[15vw] min-w-[200px] bg-white border-r border-[#e0e0e0] flex flex-col shrink-0 h-[93vh]">
-          <div className="px-[1vw] py-[0.8vh] border-b border-[#e0e0e0] shrink-0 flex items-center justify-between">
-            <span className="text-[0.85vw] font-medium text-[#5f6368] uppercase tracking-wider">Folders</span>
-            {!isAdmin && <span className="text-[0.65vw] text-[#9aa0a6] flex items-center gap-[0.3vw]">{ICONS.lock} = No access</span>}
+      {/* BODY */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* SIDEBAR */}
+        <aside className="w-[15vw] min-w-[180px] bg-white border-r border-[#e0e0e0] flex flex-col shrink-0 h-full relative">
+          {sidebarLoading && (
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
+              <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
+            </div>
+          )}
+          <div className="px-[0.8vw] py-[0.8vh] border-b border-[#e0e0e0] shrink-0 flex items-center justify-between">
+            <span className="text-[0.72vw] font-semibold text-[#5f6368] uppercase tracking-wider">Folders</span>
+            {!isAdmin && <span className="text-[0.68vw] text-[#9aa0a6] flex items-center gap-1">{ICONS.lock} = No access</span>}
           </div>
-          <div className="flex-1 overflow-y-auto px-[0.5vw] py-[0.5vh] min-h-0">
-            {sidebarLoading && !sidebarFolders.length && <div className="flex items-center justify-center h-full"><div className="w-[1.5vw] h-[1.5vw] min-w-[20px] min-h-[20px] border-[2px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div>}
-            {!sidebarLoading && !sidebarFolders.length && !sidebarCreating && <div className="flex flex-col items-center justify-center h-full text-center"><div className="text-[2vw] mb-[0.5vh] opacity-40">📁</div><p className="text-[0.75vw] text-[#5f6368]">No folders yet</p></div>}
+          <div className="flex-1 overflow-y-auto px-[0.4vw] py-[0.2vh] min-h-0">
+            {sidebarLoading && !sidebarFolders.length && <div className="flex items-center justify-center h-full"><div className="w-5 h-5 border-[2px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div>}
+            {!sidebarLoading && !sidebarFolders.length && !sidebarCreating && <div className="flex flex-col items-center justify-center h-full text-center"><div className="text-3xl mb-1 opacity-40">📁</div><p className="text-xs text-[#5f6368]">No folders yet</p></div>}
             {sidebarFolders.map(f => <div key={f.id} className="mb-[0.2vh]"><SidebarFolderItem folder={f} /></div>)}
-            {sidebarCreating && <div className="flex items-center gap-[0.6vw] px-[0.8vw] py-[0.6vh] mb-[0.2vh] bg-[#e8f0fe] rounded-r-[2vw] rounded-l-[0.3vw] border-l-[3px] border-[#1967d2]"><div className="shrink-0">{ICONS.folder}</div><input ref={sidebarInlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.4vw] py-[0.2vh] text-[0.82vw] text-[#202124] outline-none min-w-0" value={sidebarNewName} onChange={e => setSidebarNewName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitSidebarCreate(); if (e.key === "Escape") cancelSidebarCreate(); }} onBlur={() => commitSidebarCreate()} /></div>}
+            {sidebarCreating && <div className="flex items-center gap-2 px-3 py-1.5 mb-0.5 bg-[#e8f0fe] rounded-r-full rounded-l-md border-l-[3px] border-[#1967d2]"><div className="shrink-0">{ICONS.folder}</div><input ref={sidebarInlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-sm text-[#202124] outline-none min-w-0" value={sidebarNewName} onChange={e => setSidebarNewName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitSidebarCreate(); if (e.key === "Escape") cancelSidebarCreate(); }} onBlur={() => commitSidebarCreate()} /></div>}
           </div>
-          {storageInfo && <div className="px-[1vw] py-[1vh] border-t border-[#e0e0e0] shrink-0"><div className="text-[0.7vw] text-[#5f6368] mb-[0.3vh]">{storageInfo.fileCount} items • {fmtSize(storageInfo.totalSize)}</div><div className="h-[0.3vh] min-h-[3px] bg-[#e0e0e0] rounded-full overflow-hidden"><div className="h-full bg-[#1a73e8] rounded-full" style={{ width: `${Math.min(100, (storageInfo.totalSize / (15 * 1024 * 1024 * 1024)) * 100)}%` }} /></div></div>}
-          {isAdmin && <div className="px-[0.8vw] py-[1vh] border-t border-[#e0e0e0] shrink-0"><button onClick={startSidebarCreate} className="w-full h-[5vh] min-h-[42px] flex items-center justify-center gap-[0.5vw] rounded-[0.5vw] bg-[#1a73e8] hover:bg-[#1557b0] text-white text-[0.82vw] font-medium cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Add Folder</button></div>}
+          {overallStorage && (
+            <div className="px-[0.8vw] py-[0.8vh] border-t border-[#e0e0e0] shrink-0 bg-[#f8f9fa] flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[0.7vw] text-[#5f6368] font-semibold">
+                <span className="flex items-center gap-1">
+                
+                  Drive Storage
+                </span>
+                <span>{overallStorage.limit && overallStorage.limit !== "0" ? Math.round((parseInt(overallStorage.usage || 0) / parseInt(overallStorage.limit)) * 100) : 0}% used</span>
+              </div>
+              <div className="h-[6px] bg-[#dadce0] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-[#1a73e8] rounded-full transition-all duration-500" 
+                  style={{ width: `${overallStorage.limit && overallStorage.limit !== "0" ? Math.min(100, (parseInt(overallStorage.usage || 0) / parseInt(overallStorage.limit)) * 100) : 0}%` }} 
+                />
+              </div>
+              <div className="text-[0.65vw] text-[#5f6368]">
+                {fmtSize(overallStorage.usage)} of {fmtSize(overallStorage.limit)} used
+              </div>
+            </div>
+          )}
+          {storageInfo && <div className="px-[0.8vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0 bg-white"><div className="text-[0.7vw] text-[#5f6368] mb-[0.2vh] font-semibold">Folder: {storageInfo.fileCount} items ({fmtSize(storageInfo.totalSize)})</div></div>}
+          {isAdmin && <div className="px-[0.6vw] py-[0.6vh] border-t border-[#e0e0e0] shrink-0"><button onClick={startSidebarCreate} className="w-full h-[4vh] flex items-center justify-center gap-[0.4vw] rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-[0.8vw] font-semibold cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Add Folder</button></div>}
         </aside>
 
-        {/* MAIN — fixed height = 93vh */}
+        {/* MAIN */}
         <main
-          className={`relative flex-1 bg-white flex flex-col h-[93vh] overflow-hidden transition-all ${dragOver ? "border-2 border-dashed border-[#1a73e8] bg-[#e8f0fe]" : ""}`}
+          className={`relative flex-1 bg-white flex flex-col h-full overflow-hidden transition-all ${dragOver ? "border-2 border-dashed border-[#1a73e8] bg-[#e8f0fe]" : ""}`}
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={e => { e.preventDefault(); setDragOver(false); }}
           onDrop={e => { e.preventDefault(); setDragOver(false); if (canWrite()) upload(e.dataTransfer.files); }}
-          onClick={() => { clearSelection(); if (renamingId && renamingContext === "main") commitRename(); }}
+          onClick={() => { clearSelection(); setBgCtx(null); setCtx(null); if (renamingId && renamingContext === "main") commitRename(); }}
+          onContextMenu={handleBgCtx}
         >
-          {dragOver && <div className="absolute inset-0 flex justify-center items-center z-10 pointer-events-none"><p className="text-[1.2vw] text-[#1a73e8] font-medium">Drop files here to upload</p></div>}
+          {dragOver && <div className="absolute inset-0 flex justify-center items-center z-10 pointer-events-none"><p className="text-base text-[#1a73e8] font-semibold">Drop files here to upload</p></div>}
 
           <SelectionBar />
 
-          {initialLoading && !hasLoadedOnce.current && <div className="flex items-center justify-center h-full"><div className="w-[2.5vw] h-[2.5vw] min-w-[32px] min-h-[32px] border-[3px] border-[#e0e0e0] border-t-[#1a73e8] rounded-full animate-spin" /></div>}
-          {!folderId && <div className="flex flex-col items-center justify-center h-full text-center"><div className="text-[4vw] mb-[1vh] opacity-40">📁</div><p className="text-[1.2vw] text-[#202124] mb-[0.5vh]">No folder selected</p><p className="text-[0.85vw] text-[#5f6368]">Create a folder using Add Folder</p></div>}
+          {initialLoading && !folderId && (
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
+              <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
+            </div>
+          )}
 
-          {folderId && !initialLoading && (
+          {!folderId && <div className="flex flex-col items-center justify-center h-full text-center"><div className="text-4xl mb-2 opacity-40">📁</div><p className="text-base text-[#202124] mb-1">No folder selected</p><p className="text-sm text-[#5f6368]">Create a folder using Add Folder</p></div>}
+
+          {folderId && (
             <>
               {/* Breadcrumbs — shrink-0 */}
-              <div className="shrink-0">
-                {!searchFiles && <div className="flex items-center justify-between gap-[0.3vw] py-[0.5vh] px-[1.5vw] flex-wrap border-b border-[#e0e0e0]"><div className="flex items-center gap-[0.3vw] flex-wrap">{activeSidebarFolder && <button onClick={() => goTo(activeSidebarFolder.id)} className={`px-[0.6vw] py-[0.3vh] rounded-[1vw] text-[0.85vw] cursor-pointer ${crumbs.length === 0 && folderId === activeSidebarFolder.id ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{activeSidebarFolder.name}</button>}{crumbs.filter(c => c.id !== activeSidebarFolder?.id).map(c => <React.Fragment key={c.id}><span className="text-[#5f6368] select-none">›</span><button onClick={() => goTo(c.id)} className={`px-[0.6vw] py-[0.3vh] rounded-[1vw] text-[0.85vw] cursor-pointer ${c.id === folderId ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{c.name}</button></React.Fragment>)}</div><div className="flex items-center gap-[0.8vw]">{!isAdmin && <span className={`flex items-center gap-[0.3vw] text-[0.72vw] px-[0.6vw] py-[0.2vh] rounded-full ${canDownload() ? "bg-[#e6f4ea] text-[#1e8e3e]" : "bg-[#fce8e6] text-[#d93025]"}`}>{canDownload() ? ICONS.unlock : ICONS.lock}{canDownload() ? "Full access" : "No access"}</span>}<span className="text-[0.8vw] text-[#5f6368]">{displayed.length} item{displayed.length !== 1 ? "s" : ""}</span></div></div>}
-                {searchFiles !== null && <div className="flex items-center gap-[0.5vw] py-[0.5vh] px-[1.5vw] border-b border-[#e0e0e0]"><button onClick={() => { setQuery(""); setSearchFiles(null); }} className="flex items-center gap-[0.3vw] px-[0.6vw] py-[0.3vh] rounded-[1vw] text-[0.85vw] text-[#5f6368] hover:bg-[#e8eaed] cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>Back</button><span className="text-[#5f6368]">›</span><span className="text-[0.85vw] text-[#202124] font-medium">"{query}" ({searchFiles.length})</span></div>}
+              <div className="shrink-0 relative">
+                {!searchFiles && <div className="flex items-center justify-between gap-1 py-[0.5vh] px-[1vw] flex-wrap border-b border-[#e0e0e0]"><div className="flex items-center gap-1 flex-wrap">{activeSidebarFolder && <button onClick={() => goTo(activeSidebarFolder.id)} className={`px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] cursor-pointer ${crumbs.length === 0 && folderId === activeSidebarFolder.id ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{activeSidebarFolder.name}</button>}{crumbs.filter(c => c.id !== activeSidebarFolder?.id).map(c => <React.Fragment key={c.id}><span className="text-[#5f6368] select-none text-[0.8vw]">›</span><button onClick={() => goTo(c.id)} className={`px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] cursor-pointer ${c.id === folderId ? "text-[#202124] font-medium" : "text-[#5f6368] hover:bg-[#e8eaed]"}`}>{c.name}</button></React.Fragment>)}</div><div className="flex items-center gap-[0.8vw]">{!isAdmin && <span className={`flex items-center gap-1 text-[0.7vw] px-[0.5vw] py-[0.2vh] rounded-full ${canDownload() ? "bg-[#e6f4ea] text-[#1e8e3e]" : "bg-[#fce8e6] text-[#d93025]"}`}>{canDownload() ? ICONS.unlock : ICONS.lock}{canDownload() ? "Full access" : "No access"}</span>}<span className="text-[0.72vw] text-[#5f6368]">{displayed.length} item{displayed.length !== 1 ? "s" : ""}</span></div></div>}
+                {searchFiles !== null && <div className="flex items-center gap-2 py-[0.5vh] px-[1vw] border-b border-[#e0e0e0]"><button onClick={() => { setQuery(""); setSearchFiles(null); }} className="flex items-center gap-1 px-[0.6vw] py-[0.2vh] rounded-full text-[0.82vw] text-[#5f6368] hover:bg-[#e8eaed] cursor-pointer"><svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>Back</button><span className="text-[#5f6368]">›</span><span className="text-[0.82vw] text-[#202124] font-medium">"{query}" ({searchFiles.length})</span></div>}
+                {initialLoading && (
+                  <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
+                    <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
+                  </div>
+                )}
               </div>
 
               {/* Scrollable content — fills remaining height exactly */}
-              <div className="flex-1 min-h-0 overflow-y-auto bg-white">
-                {displayed.length === 0 && !inlineCreating && <div className="flex flex-col items-center justify-center h-full text-center px-[1.5vw]"><div className="text-[4vw] mb-[1vh] opacity-40">📂</div><p className="text-[1.2vw] text-[#202124] mb-[0.5vh]">{searchFiles !== null ? "No results" : "Empty folder"}</p><p className="text-[0.85vw] text-[#5f6368]">{searchFiles !== null ? "Try different keywords" : canWrite() ? "Drop files or click New" : "No files"}</p></div>}
+              <div className={`flex-1 min-h-0 overflow-y-auto bg-white transition-opacity duration-200 ${initialLoading ? "opacity-60 pointer-events-none" : "opacity-100"}`}>
+                {displayed.length === 0 && !inlineCreating && <div className="flex flex-col items-center justify-center h-full text-center px-4"><div className="text-5xl mb-2 opacity-40">📂</div><p className="text-base text-[#202124] mb-1">{searchFiles !== null ? "No results" : "Empty folder"}</p><p className="text-xs text-[#5f6368]">{searchFiles !== null ? "Try different keywords" : canWrite() ? "Drop files or click New" : "No files"}</p></div>}
 
                 {/* GRID */}
                 {view === "grid" && (displayed.length > 0 || inlineCreating) && (
-                  <div className="px-[1.5vw] py-[0.8vh]">
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(12vw,1fr))] gap-[0.8vw] auto-rows-max content-start">
-                      {inlineCreating && <div className="bg-white border-2 border-[#1a73e8] rounded-[0.5vw] overflow-hidden"><div className="h-[14vh] min-h-[100px] flex items-center justify-center bg-[#e8f0fe] border-b border-[#d2e3fc]"><div className="scale-[2.5] opacity-80">{ICONS.folder}</div></div><div className="flex items-center gap-[0.4vw] px-[0.4vw] py-[0.5vh]"><div className="shrink-0">{ICONS.folder}</div><input ref={inlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.4vw] py-[0.2vh] text-[0.8vw] text-[#202124] outline-none min-w-0" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /></div></div>}
+                  <div className="px-[1vw] py-[0.6vh]">
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(11vw,1fr))] gap-[0.8vw] auto-rows-max content-start">
+                      {inlineCreating && <div className="bg-white border-2 border-[#1a73e8] rounded-lg overflow-hidden"><div className="h-[12vh] flex items-center justify-center bg-[#e8f0fe] border-b border-[#d2e3fc]"><div className="scale-[2.5] opacity-80">{ICONS.folder}</div></div><div className="flex items-center gap-1.5 px-2 py-1.5"><div className="shrink-0">{ICONS.folder}</div><input ref={inlineRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-xs text-[#202124] outline-none min-w-0" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /></div></div>}
                       {displayed.map(f => {
                         const isSel = selected.has(f.id);
                         return (
                           <div key={f.id}
-                            className={`group bg-white rounded-[0.5vw] overflow-hidden cursor-pointer transition-all hover:shadow-[0_1px_6px_rgba(32,33,36,0.16)] ${isSel ? "border-[2px] border-[#202124] shadow-[0_0_0_1px_#202124]" : "border border-[#e0e0e0] hover:border-[#d2e3fc]"}`}
+                            className={`group bg-white rounded-lg overflow-hidden cursor-pointer transition-all hover:shadow-[0_1px_6px_rgba(32,33,36,0.16)] ${isSel ? "border-[2px] border-[#202124] shadow-[0_0_0_1px_#202124]" : "border border-[#e0e0e0] hover:border-[#d2e3fc]"}`}
                             onClick={e => handleItemClick(f, e)}
                             onContextMenu={e => handleCtx(e, f)}>
-                            <div className="h-[14vh] min-h-[100px] overflow-hidden border-b border-[#e0e0e0] relative">
+                            <div className="h-[12vh] overflow-hidden border-b border-[#e0e0e0] relative">
                               <Thumbnail file={f} apiUrl={API_URL} />
-                              {f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="absolute top-[0.4vh] right-[0.4vw] text-[#1e8e3e]">{ICONS.unlock}</span>}
+                              {f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="absolute top-1 right-1 text-[#1e8e3e]">{ICONS.unlock}</span>}
                             </div>
-                            <div className="flex items-center gap-[0.4vw] px-[0.6vw] py-[0.7vh]">
-                              <div className="shrink-0">{getIcon(f.iconType || (f.isFolder ? "folder" : "file"))}</div>
-                              {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.3vw] py-[0.1vh] text-[0.8vw] outline-none min-w-0" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="flex-1 text-[0.8vw] text-[#3c4043] truncate" title={f.name}>{f.name}</span>}
-                              <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-[0.2vw] rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
-                            </div>
+                              <div className="flex items-center gap-[0.3vw] px-[0.6vw] py-[0.6vh]">
+                                <div className="shrink-0">{getIcon(f.iconType || (f.isFolder ? "folder" : "file"))}</div>
+                                {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="flex-1 bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-xs outline-none min-w-0" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="flex-1 text-[0.78vw] text-[#3c4043] truncate" onMouseEnter={e => handleMouseEnterName(e, f.name)} onMouseLeave={handleMouseLeaveName}>{f.name}</span>}
+                                {f.isFolder ? (
+                                  <div className="shrink-0 flex items-center justify-end">
+                                    <span className="group-hover:hidden flex items-center justify-center min-w-[1.3vw] h-[1.3vw] px-[0.35vw] text-[0.65vw] font-semibold text-gray-700 bg-gray-100 rounded-full border border-gray-200">
+                                      {folderCountsMap[f.id] !== undefined ? folderCountsMap[f.id] : 0}
+                                    </span>
+                                    <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="hidden group-hover:flex p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] shrink-0 cursor-pointer">
+                                      <svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
+                                )}
+                              </div>
                           </div>
                         );
                       })}
@@ -485,21 +1017,21 @@ export default function DriveManager() {
 
                 {/* LIST */}
                 {view === "list" && (displayed.length > 0 || inlineCreating) && (
-                  <div className="px-[1.5vw]">
-                    <div className="grid grid-cols-[2.5vw_1fr_8vw_8vw_2.5vw] gap-[0.8vw] items-center px-[1vw] py-[0.5vh] text-[0.7vw] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#e0e0e0] sticky top-0 bg-white z-10"><span /><span>Name</span><span>Modified</span><span>Size</span><span /></div>
-                    {inlineCreating && <div className="grid grid-cols-[2.5vw_1fr_8vw_8vw_2.5vw] gap-[0.8vw] items-center px-[1vw] py-[0.6vh] border-b border-[#d2e3fc] bg-[#e8f0fe]"><span className="flex items-center justify-center">{ICONS.folder}</span><input ref={inlineRef} className="bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.4vw] py-[0.2vh] text-[0.85vw] outline-none" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /><span className="text-[0.8vw] text-[#5f6368]">Just now</span><span className="text-[0.8vw] text-[#5f6368]">—</span><span /></div>}
+                  <div className="px-[1vw]">
+                    <div className="grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] text-[0.7vw] font-semibold text-[#5f6368] uppercase tracking-wider border-b border-[#e0e0e0] sticky top-0 bg-white z-10"><span /><span>Name</span><span>Modified</span><span>Size</span><span /></div>
+                    {inlineCreating && <div className="grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] border-b border-[#d2e3fc] bg-[#e8f0fe]"><span className="flex items-center justify-center">{ICONS.folder}</span><input ref={inlineRef} className="bg-white border-2 border-[#1a73e8] rounded px-2 py-0.5 text-[0.82vw] outline-none" value={inlineName} onChange={e => setInlineName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") commitInlineCreate(); if (e.key === "Escape") cancelInlineCreate(); }} onBlur={() => commitInlineCreate()} /><span className="text-[0.7vw] text-[#5f6368]">Just now</span><span className="text-[0.7vw] text-[#5f6368]">—</span><span /></div>}
                     {displayed.map(f => {
                       const isSel = selected.has(f.id);
                       return (
                         <div key={f.id}
-                          className={`group grid grid-cols-[2.5vw_1fr_8vw_8vw_2.5vw] gap-[0.8vw] items-center px-[1vw] py-[0.6vh] border-b cursor-pointer transition-colors ${isSel ? "bg-[#f0f0f0] border-l-[3px] border-l-[#202124] border-b-[#e0e0e0]" : "border-[#f1f3f4] hover:bg-[#f1f3f4]"}`}
+                          className={`group grid grid-cols-[2vw_1fr_7vw_5vw_2vw] gap-[0.5vw] items-center px-[0.8vw] py-[0.6vh] border-b cursor-pointer transition-colors ${isSel ? "bg-[#f0f0f0] border-l-[3px] border-l-[#202124] border-b-[#e0e0e0]" : "border-[#f1f3f4] hover:bg-[#f1f3f4]"}`}
                           onClick={e => handleItemClick(f, e)}
                           onContextMenu={e => handleCtx(e, f)}>
                           <span className="flex items-center justify-center">{getIcon(f.iconType || (f.isFolder ? "folder" : "file"))}</span>
-                          {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="bg-white border-2 border-[#1a73e8] rounded-[0.3vw] px-[0.3vw] py-[0.1vh] text-[0.85vw] outline-none" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="text-[0.85vw] text-[#3c4043] truncate flex items-center gap-[0.4vw]"><span className="truncate">{f.name}</span>{f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="shrink-0 text-[#1e8e3e]">{ICONS.unlock}</span>}</span>}
-                          <span className="text-[0.8vw] text-[#5f6368]">{fmtDate(f.modifiedTime)}</span>
-                          <span className="text-[0.8vw] text-[#5f6368]">{f.isFolder ? "—" : fmtSize(f.size)}</span>
-                          <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-[0.2vw] rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
+                          {renamingId === f.id && renamingContext === "main" ? <input ref={renameRef} className="bg-white border-2 border-[#1a73e8] rounded px-1.5 py-0.5 text-[0.82vw] outline-none" value={renameVal} onChange={e => setRenameVal(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }} onBlur={() => commitRename()} /> : <span className="text-[0.82vw] text-[#3c4043] truncate flex items-center gap-1"><span className="truncate" onMouseEnter={e => handleMouseEnterName(e, f.name)} onMouseLeave={handleMouseLeaveName}>{f.name}</span>{f.isFolder && !isAdmin && (folderAccessMap[f.id] || {}).hasAccess && <span className="shrink-0 text-[#1e8e3e]">{ICONS.unlock}</span>}</span>}
+                          <span className="text-[0.72vw] text-[#5f6368]">{fmtDate(f.modifiedTime)}</span>
+                          <span className="text-[0.72vw] text-[#5f6368]">{f.isFolder ? "—" : fmtSize(f.size)}</span>
+                          <button onClick={e => { e.stopPropagation(); handleCtx(e, f); }} className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[#e8eaed] text-[#5f6368] transition-opacity shrink-0 cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg></button>
                         </div>
                       );
                     })}
@@ -510,17 +1042,22 @@ export default function DriveManager() {
           )}
         </main>
 
-        {/* DETAIL PANEL — fixed height = 93vh */}
+        {/* DETAIL PANEL */}
         {showDetail && detail && (
-          <aside className="w-[20vw] min-w-[280px] bg-white border-l border-[#e0e0e0] flex flex-col shrink-0 h-[93vh] overflow-y-auto animate-[slideLeft_0.2s_ease]">
-            <div className="flex items-center justify-between px-[1vw] py-[1.2vh] border-b border-[#e0e0e0] shrink-0"><span className="text-[0.9vw] font-medium text-[#202124] truncate flex-1 mr-[0.5vw]">{detail.name}</span><button onClick={() => setShowDetail(false)} className="p-[0.3vw] rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div>
-            <div className="h-[25vh] min-h-[160px] overflow-hidden border-b border-[#e0e0e0] shrink-0"><Thumbnail file={detail} apiUrl={API_URL} /></div>
-            <div className="flex flex-wrap gap-[0.4vw] px-[1vw] py-[1vh] border-b border-[#e0e0e0] shrink-0">
-              {!detail.isFolder && (canDownload() ? <button onClick={() => download(detail.id)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.5vh] border border-[#dadce0] rounded-[0.4vw] bg-white text-[0.75vw] text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>Download</button> : <button onClick={() => setRequestAccessModal(activeSidebarFolder)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.5vh] border border-[#dadce0] rounded-[0.4vw] bg-[#f8f9fa] text-[0.75vw] text-[#9aa0a6] cursor-pointer">{ICONS.lock} Request Access</button>)}
-              <button onClick={() => openDrive(detail)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.5vh] border border-[#dadce0] rounded-[0.4vw] bg-white text-[0.75vw] text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>Open in Drive</button>
-              <button onClick={() => doShare(detail)} className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.5vh] border border-[#dadce0] rounded-[0.4vw] bg-white text-[0.75vw] text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-[0.9vw] h-[0.9vw] min-w-[12px] min-h-[12px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>Share</button>
+          <aside className="w-[18vw] min-w-[220px] bg-white border-l border-[#e0e0e0] flex flex-col shrink-0 h-full overflow-y-auto animate-[slideLeft_0.2s_ease] relative">
+            {detailLoading && (
+              <div className="absolute top-0 left-0 right-0 h-[3px] bg-[#e8f0fe] z-50 overflow-hidden">
+                <div className="h-full bg-[#1a73e8] w-full origin-left animate-[loadingLine_1.5s_infinite_linear]" />
+              </div>
+            )}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#e0e0e0] shrink-0"><span className="text-sm font-semibold text-[#202124] truncate flex-1 mr-2">{detail.name}</span><button onClick={() => setShowDetail(false)} className="p-1.5 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div>
+            <div className="h-44 overflow-hidden border-b border-[#e0e0e0] shrink-0"><Thumbnail file={detail} apiUrl={API_URL} /></div>
+            <div className="flex flex-wrap gap-2 px-4 py-2.5 border-b border-[#e0e0e0] shrink-0">
+              {!detail.isFolder && (canDownload() ? <button onClick={() => download(detail.id)} className="flex items-center gap-1 px-2.5 py-1 border border-[#dadce0] rounded bg-white text-xs text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>Download</button> : <button onClick={() => setRequestAccessModal(activeSidebarFolder)} className="flex items-center gap-1 px-2.5 py-1 border border-[#dadce0] rounded bg-[#f8f9fa] text-xs text-[#9aa0a6] cursor-pointer">{ICONS.lock} Request Access</button>)}
+              <button onClick={() => openDrive(detail)} className="flex items-center gap-1 px-2.5 py-1 border border-[#dadce0] rounded bg-white text-xs text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>Open in Drive</button>
+              <button onClick={() => doShare(detail)} className="flex items-center gap-1 px-2.5 py-1 border border-[#dadce0] rounded bg-white text-xs text-[#3c4043] hover:bg-[#f1f3f4] cursor-pointer"><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>Share</button>
             </div>
-            <div className="px-[1vw] py-[1.2vh]"><p className="text-[0.7vw] font-medium text-[#5f6368] uppercase tracking-wider mb-[0.8vh]">Details</p><div className="space-y-[0.5vh]">{[["Type", detail.isFolder ? "Folder" : detail.mimeType?.split("/").pop() || "File"], ...(!detail.isFolder ? [["Size", fmtSize(detail.size)]] : []), ["Modified", fmtDate(detail.modifiedTime)], ["Created", fmtDate(detail.createdTime)]].map(([l, v]) => <div key={l} className="flex justify-between text-[0.8vw]"><span className="text-[#5f6368]">{l}</span><span className="text-[#202124] font-medium text-right max-w-[55%] break-all">{v}</span></div>)}{detail.webViewLink && <div className="flex justify-between text-[0.8vw]"><span className="text-[#5f6368]">Link</span><a href={detail.webViewLink} target="_blank" rel="noreferrer" className="text-[#1a73e8] hover:underline cursor-pointer">Open ↗</a></div>}</div></div>
+            <div className="px-4 py-3"><p className="text-xs font-semibold text-[#5f6368] uppercase tracking-wider mb-2">Details</p><div className="space-y-1.5">{[["Type", detail.isFolder ? "Folder" : detail.mimeType?.split("/").pop() || "File"], ...(!detail.isFolder ? [["Size", fmtSize(detail.size)]] : []), ["Modified", fmtDate(detail.modifiedTime)], ["Created", fmtDate(detail.createdTime)]].map(([l, v]) => <div key={l} className="flex justify-between text-xs"><span className="text-[#5f6368]">{l}</span><span className="text-[#202124] font-medium text-right max-w-[55%] break-all">{v}</span></div>)}{detail.webViewLink && <div className="flex justify-between text-xs"><span className="text-[#5f6368]">Link</span><a href={detail.webViewLink} target="_blank" rel="noreferrer" className="text-[#1a73e8] hover:underline cursor-pointer">Open ↗</a></div>}</div></div>
           </aside>
         )}
       </div>
@@ -530,8 +1067,8 @@ export default function DriveManager() {
       <input type="file" ref={ctxFileRef} className="hidden" multiple onChange={e => { if (ctxUploadTarget) upload(e.target.files, ctxUploadTarget); e.target.value = ""; setCtxUploadTarget(null); }} />
       <input type="file" ref={ctxFolderRef} className="hidden" webkitdirectory="" directory="" multiple onChange={e => { if (ctxUploadTarget) upload(e.target.files, ctxUploadTarget); e.target.value = ""; setCtxUploadTarget(null); }} />
 
-      {/* CONTEXT MENU */}
-      {ctx && <div className="fixed bg-white rounded-[0.5vw] shadow-[0_2px_10px_rgba(0,0,0,0.2)] min-w-[14vw] py-[0.4vh] z-[1000] animate-[fadeScale_0.15s_ease]" style={{ top: Math.min(ctx.y, window.innerHeight - 400), left: Math.min(ctx.x, window.innerWidth - 250) }} onClick={e => e.stopPropagation()}>
+      {/* ITEM CONTEXT MENU */}
+      {ctx && <div className="fixed bg-white rounded-[0.5vw] shadow-[0_2px_10px_rgba(0,0,0,0.2)] min-w-[14vw] py-[0.4vh] z-[1000] animate-[fadeScale_0.15s_ease]" style={{ top: Math.min(ctx.y, window.innerHeight - 440), left: Math.min(ctx.x, window.innerWidth - 250) }} onClick={e => e.stopPropagation()}>
         {ctxFile.isFolder ? <>
           <button onClick={() => { goTo(ctxFile.id); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer">{ICONS.folderOpen} Open folder</button>
           {canWriteToFolder(ctxFile.id) && <><div className="h-px bg-[#e0e0e0] my-[0.3vh]" /><button onClick={() => { setCtxUploadTarget(ctxFile.id); setCtx(null); setTimeout(() => ctxFileRef.current?.click(), 50); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>Upload file here</button><button onClick={() => { setCtxUploadTarget(ctxFile.id); setCtx(null); setTimeout(() => ctxFolderRef.current?.click(), 50); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="12" /></svg>Upload folder here</button><button onClick={() => { const tid = ctxFile.id; setCtx(null); createFolderInTarget(tid); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>Create folder here</button></>}
@@ -541,7 +1078,14 @@ export default function DriveManager() {
           {canDownload() ? <button onClick={() => { download(ctxFile.id); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>Download</button> : <button onClick={() => { setRequestAccessModal(activeSidebarFolder); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#9aa0a6] hover:bg-[#f1f3f4] text-left cursor-pointer">{ICONS.lock} Request Access</button>}
         </>}
         <div className="h-px bg-[#e0e0e0] my-[0.3vh]" />
-        {canWrite() && <><button onClick={() => { const isSb = sidebarFolders.some(f => f.id === ctxFile.id); startRename(ctxFile, isSb ? "sidebar" : "main"); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Rename</button>{!ctxFile.isFolder && <button onClick={() => { doCopy(ctxFile); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>Make a copy</button>}</>}
+        {canWrite() && (
+          <>
+            <button onClick={() => { startMoveModal(selected.size > 1 ? selectedFiles : [ctxFile]); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6" /><path d="M10 14L21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>Move to...</button>
+            <button onClick={() => { handleCopySelection(selected.size > 1 ? selectedFiles : [ctxFile]); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>Make a copy</button>
+            <button onClick={() => { handleCut(selected.size > 1 ? selectedFiles : [ctxFile]); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" /><line x1="8.12" y1="8.12" x2="12" y2="12" /></svg>Cut</button>
+            <button onClick={() => { const isSb = sidebarFolders.some(f => f.id === ctxFile.id); startRename(ctxFile, isSb ? "sidebar" : "main"); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Rename</button>
+          </>
+        )}
         <button onClick={() => { doShare(ctxFile); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>Share / Get link</button>
         {ctxFile.isFolder && (isAdmin || (currentUser.isTeamHead && teamHeadCanManageAccess(ctxFile))) && <button onClick={async () => { const isSub = ctxFile.id !== activeSidebarFolder?.id; if (isSub && folderId) await fetchParentGrantedEmployees(folderId); else { setParentGrantedEmployeeIds([]); setParentGrantedDesignations([]); } setAccessModal(ctxFile); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#1a73e8] hover:bg-[#e8f0fe] text-left cursor-pointer">{ICONS.shield} Manage Access</button>}
         <button onClick={() => { openDetails(ctxFile); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>Details</button>
@@ -549,23 +1093,239 @@ export default function DriveManager() {
         {canWrite() && <><div className="h-px bg-[#e0e0e0] my-[0.3vh]" /><button onClick={() => { setDeleteTargets(selected.size > 1 ? selectedFiles : [ctxFile]); setModalDelete(true); setCtx(null); }} className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#d93025] hover:bg-[#fce8e6] text-left cursor-pointer"><svg className="w-[1vw] h-[1vw] min-w-[14px] min-h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>Delete{selected.size > 1 ? ` (${selected.size})` : ""}</button></>}
       </div>}
 
+      {/* BACKGROUND EMPTY SPACE CONTEXT MENU */}
+      {bgCtx && (
+        <div
+          className="fixed bg-white rounded-[0.5vw] shadow-[0_2px_10px_rgba(0,0,0,0.2)] min-w-[14vw] py-[0.4vh] z-[1000] animate-[fadeScale_0.15s_ease]"
+          style={{ top: Math.min(bgCtx.y, window.innerHeight - 300), left: Math.min(bgCtx.x, window.innerWidth - 220) }}
+          onClick={e => e.stopPropagation()}
+        >
+          {canWrite() && (
+            <>
+              <button
+                onClick={() => { setBgCtx(null); startInlineCreate(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"
+              >
+                {ICONS.folder} New folder
+              </button>
+              <button
+                onClick={() => { setBgCtx(null); fileRef.current?.click(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg> File upload
+              </button>
+              <button
+                onClick={() => { setBgCtx(null); folderRef.current?.click(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="12" /></svg> Folder upload
+              </button>
+              <div className="h-px bg-[#e0e0e0] my-[0.3vh]" />
+              <button
+                disabled={!clipboard || !clipboard.items || clipboard.items.length === 0}
+                onClick={() => { setBgCtx(null); pasteClipboard(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></svg> Paste {clipboard?.items?.length ? `(${clipboard.items.length})` : ""}
+              </button>
+              <button
+                disabled={!hasSelection}
+                onClick={() => { setBgCtx(null); handleCut(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" /><line x1="8.12" y1="8.12" x2="12" y2="12" /></svg> Cut
+              </button>
+              <button
+                disabled={!hasSelection}
+                onClick={() => { setBgCtx(null); handleCopySelection(); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy
+              </button>
+              <button
+                disabled={!hasSelection}
+                onClick={() => { setBgCtx(null); startMoveModal(selectedFiles); }}
+                className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6" /><path d="M10 14L21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg> Move to...
+              </button>
+              <div className="h-px bg-[#e0e0e0] my-[0.3vh]" />
+            </>
+          )}
+          <button
+            onClick={() => { setBgCtx(null); setSelected(new Set(displayed.map(f => f.id))); }}
+            className="w-full flex items-center gap-[0.8vw] px-[1vw] py-[0.7vh] text-[0.82vw] text-[#3c4043] hover:bg-[#f1f3f4] text-left cursor-pointer"
+          >
+            <svg className="w-[1vw] h-[1vw]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 12l2 2 4-4" /></svg> Select all
+          </button>
+        </div>
+      )}
+
+      {/* MOVE MODAL */}
+      {moveModalTargets && moveModalTargets.length > 0 && (
+        <MoveModal
+          targets={moveModalTargets}
+          currentFolderId={folderId}
+          sidebarFolders={sidebarFolders}
+          onClose={() => setMoveModalTargets(null)}
+          onMove={commitMoveModal}
+        />
+      )}
+
       {/* DELETE MODAL */}
-      {modalDelete && deleteTargets.length > 0 && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]" onClick={() => { setModalDelete(false); setDeleteTargets([]); }}><div className="bg-white rounded-[0.8vw] p-[1.5vw] w-[30vw] min-w-[380px] shadow-[0_8px_32px_rgba(0,0,0,0.24)]" onClick={e => e.stopPropagation()}><div className="flex items-center justify-between mb-[1vh]"><h3 className="text-[1.1vw] text-[#202124]">{deleteTargets.length === 1 ? `Delete "${deleteTargets[0].name}"?` : `Delete ${deleteTargets.length} items?`}</h3><button onClick={() => { setModalDelete(false); setDeleteTargets([]); }} className="p-[0.3vw] rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div><p className="text-[0.85vw] text-[#5f6368]">This action cannot be undone.</p>{deleteTargets.length > 1 && <div className="max-h-[18vh] overflow-y-auto my-[0.8vh] border border-[#e0e0e0] rounded-[0.4vw]">{deleteTargets.map(item => <div key={item.id} className="flex items-center gap-[0.5vw] px-[0.8vw] py-[0.35vh] border-b border-[#f1f3f4] last:border-b-0"><div className="shrink-0">{getIcon(item.iconType || (item.isFolder ? "folder" : "file"))}</div><span className="text-[0.78vw] text-[#3c4043] truncate">{item.name}</span></div>)}</div>}<div className="flex justify-end gap-[0.5vw] mt-[2vh]"><button onClick={() => { setModalDelete(false); setDeleteTargets([]); }} className="px-[1.2vw] py-[0.6vh] rounded-[0.4vw] text-[0.85vw] text-[#1a73e8] hover:bg-[#e8f0fe] font-medium cursor-pointer">Cancel</button><button onClick={doDelete} className="px-[1.2vw] py-[0.6vh] rounded-[0.4vw] text-[0.85vw] bg-[#d93025] text-white hover:bg-[#b3261e] font-medium cursor-pointer">Delete{deleteTargets.length > 1 ? ` (${deleteTargets.length})` : ""}</button></div></div></div>}
+      {modalDelete && deleteTargets.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]" onClick={() => { setModalDelete(false); setDeleteTargets([]); }}>
+          <div className="bg-white rounded-xl p-6 w-[420px] max-w-[95vw] shadow-2xl animate-[fadeScale_0.12s_ease]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-semibold text-[#202124]">
+                {deleteTargets.length === 1 ? `Delete "${deleteTargets[0].name}"?` : `Delete ${deleteTargets.length} items?`}
+              </h3>
+              <button onClick={() => { setModalDelete(false); setDeleteTargets([]); }} className="p-1 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-sm text-[#5f6368] mb-3">This action cannot be undone.</p>
+            {deleteTargets.some(t => t.isFolder) && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex gap-2 items-start">
+                <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span><strong>Warning:</strong> Deleting a folder will permanently delete all files and subfolders within it from Google Drive.</span>
+              </div>
+            )}
+            {deleteTargets.length > 1 && (
+              <div className="max-h-36 overflow-y-auto my-3 border border-[#e0e0e0] rounded-lg">
+                {deleteTargets.map(item => (
+                  <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 border-b border-[#f1f3f4] last:border-b-0">
+                    <div className="shrink-0">{getIcon(item.iconType || (item.isFolder ? "folder" : "file"))}</div>
+                    <span className="text-xs text-[#3c4043] truncate">{item.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => { setModalDelete(false); setDeleteTargets([]); }} className="px-4 py-2 rounded-lg text-sm text-[#1a73e8] hover:bg-[#e8f0fe] font-semibold cursor-pointer">
+                Cancel
+              </button>
+              <button onClick={doDelete} className="px-4 py-2 rounded-lg text-sm bg-[#d93025] text-white hover:bg-[#b3261e] font-semibold cursor-pointer">
+                Delete{deleteTargets.length > 1 ? ` (${deleteTargets.length})` : ""}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SHARE MODAL */}
-      {modalShare && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]" onClick={() => setModalShare(false)}><div className="bg-white rounded-[0.8vw] p-[1.5vw] w-[30vw] min-w-[380px] shadow-[0_8px_32px_rgba(0,0,0,0.24)]" onClick={e => e.stopPropagation()}><div className="flex items-center justify-between mb-[1vh]"><h3 className="text-[1.1vw] text-[#202124]">Share "{shareTarget?.name}"</h3><button onClick={() => setModalShare(false)} className="p-[0.3vw] rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div>{shareLink && <div className="flex items-center gap-[0.5vw] p-[0.6vw] bg-[#f1f3f4] rounded-[0.4vw]"><input className="flex-1 bg-transparent border-none outline-none text-[0.8vw]" value={shareLink} readOnly /><button onClick={() => copyClipboard(shareLink)} className="px-[0.8vw] py-[0.4vh] bg-[#1a73e8] text-white rounded-[0.3vw] text-[0.8vw] hover:bg-[#1557b0] shrink-0 cursor-pointer">Copy</button></div>}<div className="flex justify-end mt-[2vh]"><button onClick={() => setModalShare(false)} className="px-[1.2vw] py-[0.6vh] rounded-[0.4vw] text-[0.85vw] bg-[#1a73e8] text-white hover:bg-[#1557b0] font-medium cursor-pointer">Done</button></div></div></div>}
+      {modalShare && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]" onClick={() => setModalShare(false)}>
+          <div className="bg-white rounded-xl p-6 w-[420px] max-w-[95vw] shadow-2xl animate-[fadeScale_0.12s_ease]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-[#202124]">Share "{shareTarget?.name}"</h3>
+              <button onClick={() => setModalShare(false)} className="p-1 rounded-full hover:bg-[#f1f3f4] text-[#5f6368] cursor-pointer">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            {shareLink && (
+              <div className="flex items-center gap-2 p-2.5 bg-[#f1f3f4] rounded-lg">
+                <input className="flex-1 bg-transparent border-none outline-none text-sm" value={shareLink} readOnly />
+                <button onClick={() => copyClipboard(shareLink)} className="px-3 py-1.5 bg-[#1a73e8] text-white rounded-lg text-sm hover:bg-[#1557b0] shrink-0 cursor-pointer">
+                  Copy
+                </button>
+              </div>
+            )}
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setModalShare(false)} className="px-4 py-2 rounded-lg text-sm bg-[#1a73e8] text-white hover:bg-[#1557b0] font-semibold cursor-pointer">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PREVIEW MODAL */}
-      {modalPreview && <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000]" onClick={() => setModalPreview(null)}><div className="relative w-[80vw] h-[85vh] bg-white rounded-[0.8vw] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}><div className="flex items-center justify-between px-[1.2vw] py-[1vh] bg-[#202124] text-white shrink-0"><span className="text-[0.9vw] truncate flex-1">{modalPreview.name}</span><div className="flex items-center gap-[0.5vw]">{canDownload() ? <button onClick={() => download(modalPreview.id)} className="p-[0.4vw] rounded-full hover:bg-white/20 cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg></button> : <button onClick={() => { setModalPreview(null); setRequestAccessModal(activeSidebarFolder); }} className="p-[0.4vw] rounded-full hover:bg-white/20 cursor-pointer opacity-50">{ICONS.lock}</button>}<button onClick={() => openDrive(modalPreview)} className="p-[0.4vw] rounded-full hover:bg-white/20 cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg></button><button onClick={() => setModalPreview(null)} className="p-[0.4vw] rounded-full hover:bg-white/20 cursor-pointer"><svg className="w-[1.2vw] h-[1.2vw] min-w-[16px] min-h-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button></div></div><div className="flex-1 flex items-center justify-center bg-[#1a1a1a] overflow-auto p-[2vw]">{modalPreview.mimeType?.startsWith("image/") ? <img src={`${API_URL}/preview/${modalPreview.id}`} alt={modalPreview.name} className="max-w-full max-h-full object-contain" /> : modalPreview.mimeType?.includes("pdf") ? <iframe src={`${API_URL}/preview/${modalPreview.id}`} className="w-full h-full border-none" title={modalPreview.name} /> : modalPreview.mimeType?.startsWith("video/") ? <video controls className="max-w-full max-h-full"><source src={`${API_URL}/preview/${modalPreview.id}`} type={modalPreview.mimeType} /></video> : modalPreview.mimeType?.startsWith("audio/") ? <div className="flex flex-col items-center gap-[2vh]"><div className="scale-[4] opacity-60">{ICONS.audio}</div><audio controls className="w-[30vw] min-w-[300px]"><source src={`${API_URL}/preview/${modalPreview.id}`} type={modalPreview.mimeType} /></audio></div> : <p className="text-white">Preview not available</p>}</div></div></div>}
+      {modalPreview && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000]" onClick={() => setModalPreview(null)}>
+          <div className="relative w-[90vw] max-w-[1200px] h-[85vh] bg-white rounded-xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-2.5 bg-[#202124] text-white shrink-0">
+              <span className="text-sm font-semibold truncate flex-1">{modalPreview.name}</span>
+              <div className="flex items-center gap-2">
+                {canDownload() ? (
+                  <button onClick={() => download(modalPreview.id)} className="p-1.5 rounded-full hover:bg-white/20 cursor-pointer">
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button onClick={() => { setModalPreview(null); setRequestAccessModal(activeSidebarFolder); }} className="p-1.5 rounded-full hover:bg-white/20 cursor-pointer opacity-50">
+                    {ICONS.lock}
+                  </button>
+                )}
+                <button onClick={() => openDrive(modalPreview)} className="p-1.5 rounded-full hover:bg-white/20 cursor-pointer">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </button>
+                <button onClick={() => setModalPreview(null)} className="p-1.5 rounded-full hover:bg-white/20 cursor-pointer">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 flex items-center justify-center bg-[#1a1a1a] overflow-auto p-6">
+              {modalPreview.mimeType?.startsWith("image/") ? (
+                <img src={`${API_URL}/preview/${modalPreview.id}`} alt={modalPreview.name} className="max-w-full max-h-full object-contain" />
+              ) : modalPreview.mimeType?.includes("pdf") ? (
+                <iframe src={`${API_URL}/preview/${modalPreview.id}`} className="w-full h-full border-none" title={modalPreview.name} />
+              ) : modalPreview.mimeType?.startsWith("video/") ? (
+                <video controls className="max-w-full max-h-full">
+                  <source src={`${API_URL}/preview/${modalPreview.id}`} type={modalPreview.mimeType} />
+                </video>
+              ) : modalPreview.mimeType?.startsWith("audio/") ? (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="scale-[4] opacity-60">{ICONS.audio}</div>
+                  <audio controls className="w-[360px] max-w-[90vw]">
+                    <source src={`${API_URL}/preview/${modalPreview.id}`} type={modalPreview.mimeType} />
+                  </audio>
+                </div>
+              ) : (
+                <p className="text-white">Preview not available</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* UPLOAD PROGRESS */}
       {showUploadPanel && uploadItems.length > 0 && <UploadProgressPanel uploadItems={uploadItems} onClose={() => { setShowUploadPanel(false); setUploadItems([]); }} onCancel={cancelUpload} />}
 
       {/* ACCESS MODAL */}
-      {accessModal && <AccessModal folder={accessModal} currentUser={currentUser} onClose={() => { setAccessModal(null); bulkCheckAccess(sidebarFolders.map(f => f.id)); if (activeSidebarFolder) fetchParentGrantedEmployees(activeSidebarFolder.id); }} notify={notify} parentGrantedEmployeeIds={accessModal?.id !== activeSidebarFolder?.id ? parentGrantedEmployeeIds : []} parentGrantedDesignations={accessModal?.id !== activeSidebarFolder?.id ? parentGrantedDesignations : []} />}
-      {requestAccessModal && <RequestAccessModal folder={requestAccessModal} onClose={() => setRequestAccessModal(null)} />}
+      {accessModal && <AccessModal folder={accessModal} currentUser={currentUser} onClose={() => { setAccessModal(null); const ids = [...sidebarFolders.map(f => f.id), ...(folderId ? [folderId] : []), ...files.filter(f => f.isFolder).map(f => f.id)]; bulkCheckAccess(ids); if (activeSidebarFolder) fetchParentGrantedEmployees(activeSidebarFolder.id); }} notify={notify} parentGrantedEmployeeIds={accessModal?.id !== activeSidebarFolder?.id ? parentGrantedEmployeeIds : []} parentGrantedDesignations={accessModal?.id !== activeSidebarFolder?.id ? parentGrantedDesignations : []} />}
+      {/* CUSTOM HOVER TOOLTIP */}
+      {hoverTooltip && (
+        <div
+          className="fixed z-[2000] bg-[#202124] text-white rounded-md px-3 py-1.5 text-xs shadow-xl pointer-events-none animate-[fadeScale_0.1s_ease] whitespace-nowrap overflow-hidden text-ellipsis max-w-[360px]"
+          style={{
+            top: Math.min(hoverTooltip.y, window.innerHeight - 40),
+            left: Math.min(Math.max(hoverTooltip.x, 10), window.innerWidth - 300),
+          }}
+        >
+          {hoverTooltip.text}
+        </div>
+      )}
 
-      <style>{`@keyframes fadeScale{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}@keyframes slideLeft{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+      <style>{`@keyframes fadeScale{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}@keyframes slideLeft{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes loadingLine{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}`}</style>
     </div>
   );
 }

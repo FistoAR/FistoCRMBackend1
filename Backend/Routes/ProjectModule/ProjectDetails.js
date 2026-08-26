@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const { queryWithRetry } = require("../../dataBase/connection");
 const {
   Project_Details,
@@ -147,6 +148,7 @@ router.post("/request", async (req, res) => {
       department,
       startDate,
       endDate,
+      reviewDate,
       description,
       employeeID,
     } = req.body;
@@ -165,6 +167,7 @@ router.post("/request", async (req, res) => {
       department,
       startDate,
       endDate,
+      reviewDate,
       description: description || "",
       employeeID: employeeID || "",
       status: "Requested",
@@ -358,6 +361,10 @@ router.put("/:projectId", async (req, res) => {
     const { projectId } = req.params;
     const updateData = req.body;
 
+    if (updateData.status === "Completed") {
+      updateData.percentage = 100;
+    }
+
     const project = await Project_Details.findByIdAndUpdate(
       projectId,
       { $set: updateData },
@@ -369,6 +376,19 @@ router.put("/:projectId", async (req, res) => {
         success: false,
         message: "Project not found",
       });
+    }
+
+    if (updateData.status === "Completed") {
+      const tasks = await Tasks.find({ projectId });
+      for (const t of tasks) {
+        t.percentage = 100;
+        if (t.activities && t.activities.length > 0) {
+          t.activities.forEach((activity) => {
+            activity.percentage = 100;
+          });
+        }
+        await t.save();
+      }
     }
 
     res.status(200).json({
@@ -617,7 +637,7 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
         if (isTaskAssigned || isTaskSupporting) {
           const latestTaskReview = await TaskReportsReview.findOne({
             taskId: task._id,
-            activityId: null,
+            $or: [{ activityId: null }, { activityId: "" }],
           })
             .sort({ createdAt: -1 })
             .lean();
@@ -1229,6 +1249,9 @@ router.get("/:projectId", async (req, res) => {
       .lean();
 
     if (tasks.length > 0) {
+      let tasksSum = 0;
+      let activeTasksCount = 0;
+      let completedTaskCount = 0;
       const tasksWithAssignedBy = await Promise.all(
         tasks.map(async (task) => {
           let assignedBy = null;
@@ -1248,9 +1271,19 @@ router.get("/:projectId", async (req, res) => {
             }
           }
 
+          const queryTaskId = [task._id.toString()];
+          if (mongoose.Types.ObjectId.isValid(task._id)) {
+            queryTaskId.push(new mongoose.Types.ObjectId(task._id));
+          }
+
           let latestTaskReport = await TaskReportsReview.findOne({
-            taskId: task._id,
-            activityId: null,
+            taskId: { $in: queryTaskId },
+            $or: [
+              { activityId: null },
+              { activityId: "" },
+              { activityId: { $exists: false } },
+              { activityId: "undefined" },
+            ],
             status: "underReview",
           })
             .sort({ createdAt: -1 })
@@ -1259,8 +1292,13 @@ router.get("/:projectId", async (req, res) => {
 
           if (!latestTaskReport) {
             latestTaskReport = await TaskReports.findOne({
-              taskId: task._id,
-              activityId: null,
+              taskId: { $in: queryTaskId },
+              $or: [
+                { activityId: null },
+                { activityId: "" },
+                { activityId: { $exists: false } },
+                { activityId: "undefined" },
+              ],
             })
               .sort({ createdAt: -1 })
               .select("createdAt status budget")
@@ -1276,9 +1314,18 @@ router.get("/:projectId", async (req, res) => {
           if (task.activities?.length > 0) {
             activitiesWithReports = await Promise.all(
               task.activities.map(async (activity) => {
+                const queryActTaskId = [task._id.toString()];
+                if (mongoose.Types.ObjectId.isValid(task._id)) {
+                  queryActTaskId.push(new mongoose.Types.ObjectId(task._id));
+                }
+                const queryActivityId = [activity._id.toString()];
+                if (mongoose.Types.ObjectId.isValid(activity._id)) {
+                  queryActivityId.push(new mongoose.Types.ObjectId(activity._id));
+                }
+
                 let latestActivityReport = await TaskReportsReview.findOne({
-                  taskId: task._id,
-                  activityId: activity._id,
+                  taskId: { $in: queryActTaskId },
+                  activityId: { $in: queryActivityId },
                   status: "underReview",
                 })
                   .sort({ createdAt: -1 })
@@ -1287,8 +1334,8 @@ router.get("/:projectId", async (req, res) => {
 
                 if (!latestActivityReport) {
                   latestActivityReport = await TaskReports.findOne({
-                    taskId: task._id,
-                    activityId: activity._id,
+                    taskId: { $in: queryActTaskId },
+                    activityId: { $in: queryActivityId },
                   })
                     .sort({ createdAt: -1 })
                     .select("createdAt status budget")
@@ -1309,6 +1356,24 @@ router.get("/:projectId", async (req, res) => {
             );
           }
 
+          if (task.activities && task.activities.length > 0) {
+            const activeActivities = (activitiesWithReports || []).filter((act) => act && act.status !== "Cancelled");
+            if (activeActivities.length > 0) {
+              const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
+              task.percentage = Math.round(activitiesSum / activeActivities.length);
+            } else {
+              task.percentage = 0;
+            }
+          }
+
+          if (task && task.status !== "Cancelled") {
+            tasksSum += (task.percentage || 0);
+            activeTasksCount++;
+            if ((task.percentage || 0) >= 100) {
+              completedTaskCount++;
+            }
+          }
+
           return {
             ...task,
             activities: activitiesWithReports,
@@ -1319,6 +1384,11 @@ router.get("/:projectId", async (req, res) => {
       );
 
       project.tasks = tasksWithAssignedBy;
+      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (project.percentage || 0);
+      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+        calculatedPercentage = 99;
+      }
+      project.percentage = calculatedPercentage;
     } else {
       project.tasks = null;
     }
@@ -1451,69 +1521,123 @@ router.get("/", async (req, res) => {
       });
     }
 
-    projects = await Promise.all(
-      projects.map(async (proj) => {
-        if (proj.employeeID && employeeMap[proj.employeeID]) {
-          proj.teamHead = employeeMap[proj.employeeID];
-        } else {
-          proj.teamHead = { id: null, name: "Unassigned", profile: null };
+    // Batch fetch all tasks for these projects
+    const projectIds = projects.map((p) => p._id);
+    const allTasks = await Tasks.find({ projectId: { $in: projectIds } })
+      .select("projectId _id percentage activities status")
+      .lean();
+
+    const tasksByProjectId = {};
+    allTasks.forEach((task) => {
+      if (!task.projectId) return;
+      const pId = task.projectId.toString();
+      if (!tasksByProjectId[pId]) {
+        tasksByProjectId[pId] = [];
+      }
+      tasksByProjectId[pId].push(task);
+    });
+
+    // Batch fetch all TaskReportsReview status "underReview"
+    const allTaskIds = allTasks.map((t) => t._id);
+    const allUnderReviewDocs = await TaskReportsReview.find({
+      taskId: { $in: allTaskIds },
+      status: "underReview",
+    })
+      .select("taskId activityId status percentage")
+      .lean();
+
+    const reviewsByTaskId = {};
+    allUnderReviewDocs.forEach((doc) => {
+      if (!doc.taskId) return;
+      const tId = doc.taskId.toString();
+      if (!reviewsByTaskId[tId]) {
+        reviewsByTaskId[tId] = [];
+      }
+      reviewsByTaskId[tId].push(doc);
+    });
+
+    // Batch fetch latest report dates for all projects using aggregation
+    const latestReports = await TaskReports.aggregate([
+      { $match: { projectId: { $in: projectIds.map((id) => id.toString()) } } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: "$projectId", latestReportDate: { $first: "$createdAt" } } }
+    ]);
+
+    const reportMap = {};
+    latestReports.forEach((r) => {
+      if (r._id) reportMap[r._id.toString()] = r.latestReportDate;
+    });
+
+    projects = projects.map((proj) => {
+      if (proj.employeeID && employeeMap[proj.employeeID]) {
+        proj.teamHead = employeeMap[proj.employeeID];
+      } else {
+        proj.teamHead = { id: null, name: "Unassigned", profile: null };
+      }
+
+      if (proj.department && proj.department.length > 0) {
+        proj.departmentDetails = proj.department
+          .map((dId) => (deptMap[dId] ? { id: dId, name: deptMap[dId] } : null))
+          .filter(Boolean);
+      } else {
+        proj.departmentDetails = [];
+      }
+
+      const pIdStr = proj._id.toString();
+      proj.latestReportDate = reportMap[pIdStr] || null;
+
+      const projectTasks = tasksByProjectId[pIdStr] || [];
+
+      let tasksSum = 0;
+      let activeTasksCount = 0;
+      let completedTaskCount = 0;
+
+      for (const task of projectTasks) {
+        if (!task) continue;
+        let taskPercentage = task.percentage || 0;
+        if (task.activities && Array.isArray(task.activities) && task.activities.length > 0) {
+          const activeActivities = task.activities.filter((act) => act && act.status !== "Cancelled");
+          if (activeActivities.length > 0) {
+            const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
+            taskPercentage = Math.round(activitiesSum / activeActivities.length);
+          } else {
+            taskPercentage = 0;
+          }
         }
 
-        if (proj.department && proj.department.length > 0) {
-          proj.departmentDetails = proj.department
-            .map((dId) =>
-              deptMap[dId] ? { id: dId, name: deptMap[dId] } : null,
-            )
-            .filter(Boolean);
-        } else {
-          proj.departmentDetails = [];
+        if (task.status !== "Cancelled") {
+          tasksSum += taskPercentage;
+          activeTasksCount++;
+          if (taskPercentage >= 100) {
+            completedTaskCount++;
+          }
         }
+      }
 
-        const latestProjectReport = await TaskReports.findOne({
-          projectId: proj._id,
-        })
-          .sort({ createdAt: -1 })
-          .select("createdAt")
-          .lean();
+      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (proj.percentage || 0);
+      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+        calculatedPercentage = 99;
+      }
+      proj.percentage = calculatedPercentage;
+      proj.taskCount = projectTasks.filter((t) => t && t.status !== "Cancelled").length;
+      proj.completedTaskCount = completedTaskCount;
 
-        proj.latestReportDate = latestProjectReport
-          ? latestProjectReport.createdAt
-          : null;
-
-        const projectTasks = await Tasks.find({ projectId: proj._id })
-          .select("_id percentage activities")
-          .lean();
-
-        proj.taskCount = projectTasks.length;
-
-        proj.completedTaskCount = projectTasks.filter(
-          (t) => (t.percentage || 0) >= 100,
-        ).length;
-
-        if (projectTasks.length > 0) {
-          const taskIds = projectTasks.map((t) => t._id);
-
-          const underReviewDocs = await TaskReportsReview.find({
-            taskId: { $in: taskIds },
-            status: "underReview",
-          })
-            .select("taskId activityId status percentage")
-            .lean();
-
-          const uniqueUnderReviewKeys = new Set();
-          underReviewDocs.forEach((doc) => {
+      if (projectTasks.length > 0) {
+        const uniqueUnderReviewKeys = new Set();
+        projectTasks.forEach((task) => {
+          const reviews = reviewsByTaskId[task._id.toString()] || [];
+          reviews.forEach((doc) => {
             const key = `${doc.taskId}_${doc.activityId || "null"}`;
             uniqueUnderReviewKeys.add(key);
           });
+        });
+        proj.underReviewCount = uniqueUnderReviewKeys.size;
+      } else {
+        proj.underReviewCount = 0;
+      }
 
-          proj.underReviewCount = uniqueUnderReviewKeys.size;
-        } else {
-          proj.underReviewCount = 0;
-        }
-
-        return proj;
-      }),
-    );
+      return proj;
+    });
 
     if (search) {
       projects = projects.filter(
@@ -1784,4 +1908,53 @@ router.patch("/request/:requestId/reject", async (req, res) => {
   }
 });
 
+router.delete("/deleteProject/:projectId", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Project ID is required",
+      });
+    }
+
+    const project = await Project_Details.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Delete project details
+    await Project_Details.findByIdAndDelete(projectId);
+
+    // Delete all related tasks
+    await Tasks.deleteMany({ projectId });
+
+    // Delete all related day reports
+    await DayReport.deleteMany({ projectId });
+
+    // Delete all related task reports
+    await TaskReports.deleteMany({ projectId });
+
+    // Delete all related task reports review
+    await TaskReportsReview.deleteMany({ projectId });
+
+    res.status(200).json({
+      success: true,
+      message: "Project and all associated data deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error deleting project:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete project",
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;
+

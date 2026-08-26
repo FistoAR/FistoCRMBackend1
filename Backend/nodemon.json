@@ -1,0 +1,7 @@
+{
+  "ignore": [
+    "tokens.json",
+    "temp/*",
+    "uploads/*"
+  ]
+}

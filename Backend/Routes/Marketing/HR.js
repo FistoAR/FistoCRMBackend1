@@ -89,9 +89,9 @@ router.patch("/leave-requests/:id/update-approval", async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { action, remark, updated_by, designation } = req.body;
+    const { action, remark = "", updated_by, designation } = req.body;
 
-    if (!action || !remark || !updated_by || !designation) {
+    if (!action || !updated_by || !designation) {
       return res.status(400).json({
         success: false,
         error: "Missing required fields",
@@ -542,9 +542,17 @@ router.delete("/permission-requests/:id", async (req, res) => {
   }
 });
 
-// ========== GET ALL EMPLOYEES ==========
+// ========== GET ALL EMPLOYEES (Supports status filter) ==========
 router.get("/employees", async (req, res) => {
   try {
+    const { status } = req.query;
+    let whereClause = "WHERE working_status = 'Active'";
+    if (status === "Inactive") {
+      whereClause = "WHERE working_status != 'Active'";
+    } else if (status === "all") {
+      whereClause = "";
+    }
+
     const query = `
       SELECT 
         employee_id, 
@@ -556,7 +564,7 @@ router.get("/employees", async (req, res) => {
         password,
         profile_url
       FROM employees_details 
-      WHERE working_status = 'Active'
+      ${whereClause}
       ORDER BY employee_name ASC
     `;
     const results = await queryWithRetry(query);

@@ -75,17 +75,23 @@ router.get("/announcements", (req, res) => {
     SELECT
       id,
       date,
+      end_date,
+      title,
       quote,
       occasion,
       image_url AS imageUrl,
       created_at
     FROM quotes
-    WHERE DATE(date) = ?
-      AND occasion = 'Announcement'
+    WHERE occasion = 'Announcement'
+      AND (
+        (end_date IS NULL AND DATE(date) = ?)
+        OR
+        (end_date IS NOT NULL AND DATE(?) BETWEEN DATE(date) AND DATE(end_date))
+      )
     ORDER BY id ASC
   `;
 
-  db.pool.query(query, [dateStr], (err, results) => {
+  db.pool.query(query, [dateStr, dateStr], (err, results) => {
     if (err) {
       console.error("Error fetching announcements:", err);
       return res.status(500).json({
@@ -98,11 +104,11 @@ router.get("/announcements", (req, res) => {
     const announcements = results.map((q) => ({
       id: q.id,
       date: q.date,
+      endDate: q.end_date,
+      title: q.title || "Announcement",
       quote: q.quote,
       occasion: q.occasion,
       imageUrl: q.imageUrl,
-      // Support both "title" and "agenda" field names on the frontend
-      title: q.quote,
       agenda: q.quote,
     }));
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import Logo from "../assets/NotificationLogo.png";
 import LargeLogo from "../assets/NotificationLargeLogo.png";
+import notificationAudio from "../assets/notificationAudio.wav";
 
 export default function useWorker() {
   const audioRef = useRef(null);
@@ -15,7 +16,7 @@ export default function useWorker() {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       audioContextRef.current = new AudioContext();
 
-      const response = await fetch("/fisto_crm/notificationAudio.wav");
+      const response = await fetch(notificationAudio);
       const arrayBuffer = await response.arrayBuffer();
       audioBufferRef.current = await audioContextRef.current.decodeAudioData(
         arrayBuffer
@@ -23,7 +24,7 @@ export default function useWorker() {
 
     } catch (error) {
       console.warn("useWorker: Audio context init failed:", error.message);
-      audioRef.current = new Audio("/fisto_crm/notificationAudio.wav");
+      audioRef.current = new Audio(notificationAudio);
       audioRef.current.volume = 0.7;
       audioRef.current.load();
     }

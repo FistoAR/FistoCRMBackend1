@@ -8,6 +8,7 @@ const createDirectories = () => {
     path.join(__dirname, "../Images/ProjectBudget"),
     path.join(__dirname, "../Images/ProjectBudget/PO"),
     path.join(__dirname, "../Images/ProjectBudget/Invoice"),
+    path.join(__dirname, "../Images/ProjectBudget/Quotation"),
   ];
 
   dirs.forEach((dir) => {
@@ -30,6 +31,8 @@ const storage = multer.diskStorage({
       uploadPath = path.join(__dirname, "../Images/ProjectBudget/PO");
     } else if (file.fieldname === "invoice") {
       uploadPath = path.join(__dirname, "../Images/ProjectBudget/Invoice");
+    } else if (file.fieldname === "quotation") {
+      uploadPath = path.join(__dirname, "../Images/ProjectBudget/Quotation");
     } else {
       uploadPath = path.join(__dirname, "../Images/ProjectBudget");
     }
@@ -74,6 +77,7 @@ const upload = multer({
 const uploadProjectDocuments = upload.fields([
   { name: "po", maxCount: 10 },
   { name: "invoice", maxCount: 10 },
+  { name: "quotation", maxCount: 10 },
 ]);
 
 module.exports = uploadProjectDocuments;

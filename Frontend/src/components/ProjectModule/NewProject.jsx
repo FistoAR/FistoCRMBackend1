@@ -69,6 +69,7 @@ export default function NewProject() {
     },
     { value: "Hold", label: "Hold", color: "bg-yellow-500 text-white" },
     { value: "Canceled", label: "Canceled", color: "bg-red-400 text-white" },
+    { value: "Completed", label: "Completed", color: "bg-green-100 text-green-700" },
   ];
 
   const companyRef = useRef(null);
@@ -100,10 +101,51 @@ export default function NewProject() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [projectId, setProjectId] = useState(null);
 
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmDeleteText, setConfirmDeleteText] = useState("");
+
   const isRequestOnlyUser =
     isTeamHead && !["Admin", "SBU", "Project Head"].includes(employeeRole);
 
   const isAdminLevel = ["Admin", "SBU", "Project Head"].includes(employeeRole);
+
+  const isFormDisabled = fetchingProject || loading;
+
+  const handleDeleteProject = async () => {
+    if (confirmDeleteText !== formData.projectName) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/deleteProject/${projectId}`,
+        {
+          method: "DELETE",
+        }
+      );
+      const data = await response.json();
+      if (response.ok && data.success) {
+        notify({
+          title: "Success",
+          message: "Project and all associated data deleted successfully!",
+        });
+        setShowDeleteModal(false);
+        navigate(getProjectsPath(employeeRole));
+      } else {
+        notify({
+          title: "Error",
+          message: data.message || "Failed to delete project",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting project:", error);
+      notify({
+        title: "Error",
+        message: "Failed to delete project. Please try again.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   useEffect(() => {
     if (location.state?.isEditMode && location.state?.projectId) {
@@ -365,6 +407,7 @@ export default function NewProject() {
     if (designation === "3D") return "/threeD/projects";
     if (designation === "Project Head") return "/projectHead/projects";
     if (designation === "Admin") return "/admin/project";
+    if (designation === "SBU") return "/sbu/projects";
     return "/projects";
   };
 
@@ -898,15 +941,12 @@ export default function NewProject() {
     );
   };
 
-  if (loading) {
+  if (loading || fetchingProject) {
     return (
-      <div className="h-[92vh] w-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600 mx-auto mb-[1vw]"></div>
-          <p className="text-gray-600 text-[0.85vw]">
-            {fetchingProject ? "Loading project details..." : "Saving..."}
-          </p>
-        </div>
+      <div className="h-[92vh] w-full p-[1.5vw] space-y-[1vw]">
+        <div className="h-[2.5vw] w-[30%] animate-shimmer rounded-lg" />
+        <div className="h-[15vw] animate-shimmer rounded-xl w-full" />
+        <div className="h-[10vw] animate-shimmer rounded-xl w-full" />
       </div>
     );
   }
@@ -975,29 +1015,6 @@ export default function NewProject() {
           </div>
 
           <div className="flex items-center gap-[0.8vw]">
-            {fetchingProject && (
-              <p className="text-[0.8vw] text-gray-600">
-                <svg
-                  className="animate-spin h-[1vw] w-[1vw] text-black"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-              </p>
-            )}
             {activeTab === "form" && loadedFromRequest && !isEditMode && (
               <div className="flex items-center gap-[0.5vw] bg-white  px-[0.7vw] mb-[0.7vh] py-[0.2vw] rounded-full">
                 <span className="text-[0.72vw] text-gray-700">
@@ -1017,8 +1034,10 @@ export default function NewProject() {
         {activeTab === "requests" && (
           <div className="h-[87%] max-h-[87%] overflow-y-auto px-[1vw] py-[0.8vw]">
             {fetchingRequests ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-[1.8vw] w-[1.8vw] border-b-2 border-blue-600" />
+              <div className="space-y-[0.6vw]">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div key={idx} className="h-[4vw] animate-shimmer rounded-xl w-full" />
+                ))}
               </div>
             ) : requests.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-400">
@@ -1178,7 +1197,8 @@ export default function NewProject() {
         {activeTab === "form" && (
           <>
             <div className="h-[87%] max-h-[87%] overflow-y-auto px-[1vw] py-[0.8vw] pr-[15%]">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-[1vw] mb-[1vw]">
+              <fieldset disabled={isFormDisabled} className="w-full space-y-[1vw] border-none p-0 m-0 contents">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-[1vw] mb-[1vw]">
                 <div ref={companyRef} className="relative">
                   <div className="flex gap-[0.5vw] mb-[0.5vw] justify-between">
                     <label className="block text-[0.85vw] text-gray-700">
@@ -1231,9 +1251,9 @@ export default function NewProject() {
                   ) : (
                     <>
                       <div
-                        className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer flex items-center justify-between"
+                        className={`w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 flex items-center justify-between ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                         onClick={() =>
-                          setShowCompanyDropdown(!showCompanyDropdown)
+                          !isFormDisabled && setShowCompanyDropdown(!showCompanyDropdown)
                         }
                       >
                         <span
@@ -1418,9 +1438,9 @@ export default function NewProject() {
                     Department <span className="text-red-500">*</span>
                   </label>
                   <div
-                    className="w-full border border-gray-600 rounded-[0.8vw] px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer min-h-[2vw] flex items-center flex-wrap gap-[0.3vw]"
+                    className={`w-full border border-gray-600 rounded-[0.8vw] px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 min-h-[2vw] flex items-center flex-wrap gap-[0.3vw] ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                     onClick={() =>
-                      setShowDepartmentDropdown(!showDepartmentDropdown)
+                      !isFormDisabled && setShowDepartmentDropdown(!showDepartmentDropdown)
                     }
                   >
                     {formData.department.length === 0 ? (
@@ -1436,7 +1456,7 @@ export default function NewProject() {
                             className="w-[0.9vw] h-[0.9vw] cursor-pointer hover:text-red-600"
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeDepartment(dept.id);
+                              if (!isFormDisabled) removeDepartment(dept.id);
                             }}
                           />
                         </span>
@@ -1486,9 +1506,9 @@ export default function NewProject() {
                       Priority
                     </label>
                     <div
-                      className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 cursor-pointer flex items-center justify-between"
+                      className={`w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 flex items-center justify-between ${isFormDisabled ? "bg-gray-100 cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                       onClick={() =>
-                        setShowPriorityDropdown(!showPriorityDropdown)
+                        !isFormDisabled && setShowPriorityDropdown(!showPriorityDropdown)
                       }
                     >
                       <span
@@ -1535,34 +1555,24 @@ export default function NewProject() {
                     <label className="block text-[0.85vw] text-gray-700 mb-[0.5vw]">
                       Project Status
                     </label>
-                    {originalStatus === "Canceled" ? (
-                      <div className="w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 bg-gray-100 cursor-not-allowed flex items-center">
-                        <span
-                          className={`px-[0.5vw] py-[0.1vw] rounded-full text-[0.75vw] font-medium ${getStatusColor(originalStatus)}`}
-                        >
-                          {originalStatus}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <select
-                          className="appearance-none w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                          value={formData.status}
-                          onChange={(e) => handleStatusChange(e.target.value)}
-                        >
-                          {statusOptions.map((status) => (
-                            <option
-                              key={status.value}
-                              value={status.value}
-                              disabled={status.value === originalStatus}
-                            >
-                              {status.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-500 pointer-events-none" />
-                      </div>
-                    )}
+                    <div className="relative">
+                      <select
+                        className="appearance-none w-full border border-gray-600 rounded-full px-[0.7vw] py-[0.3vw] text-[0.80vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                        value={formData.status}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                      >
+                        {statusOptions.map((status) => (
+                          <option
+                            key={status.value}
+                            value={status.value}
+                            disabled={status.value === originalStatus}
+                          >
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-[0.7vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-500 pointer-events-none" />
+                    </div>
                     {formData.status !== originalStatus && (
                       <p className="text-[0.7vw] text-gray-600 mt-[0.2vw] ml-[0.3vw]">
                         Status will change from "{originalStatus}" to "
@@ -1649,20 +1659,25 @@ export default function NewProject() {
                     </div>
                   </div>
                 )}
+              </fieldset>
             </div>
 
-            <div className="flex items-center justify-end pr-[1vw] h-[7%] pb-[0.5vw] gap-[1vw]">
-              <button
-                className="bg-gray-300 hover:bg-gray-200 text-black px-[1.3vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
-                onClick={() => navigate(getProjectsPath(employeeRole))}
-              >
-                Cancel
-              </button>
-              {originalStatus === "Canceled" ? null : (
+             <div className="flex items-center justify-between w-full pr-[1vw] h-[7%] pb-[0.5vw]">
+           
+              <div>
+
+              </div>
+              <div className="flex items-center gap-[1vw]">
+                <button
+                  className="bg-gray-300 hover:bg-gray-200 text-black px-[1.3vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
+                  onClick={() => navigate(getProjectsPath(employeeRole))}
+                >
+                  Cancel
+                </button>
                 <button
                   className="bg-black hover:bg-gray-900 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer disabled:opacity-60"
                   onClick={handleSave}
-                  disabled={loading}
+                  disabled={loading || fetchingProject}
                 >
                   {( !isEditMode && isRequestOnlyUser )
                     ? "Request"
@@ -1670,7 +1685,18 @@ export default function NewProject() {
                       ? "Update"
                       : "Save"}
                 </button>
-              )}
+                  {isEditMode && isAdminLevel && (
+                  <button
+                    className="bg-red-600 hover:bg-red-700 text-white px-[1.6vw] py-[0.3vw] rounded-full text-[0.8vw] cursor-pointer"
+                    onClick={() => {
+                      setConfirmDeleteText("");
+                      setShowDeleteModal(true);
+                    }}
+                  >
+                    Delete Project
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -1722,6 +1748,58 @@ export default function NewProject() {
           </div>
         </div>
       )}
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/25 backdrop-blur-[0.1px] flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-[32%] p-[1.5vw]">
+            <div className="flex justify-between items-center mb-[1vw] bg-blue-50 rounded-md px-[0.5vw] py-[0.4vw]">
+              <h3 className="text-[1.1vw] font-semibold text-blue-600">
+                Delete Project
+              </h3>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="p-[0.4vw] hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X className="w-[1.2vw] h-[1.2vw]" />
+              </button>
+            </div>
+            <div className="mb-[1vw]">
+              <p className="text-[0.85vw] text-gray-700 mb-[0.8vw]">
+                This action <strong className="text-gray-900">CANNOT</strong> be undone. This will permanently delete the project <strong className="text-gray-900">{formData.projectName}</strong>.
+              </p>
+              <p className="text-[0.85vw] text-red-600 font-semibold mb-[1vw]">
+               Warning: All associated tasks, day reports, task reports, reviews, and the entire worked employees' reports in this project will be deleted permanently.
+              </p>
+              <label className="block text-[0.85vw] font-medium text-gray-700 mb-[0.5vw]">
+                Please type <strong className="text-gray-900">"{formData.projectName}"</strong> to confirm:
+              </label>
+              <input
+                type="text"
+                value={confirmDeleteText}
+                onChange={(e) => setConfirmDeleteText(e.target.value)}
+                placeholder="Enter project name"
+                className="w-full border border-gray-600 rounded-lg px-[0.7vw] py-[0.4vw] text-[0.8vw] text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+            <div className="flex gap-[1vw] justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-[1.3vw] py-[0.3vw] bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-full text-[0.8vw] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProject}
+                disabled={confirmDeleteText !== formData.projectName || loading}
+                className="px-[1.3vw] py-[0.3vw] bg-red-600 hover:bg-red-700 text-white rounded-full text-[0.8vw] cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+              >
+                {loading ? "Deleting..." : "Delete Project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, act } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   PieChart,
   Pie,
@@ -20,6 +21,70 @@ import ExportToPDF from "../components/ProjectModule/Analytics/Exports/ExportToP
 import { useNotification } from "../components/NotificationContext";
 import filterIcon from "../assets/ProjectPages/filter.webp";
 import searchIcon from "../assets/ProjectPages/search.webp";
+
+const AnalyticsSkeleton = () => (
+  <div className="relative bg-gray-100 pr-[0.4vw] text-black h-[calc(100vh-5.5vw)] flex-1 min-h-0 flex flex-col overflow-y-auto pb-[1vw] gap-[0.7vw]">
+    {/* Header bar skeleton */}
+    <div className="flex justify-between items-center bg-white px-[0.8vw] py-[0.5vw] rounded-xl shadow-sm">
+      <div className="flex flex-col gap-[0.4vw]">
+        <div className="h-[2vw] w-[14vw] animate-shimmer rounded-lg" />
+        <div className="h-[1vw] w-[18vw] animate-shimmer rounded" />
+      </div>
+      <div className="flex gap-[0.5vw]">
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[7vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[6vw] animate-shimmer rounded-full" />
+      </div>
+    </div>
+
+    {/* Top Charts/Stats Cards Skeleton */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-[0.7vw]">
+      {/* Left Donut Chart Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col items-center justify-center gap-[0.8vw] h-[18vw]">
+        <div className="h-[1.2vw] w-[60%] animate-shimmer rounded" />
+        <div className="w-[10vw] h-[10vw] animate-shimmer rounded-full" />
+      </div>
+      {/* Middle Stats Card Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col justify-between h-[18vw]">
+        <div className="h-[1.2vw] w-[50%] animate-shimmer rounded" />
+        <div className="space-y-[0.6vw]">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="h-[1vw] w-[40%] animate-shimmer rounded" />
+              <div className="h-[1vw] w-[20%] animate-shimmer rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Right Stats Card Skeleton */}
+      <div className="bg-white rounded-xl p-[1vw] shadow-sm flex flex-col justify-between h-[18vw]">
+        <div className="h-[1.2vw] w-[50%] animate-shimmer rounded" />
+        <div className="space-y-[0.6vw]">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="h-[1vw] w-[40%] animate-shimmer rounded" />
+              <div className="h-[1vw] w-[20%] animate-shimmer rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    {/* Bottom Table Section Skeleton */}
+    <div className="bg-white rounded-xl shadow-sm p-[1vw] flex-1 flex flex-col gap-[0.8vw]">
+      <div className="flex justify-between items-center">
+        <div className="h-[2vw] w-[15vw] animate-shimmer rounded-full" />
+        <div className="h-[2vw] w-[10vw] animate-shimmer rounded-full" />
+      </div>
+      <div className="space-y-[0.6vw] mt-[0.5vw]">
+        {Array.from({ length: 6 }).map((_, idx) => (
+          <div key={`an-skel-${idx}`} className="h-[3.2vw] animate-shimmer rounded-lg w-full" />
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
 const Analytics = () => {
   const { notify } = useNotification();
@@ -72,20 +137,128 @@ const Analytics = () => {
     !!fromDate ||
     !!toDate;
 
-  useEffect(() => {
-    const fetchAllData = async () => {
-      setLoading(true);
-      await Promise.all([
-        fetchAllEmployees(),
-        fetchAnalyticsData(),
-        fetchTimelineData(),
-        fetchTeamMembers(),
-      ]);
+  const { data: employeesData = [], isLoading: employeesQueryLoading } = useQuery({
+    queryKey: ["allEmployees"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
+      );
+      const result = await response.json();
+      return result.status ? result.employees || [] : [];
+    },
+  });
 
-      loadProjectEmployees("all");
-      setLoading(false);
-    };
-    fetchAllData();
+  const { data: analyticsResult, isLoading: analyticsQueryLoading } = useQuery({
+    queryKey: ["analyticsOverview"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/overview`,
+      );
+      const result = await response.json();
+      if (result.success) {
+        return {
+          projects: [
+            { id: "all", name: "All projects" },
+            ...result.data.projects.map((p) => ({
+              id: p.projectId,
+              name: p.projectName,
+              status: p.status,
+            })),
+          ],
+          overallStats: result.data.overallStats,
+        };
+      }
+      return null;
+    },
+  });
+
+  const { data: projectDetailData } = useQuery({
+    queryKey: ["analyticsProject", selectedProject],
+    queryFn: async () => {
+      if (selectedProject === "all") return null;
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/project/${selectedProject}`,
+      );
+      const result = await response.json();
+      return result.success ? result.data : null;
+    },
+    enabled: selectedProject !== "all",
+  });
+
+  const { data: timelineResult = [], isLoading: timelineQueryLoading } = useQuery({
+    queryKey: ["analyticsTimeline"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/timeline`,
+      );
+      const result = await response.json();
+      return result.success ? result.data.timeline || [] : [];
+    },
+  });
+
+  const { data: teamMembersResult, isLoading: teamQueryLoading } = useQuery({
+    queryKey: ["analyticsTeamMembers"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/analytics/team-members`,
+      );
+      const result = await response.json();
+      if (result.success) {
+        const uniqueEmployees = new Map();
+        result.data.projects?.forEach((project) => {
+          project.teamMembers?.forEach((member) => {
+            if (!uniqueEmployees.has(member.id)) {
+              uniqueEmployees.set(member.id, member);
+            }
+          });
+        });
+        return {
+          departments: result.data.departments || [],
+          teamMembers: Array.from(uniqueEmployees.values()),
+        };
+      }
+      return null;
+    },
+  });
+
+  const queriesLoading = employeesQueryLoading || analyticsQueryLoading || timelineQueryLoading || teamQueryLoading;
+
+  useEffect(() => {
+    setLoading(queriesLoading);
+  }, [queriesLoading]);
+
+  useEffect(() => {
+    if (employeesData.length > 0) setAllEmployee(employeesData);
+  }, [employeesData]);
+
+  useEffect(() => {
+    if (analyticsResult) {
+      setProjects(analyticsResult.projects);
+      setOverallStats(analyticsResult.overallStats);
+    }
+  }, [analyticsResult]);
+
+  useEffect(() => {
+    if (selectedProject === "all") {
+      setSelectedProjectData(null);
+    } else if (projectDetailData) {
+      setSelectedProjectData(projectDetailData);
+    }
+  }, [projectDetailData, selectedProject]);
+
+  useEffect(() => {
+    if (timelineResult.length > 0) setTimelineData(timelineResult);
+  }, [timelineResult]);
+
+  useEffect(() => {
+    if (teamMembersResult) {
+      setDepartments(teamMembersResult.departments);
+      setTeamMembers(teamMembersResult.teamMembers);
+    }
+  }, [teamMembersResult]);
+
+  useEffect(() => {
+    loadProjectEmployees("all");
   }, []);
 
   useEffect(() => {
@@ -133,108 +306,7 @@ const Analytics = () => {
     };
   }, [showFilterDropdown]);
 
-  const fetchAllEmployees = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/employeeRegister`,
-      );
-      const result = await response.json();
-      if (result.status) {
-        setAllEmployee(result.employees);
-      }
-    } catch (error) {
-      console.error("Error Employees:", error);
-    }
-  };
 
-  const fetchAnalyticsData = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/overview`,
-      );
-      const result = await response.json();
-      if (result.success) {
-        const projectsList = [
-          { id: "all", name: "All projects" },
-          ...result.data.projects.map((p) => ({
-            id: p.projectId,
-            name: p.projectName,
-            status: p.status,
-          })),
-        ];
-        setProjects(projectsList);
-        setOverallStats(result.data.overallStats);
-      }
-    } catch (error) {
-      console.error("Error fetching analytics:", error);
-    }
-  };
-
-  const fetchProjectData = async (projectId) => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/project/${projectId}`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        setSelectedProjectData(result.data);
-      }
-    } catch (error) {
-      console.error("Error fetching project data:", error);
-    }
-  };
-
-  const fetchTimelineData = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/timeline`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        setTimelineData(result.data.timeline || []);
-      }
-    } catch (error) {
-      console.error("Error fetching timeline:", error);
-    }
-  };
-
-  const fetchTeamMembers = async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/analytics/team-members`,
-      );
-      const result = await response.json();
-
-      if (result.success) {
-        console.log("API Response:", result);
-        console.log("Departments from API:", result.data.departments);
-        if (result.data.departments) {
-          setDepartments(result.data.departments || []);
-          console.log("Departments state updated:", result.data.departments);
-        } else {
-          console.log("No departments in API response");
-        }
-
-        if (result.data.projects) {
-          const uniqueEmployees = new Map();
-          result.data.projects.forEach((project) => {
-            project.teamMembers?.forEach((member) => {
-              if (!uniqueEmployees.has(member.id)) {
-                uniqueEmployees.set(member.id, member);
-              }
-            });
-          });
-          setTeamMembers(Array.from(uniqueEmployees.values()));
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching team members:", error);
-      setDepartments([]);
-      setTeamMembers([]);
-    }
-  };
 
   const fetchReportTasks = async (employeeId, monthFilter) => {
     try {
@@ -1270,6 +1342,16 @@ const Analytics = () => {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState("");
     const [activeTab, setActiveTab] = useState("In Progress");
+    const [canScrollRight, setCanScrollRight] = useState(false);
+    const tabsRef = useRef(null);
+
+    const checkScroll = () => {
+      if (tabsRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
+        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2);
+      }
+    };
+
     const selectRef = useRef(null);
 
     useEffect(() => {
@@ -1283,23 +1365,38 @@ const Analytics = () => {
         document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    useEffect(() => {
+      checkScroll();
+    }, [open]);
+
+    const getProjectStatusCategory = (p) => {
+      const statusLower = p.status?.toLowerCase() || "";
+      if (statusLower === "completed") return "Completed";
+      if (statusLower === "hold") return "Hold";
+      if (statusLower === "canceled" || statusLower === "cancelled") return "Canceled";
+      return "In Progress";
+    };
+
+    const validProjects = projects.filter((p) => p.id != "all");
+    const totalProjectsCount = validProjects.length;
+
+    const counts = {
+      "In Progress": validProjects.filter((p) => getProjectStatusCategory(p) === "In Progress").length,
+      Completed: validProjects.filter((p) => getProjectStatusCategory(p) === "Completed").length,
+      Hold: validProjects.filter((p) => getProjectStatusCategory(p) === "Hold").length,
+      Canceled: validProjects.filter((p) => getProjectStatusCategory(p) === "Canceled").length,
+    };
+
     const filteredProjects = projects.filter((p) => {
       const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-
-      const projectStatus =
-        p.status?.toLowerCase() === "hold"
-          ? "Hold"
-          : p.status?.toLowerCase() === "canceled"
-            ? "Canceled"
-            : "In Progress";
-
+      const projectStatus = getProjectStatusCategory(p);
       const matchesStatus = projectStatus === activeTab;
-
       return matchesSearch && matchesStatus;
     });
 
     const tabs = [
       { id: "In Progress", label: "In Progress" },
+      { id: "Completed", label: "Completed" },
       { id: "Hold", label: "Hold" },
       { id: "Canceled", label: "Canceled" },
     ];
@@ -1322,7 +1419,7 @@ const Analytics = () => {
         </div>
 
         {open && (
-          <div className="absolute left-0 mt-[0.4vw] w-[15vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 overflow-hidden animate-fadeIn">
+          <div className="absolute left-0 mt-[0.4vw] w-[17.5vw] p-[0.3vw] bg-white shadow-lg rounded-lg border border-gray-200 z-50 animate-fadeIn">
             <div className="flex items-center px-[0.4vw] py-[0.2vw] rounded-full border-b border-gray-200 bg-gray-100">
               <Search className="w-[1vw] h-[1vw] text-gray-500 mr-[0.7vw]" />
               <input
@@ -1340,25 +1437,57 @@ const Analytics = () => {
                 setOpen(false);
                 setSearch("");
               }}
-              className="cursor-pointer hover:bg-blue-100 text-gray-800 text-[0.9vw] font-medium border-b border-gray-300 px-[0.4vw] rounded-[0.2vw] py-[0.5vw] mt-[0.2vw]"
+              className="cursor-pointer hover:bg-blue-100 text-gray-800 text-[0.9vw] font-medium border-b border-gray-300 px-[0.4vw] rounded-[0.2vw] py-[0.5vw] mt-[0.2vw] flex items-center justify-between"
             >
-              All projects
+              <span>All projects</span>
+              <span className="text-[0.7vw] bg-gray-200 text-gray-700 px-[0.4vw] py-[0.1vw] rounded-full font-semibold">
+                {totalProjectsCount}
+              </span>
             </div>
 
-            <div className="flex border-b border-gray-200 mt-[0.3vw]">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 text-center py-[0.2vw] text-[0.85vw] font-medium transition-colors cursor-pointer ${
-                    activeTab === tab.id
-                      ? "text-blue-600 border-b-2 border-blue-600"
-                      : "text-gray-600 hover:text-gray-800"
-                  }`}
+            <div className="relative flex items-center border-b border-gray-200 mt-[0.3vw]">
+              <div
+                ref={tabsRef}
+                onScroll={checkScroll}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                className="flex overflow-x-auto [&::-webkit-scrollbar]:hidden scroll-smooth w-full pr-[1.5vw]"
+              >
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`whitespace-nowrap px-[0.5vw] py-[0.25vw] text-[0.85vw] font-medium transition-colors cursor-pointer shrink-0 flex items-center gap-[0.3vw] ${
+                      activeTab === tab.id
+                        ? "text-blue-600 border-b-2 border-blue-600 font-semibold"
+                        : "text-gray-600 hover:text-gray-800"
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[0.65vw] px-[0.35vw] py-[0.05vw] rounded-full font-bold ${
+                        activeTab === tab.id
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {counts[tab.id] || 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {canScrollRight && (
+                <div
+                  onClick={() => {
+                    if (tabsRef.current) {
+                      tabsRef.current.scrollBy({ left: 50, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute -right-[0.9vw] top-1/2 -translate-y-1/2 bg-white shadow-md rounded-full p-[0.15vw] border border-gray-200 text-gray-600 hover:text-blue-600 cursor-pointer z-10 animate-pulse"
+                  title="Scroll for more tabs"
                 >
-                  {tab.label}
-                </button>
-              ))}
+                  <ChevronRight className="w-[0.9vw] h-[0.9vw]" />
+                </div>
+              )}
             </div>
 
             <div className="max-h-[18vw] overflow-y-auto mt-[0.2vw]">
@@ -2441,11 +2570,7 @@ const Analytics = () => {
     .filter((project) => project !== null && project.tasks.length > 0);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-[2vw] w-[2vw] border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <AnalyticsSkeleton />;
   }
 
   const projectStatusData = getChartData(overallStats);
@@ -2456,7 +2581,7 @@ const Analytics = () => {
   );
 
   return (
-    <div className="relative bg-gray-100 pr-[0.4vw] text-black max-h-[90%] h-[90vh] flex flex-col gap-[0.7vw]">
+    <div className="relative bg-gray-100 pr-[0.4vw] text-black h-[calc(100vh-5.5vw)] flex-1 min-h-0 flex flex-col overflow-y-auto pb-[1vw] gap-[0.7vw]">
       <div className=" flex justify-between items-center bg-white px-[0.8vw] py-[0.5vw] rounded-xl shadow">
         <div className=" flex flex-col gap-[0.3vw]">
           <CustomSelect

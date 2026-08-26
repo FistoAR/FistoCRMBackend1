@@ -64,6 +64,7 @@ const ProjectOverview = () => {
     if (designation === "3D") return "/threeD/projects";
     if (designation === "Project Head") return "/projectHead/projects";
     if (designation === "Admin") return "/admin/project";
+    if (designation === "SBU") return "/sbu/projects";
     return "/projects";
   };
 
@@ -111,7 +112,7 @@ const ProjectOverview = () => {
         </NavLink>
       </div>
 
-      <div className="overflow-y-auto h-[80vh] pr-[0.3vw]">
+      <div className="overflow-y-auto h-[calc(100vh-19vh)] pb-[1vw] pr-[0.3vw]">
         <Outlet />
       </div>
     </div>
