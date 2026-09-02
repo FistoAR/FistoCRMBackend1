@@ -109,7 +109,7 @@ function AppContent() {
   const socketData = useSocketNotifications();
 
   return (
-    <Router>
+        <Router basename="/fisto_crm/">
       <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Login />} />

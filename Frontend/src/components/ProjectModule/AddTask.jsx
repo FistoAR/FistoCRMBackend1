@@ -18,6 +18,7 @@ export default function AddTask({
   const confirm = useConfirm();
 
   const [deletedTaskIds, setDeletedTaskIds] = useState([]);
+  const [newTasksStack, setNewTasksStack] = useState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const initialTasksRef = useRef(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -424,44 +425,6 @@ export default function AddTask({
     return "bg-gray-100 text-gray-600 border border-gray-300";
   };
 
-  const checkEmployeeAvailability = async (
-
-    employeeId,
-    empStartDate,
-    empStartTime,
-    empEndDate,
-    empEndTime,
-    isActivityReport,
-    excludeId,
-  ) => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/tasks/check-availability`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            employeeId,
-            startDate: empStartDate,
-            startTime: empStartTime,
-            endDate: empEndDate,
-            endTime: empEndTime,
-            projectId,
-            projectType,
-            isActivityReport,
-            excludeId,
-          }),
-        },
-      );
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error("Error checking availability:", error);
-      return { available: true, conflicts: [] };
-    }
-  };
-
   const checkEmployeeConflictAcrossTasks = (
     employeeId,
     checkStartDate,
@@ -622,7 +585,7 @@ export default function AddTask({
     });
   };
 
-  const handleTaskEmployeeChange = async (taskIndex, employeeId) => {
+  const handleTaskEmployeeChange = (taskIndex, employeeId) => {
     const task = tasks[taskIndex];
 
     if (!task.taskName || task.taskName.trim() === "") {
@@ -641,55 +604,7 @@ export default function AddTask({
       return;
     }
 
-    const availability = await checkEmployeeAvailability(
-      employeeId,
-      task.startDate,
-      task.startTime || "09:30",
-      task.endDate,
-      task.endTime || "18:30",
-      false,
-      task.id ?? null,
-    );
-
-    if (!availability.available && availability.conflicts?.length > 0) {
-      notify({
-        title: "Info",
-        message: `Employee is already assigned to: ${availability.conflicts.map(
-          (c) =>
-            c.activityName
-              ? `Project: ${c.projectName} | Task: ${c.taskName} | Activity: ${c.activityName}`
-              : `Project: ${c.projectName} | Task: ${c.taskName}`,
-        )}`,
-      });
-      // return;
-    } else if (!availability.available) {
-      notify({
-        title: "Info",
-        message: availability.message,
-      });
-      // return;
-    }
-
-    const localConflict = checkEmployeeConflictAcrossTasks(
-      employeeId,
-      task.startDate,
-      task.startTime || "09:30",
-      task.endDate,
-      task.endTime || "18:30",
-      taskIndex,
-    );
-
-    if (localConflict.hasConflict) {
-      notify({
-        title: "Info",
-        message: `Employee has time conflict with: ${localConflict.conflicts.join(
-          ", ",
-        )}`,
-      });
-      // return;
-    }
-
-    const team = getTeamFromEmployee(employeeId);
+    // const team = getTeamFromEmployee(employeeId);
 
     setTasks((prevTasks) => {
       const newTasks = [...prevTasks];
@@ -895,97 +810,26 @@ export default function AddTask({
 
     setValidatingActivity((prev) => ({
       ...prev,
-      [`${taskIndex}_${activityIndex}`]: true,
+      [`${taskIndex}_${activityIndex}`]: false,
     }));
 
-    try {
-      const availability = await checkEmployeeAvailability(
-        activity.employee,
-        activity.startDate,
-        activity.startTime || "09:30",
-        activity.endDate,
-        activity.endTime || "18:30",
-        true,
-        activity._id ?? null,
-      );
+    setValidationErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors[`activity_${taskIndex}_${activityIndex}_employee`];
+      delete newErrors[`activity_${taskIndex}_${activityIndex}_time`];
+      return newErrors;
+    });
 
-      if (!availability.available && availability.conflicts?.length > 0) {
-        notify({
-          title: "Info",
-          message: `Employee is already assigned to: ${availability.conflicts.map(
-            (c) =>
-              c.activityName
-                ? `Project: ${c.projectName} | Task: ${c.taskName} | Activity: ${c.activityName}`
-                : `Project: ${c.projectName} | Task: ${c.taskName}`,
-          )}`,
-        });
-
-        setValidatingActivity((prev) => ({
-          ...prev,
-          [`${taskIndex}_${activityIndex}`]: false,
-        }));
-        // return;
-      } else if (!availability.available) {
-        notify({
-          title: "Info",
-          message: availability.message,
-        });
-        setValidatingActivity((prev) => ({
-          ...prev,
-          [`${taskIndex}_${activityIndex}`]: false,
-        }));
-        // return;
-      }
-
-      const localConflict = checkEmployeeConflictAcrossTasks(
-        activity.employee,
-        activity.startDate,
-        activity.startTime,
-        activity.endDate,
-        activity.endTime,
-        taskIndex,
-        activityIndex,
-      );
-
-      if (localConflict.hasConflict) {
-        notify({
-          title: "Info",
-          message: `Employee has time conflict with: ${localConflict.conflicts.join(
-            ", ",
-          )}`,
-        });
-        setValidatingActivity((prev) => ({
-          ...prev,
-          [`${taskIndex}_${activityIndex}`]: false,
-        }));
-        // return;
-      }
-
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[`activity_${taskIndex}_${activityIndex}_employee`];
-        delete newErrors[`activity_${taskIndex}_${activityIndex}_time`];
-        return newErrors;
-      });
-
-      setTimeout(() => {
-        setActivityValidationStatus((prev) => ({
-          ...prev,
-          [`${taskIndex}_${activityIndex}`]: true,
-        }));
-        setValidatingActivity((prev) => ({
-          ...prev,
-          [`${taskIndex}_${activityIndex}`]: false,
-        }));
-      }, 500);
-    } catch (error) {
-      console.error(error);
+    setTimeout(() => {
+      setActivityValidationStatus((prev) => ({
+        ...prev,
+        [`${taskIndex}_${activityIndex}`]: true,
+      }));
       setValidatingActivity((prev) => ({
         ...prev,
         [`${taskIndex}_${activityIndex}`]: false,
       }));
-      notify({ title: "Error", message: "Validation failed" });
-    }
+    }, 500);
   };
 
   const toggleActivity = (taskIndex) => {
@@ -1217,6 +1061,8 @@ export default function AddTask({
 
     if (taskToRemove.isExisting && taskToRemove.id) {
       setDeletedTaskIds((prev) => [...prev, taskToRemove.id]);
+    } else if (taskToRemove && taskToRemove.id) {
+      setNewTasksStack((prevStack) => prevStack.filter((id) => id !== taskToRemove.id));
     }
 
     setTasks((prevTasks) => prevTasks.filter((_, idx) => idx !== taskIndex));
@@ -1356,6 +1202,7 @@ export default function AddTask({
     };
 
     setTasks((prevTasks) => [...prevTasks, newTask]);
+    setNewTasksStack((prevStack) => [...prevStack, newTask.id]);
     setExpandedTask(tasks.length);
   };
 
@@ -1591,75 +1438,47 @@ export default function AddTask({
     try {
       setIsSubmitting(true);
 
-      if (deletedTaskIds.length > 0) {
-        for (const taskId of deletedTaskIds) {
-          try {
-            await fetch(
-              `${import.meta.env.VITE_API_BASE_URL}/tasks/${taskId}`,
-              {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-              },
-            );
-          } catch (error) {
-            console.error("Error deleting task:", error);
-          }
-        }
-      }
-
       const tasksToCreate = tasks
-        .filter((task) => !task.isExisting)
+        .filter((task) => !task.isExisting || newTasksStack.includes(task.id))
         .map((task) => ({
           ...task,
           status: taskStatuses[task.id] || "In Progress",
           supportingPersons: taskSupportingPersons[task.id] || [],
-          activities: task.activities.map(act => ({
+          activities: task.activities.map((act) => ({
             ...act,
             status: activityStatuses[`${task.id}_${act._id}`] || "In Progress",
-            supportingPersons: taskSupportingPersons[`${task.id}_${act._id}`] || []
-          }))
+            supportingPersons: taskSupportingPersons[`${task.id}_${act._id}`] || [],
+          })),
         }));
 
-      const updatedTasks = tasks.filter((task) => task.isExisting);
-
-      if (tasksToCreate.length > 0) {
-        await fetch(`${import.meta.env.VITE_API_BASE_URL}/tasks/create`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, tasks: tasksToCreate }),
-        });
-      }
-
-      for (const task of updatedTasks) {
-        const employeeToSend = task.activities.length > 0 ? "" : task.employees;
-
-        const taskStatus = taskStatuses[task.id] || "In Progress";
-        const taskSupporting = taskSupportingPersons[task.id] || [];
-        const taskActivities = task.activities.map(act => ({
-          ...act,
-          status: activityStatuses[`${task.id}_${act._id}`] || "In Progress",
-          supportingPersons: taskSupportingPersons[`${task.id}_${act._id}`] || []
+      const updatedTasks = tasks
+        .filter((task) => task.isExisting && !newTasksStack.includes(task.id))
+        .map((task) => ({
+          ...task,
+          status: taskStatuses[task.id] || "In Progress",
+          supportingPersons: taskSupportingPersons[task.id] || [],
+          changedBy: localStorage.getItem("employeeId"),
+          activities: task.activities.map((act) => ({
+            ...act,
+            status: activityStatuses[`${task.id}_${act._id}`] || "In Progress",
+            supportingPersons: taskSupportingPersons[`${task.id}_${act._id}`] || [],
+          })),
         }));
 
-        await fetch(`${import.meta.env.VITE_API_BASE_URL}/tasks/${task.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            taskName: task.taskName,
-            description: task.description,
-            startDate: task.startDate,
-            startTime: task.startTime,
-            endDate: task.endDate,
-            endTime: task.endTime,
-            employee: employeeToSend,
-            department: task.department,
-            activities: taskActivities,
-            points: task.points,
-            status: taskStatus,
-            supportingPersons: taskSupporting,
-            changedBy: localStorage.getItem("employeeId"),
-          }),
-        });
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/tasks/batch-save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          createdTasks: tasksToCreate,
+          updatedTasks,
+          deletedTaskIds,
+        }),
+      });
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to save tasks");
       }
 
       notify({
@@ -1670,6 +1489,7 @@ export default function AddTask({
       setHasUnsavedChanges(false);
       initialTasksRef.current = null;
       setDeletedTaskIds([]);
+      setNewTasksStack([]);
       onBack();
     } catch (error) {
       console.error("Error submitting tasks:", error);

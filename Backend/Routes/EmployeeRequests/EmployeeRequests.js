@@ -82,7 +82,13 @@ async function notifySpecificUsers(employeeIds, notificationData) {
 router.post("/leave-requests", async (req, res) => {
   try {
     const userData = JSON.parse(req.headers["x-user-data"] || "{}");
-    const employee_id = userData.userName || "FST001";
+    const employee_id = userData.userName || userData.employee_id || userData.employeeId;
+    if (!employee_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Employee ID not found. Kindly relogin or refresh the page.",
+      });
+    }
     const employee_name = userData.employeeName || employee_id;
     const {
       leave_type,
@@ -193,7 +199,13 @@ router.post("/leave-requests", async (req, res) => {
 router.post("/permission-requests", async (req, res) => {
   try {
     const userData = JSON.parse(req.headers["x-user-data"] || "{}");
-    const employee_id = userData.userName || "FST001";
+    const employee_id = userData.userName || userData.employee_id || userData.employeeId;
+    if (!employee_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Employee ID not found. Kindly relogin or refresh the page.",
+      });
+    }
     const employee_name = userData.employeeName || employee_id;
     const { permission_date, from_time, to_time, duration_minutes, reason } =
       req.body;
@@ -319,7 +331,13 @@ router.get("/employees", async (req, res) => {
 router.post("/meeting-requests", async (req, res) => {
   try {
     const userData = JSON.parse(req.headers["x-user-data"] || "{}");
-    const employee_id = userData.userName || "FST001";
+    const employee_id = userData.userName || userData.employee_id || userData.employeeId;
+    if (!employee_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Employee ID not found. Kindly relogin or refresh the page.",
+      });
+    }
     const employee_name = userData.employeeName || employee_id;
 
     const {

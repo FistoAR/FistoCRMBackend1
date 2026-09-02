@@ -9,24 +9,14 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
+import { useNotification } from "../NotificationContext";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-const Notification = ({ title, message, onClose }) => (
-  <div className="fixed top-4 right-4 bg-white border border-gray-200 rounded-lg shadow-lg p-4 z-50 min-w-[300px]">
-    <div className="flex justify-between items-start">
-      <div>
-        <h4 className="font-semibold text-gray-900">{title}</h4>
-        <p className="text-sm text-gray-600 mt-1">{message}</p>
-      </div>
-      <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-        <X size={16} />
-      </button>
-    </div>
-  </div>
-);
-
 const EmployeeRequest = () => {
+  const { notify } = useNotification();
   const userData = JSON.parse(sessionStorage.getItem("user") || "{}");
+  const employeeId = userData.userName || userData.employee_id || userData.employeeId || "";
   const designation = (userData.designation || "").toLowerCase();
   const isPHorSBU = designation.includes("project head") || designation.includes("sbu");
 
@@ -55,7 +45,6 @@ const EmployeeRequest = () => {
     leaveDurationType: "full",
   });
 
-  const [toast, setToast] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -89,7 +78,12 @@ const EmployeeRequest = () => {
   }, [subTab]);
 
   const fetchHistory = async () => {
-    const employeeId = userData.userName || "FST001";
+    if (!employeeId) {
+      showToast("Error", "Employee ID not found. Kindly relogin or refresh the page.");
+      setLeaveHistory([]);
+      setPermissionHistory([]);
+      return;
+    }
     setLoadingHistory(true);
     try {
       if (subTab === "leaveHistory") {
@@ -189,14 +183,17 @@ const EmployeeRequest = () => {
   };
 
   const showToast = (title, message) => {
-    setToast({ title, message });
-    setTimeout(() => setToast(null), 5000);
+    notify({ title, message });
   };
 
   const permissionExceedsLimit =
     !!formData.permissionDuration && parseFloat(formData.permissionDuration) > 180;
 
   const handleSubmit = async () => {
+    if (!employeeId) {
+      showToast("Error", "Employee ID not found. Kindly relogin or refresh the page.");
+      return;
+    }
     try {
       setIsSubmitting(true);
 
@@ -726,8 +723,6 @@ const EmployeeRequest = () => {
 
   return (
     <div className="text-black min-h-[92%] max-h-[100%] w-[100%] max-w-[100%] overflow-hidden">
-      {toast && <Notification title={toast.title} message={toast.message} onClose={() => setToast(null)} />}
-
       <div className="w-[100%] h-[91vh] flex flex-col gap-[1vh]">
         {/* TOP TABS */}
         <div className="bg-white flex justify-between overflow-hidden rounded-xl shadow-sm h-[6%] flex-shrink-0">
@@ -780,7 +775,7 @@ const EmployeeRequest = () => {
           )}
 
           {/* Header */}
-          <div className="flex items-center gap-[0.5vw] p-[1vw] border-b border-gray-200">
+          <div className="flex items-center justify-between p-[1vw] border-b border-gray-200">
             <h2 className="text-[1vw] font-semibold text-gray-800">
               {mainTab === "applyLeave" && subTab === "leave" && "New Leave Request"}
               {mainTab === "applyLeave" && subTab === "leaveHistory" && "Leave History"}
@@ -790,6 +785,17 @@ const EmployeeRequest = () => {
             </h2>
           </div>
 
+          {!employeeId && (
+            <div className="mx-[1.2vw] mt-[1vw] p-[0.8vw] bg-red-50 border border-red-200 rounded-lg flex items-center justify-between text-red-700">
+              <div className="flex items-center gap-[0.5vw]">
+                <AlertTriangle className="w-[1.2vw] h-[1.2vw] text-red-500 flex-shrink-0" />
+                <span className="text-[0.85vw] font-medium">
+                  Employee ID not found. Kindly relogin or refresh the page.
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="flex-1 overflow-auto p-[1.2vw]">{renderContent()}</div>
 
           {/* Submit buttons */}
@@ -798,9 +804,9 @@ const EmployeeRequest = () => {
             mainTab === "scheduleMeeting") && (
             <div className="p-[1vw] border-t border-gray-200 bg-gray-50">
               <div className="flex gap-[0.8vw]">
-                <button onClick={handleSubmit} disabled={isSubmitting || isPermissionBlocked}
+                <button onClick={handleSubmit} disabled={isSubmitting || isPermissionBlocked || !employeeId}
                   className={`px-[1.2vw] py-[0.6vw] text-[0.85vw] font-medium rounded-full transition-all flex items-center gap-[0.4vw] ${
-                    isSubmitting || isPermissionBlocked
+                    isSubmitting || isPermissionBlocked || !employeeId
                       ? "bg-gray-400 text-white cursor-not-allowed"
                       : "bg-black text-white hover:bg-gray-800 cursor-pointer"
                   }`}>
