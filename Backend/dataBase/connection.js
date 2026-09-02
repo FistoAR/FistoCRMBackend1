@@ -50,7 +50,7 @@ function createPool() {
 
 createPool();
 
-function queryWithRetry(sql, params = [], retries = 1) {
+function queryWithRetry(sql, params = [], retries = 3) {
   return new Promise((resolve, reject) => {
     const attemptQuery = (attemptsLeft) => {
       pool.query(sql, params, (err, results) => {
@@ -78,7 +78,7 @@ function queryWithRetry(sql, params = [], retries = 1) {
   });
 }
 
-function getConnectionWithRetry(retries = 1) {
+function getConnectionWithRetry(retries = 3) {
   return new Promise((resolve, reject) => {
     const attemptConnection = (attemptsLeft) => {
       pool.getConnection((err, connection) => {
