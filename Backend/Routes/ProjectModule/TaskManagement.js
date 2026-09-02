@@ -177,192 +177,133 @@ const updateProjectPercentage = async (projectId) => {
   }
 };
 
-router.post("/check-availability", async (req, res) => {
+// ========== BATCH SAVE TASKS (High Performance <300ms) ==========
+router.post("/batch-save", async (req, res) => {
+  const startTime = Date.now();
   try {
-    const {
-      employeeId,
-      startDate,
-      startTime,
-      endDate,
-      endTime,
-      isActivityReport,
-      excludeId,
-      projectId,
-      projectType,
-    } = req.body;
+    const { projectId, createdTasks = [], updatedTasks = [], deletedTaskIds = [] } = req.body;
 
-    if (!employeeId || !startDate || !endDate) {
-      return res.status(400).json({
-        available: true,
-        conflicts: [],
-        message: "Missing required parameters",
-      });
+    if (!projectId) {
+      return res.status(400).json({ success: false, message: "Project ID is required" });
     }
 
-    const requestStart = startTime
-      ? `${startDate}T${startTime}`
-      : `${startDate}T09:30`;
-    const requestEnd = endTime ? `${endDate}T${endTime}` : `${endDate}T18:30`;
+    const io = req.app.get("io");
 
-    if (new Date(requestEnd) <= new Date(requestStart)) {
-      return res.json({
-        available: false,
-        conflicts: [],
-        message: "End time must be after start time",
-      });
+    // 1. Delete tasks in bulk
+    if (deletedTaskIds && deletedTaskIds.length > 0) {
+      await Tasks.deleteMany({ _id: { $in: deletedTaskIds } });
     }
 
-    const query = {
-      $or: [{ employee: employeeId }, { "activities.employee": employeeId }],
-    };
+    // 2. Create new tasks in bulk
+    let insertedTasks = [];
+    if (createdTasks && createdTasks.length > 0) {
+      const tasksToInsert = createdTasks.map((taskData) => {
+        const activities = (taskData.activities || []).map((activity) => {
+          const { _id, ...activityFields } = activity;
+          const updatedActivity = { ...activityFields };
+          if (_id && !String(_id).startsWith("temp_")) {
+            updatedActivity._id = _id;
+          }
+          return {
+            ...updatedActivity,
+            percentage: activity.percentage || 0,
+            status: activity.status || "Not Started",
+          };
+        });
 
-    let assignedTasks = await Tasks.find(query)
-      .select(
-        "employee activities projectId taskName startDate endDate startTime endTime percentage"
-      )
-      .lean();
+        const taskPercentage = activities.length > 0 ? calculateTaskPercentage(activities) : 0;
 
-    if (projectType && projectId) {
-      const currentProject = await Project_Details.findById(projectId)
-        .select("projectType")
-        .lean();
+        return {
+          projectId,
+          employeeID: taskData.employeeID || "",
+          taskName: taskData.taskName,
+          description: taskData.description || "",
+          startDate: taskData.startDate,
+          startTime: taskData.startTime || "09:30",
+          endDate: taskData.endDate,
+          endTime: taskData.endTime || "18:30",
+          employee: taskData.employees || taskData.employee || "",
+          department: taskData.department || "",
+          teams: taskData.teams || [],
+          activities: activities,
+          percentage: taskPercentage,
+          points: taskData.points || [],
+          status: taskData.status || "Not Started",
+          supportingPersons: taskData.supportingPersons || [],
+        };
+      });
 
-      if (currentProject && currentProject.projectType) {
-        const projectsWithSameType = await Project_Details.find({
-          projectType: currentProject.projectType,
+      insertedTasks = await Tasks.insertMany(tasksToInsert);
+    }
+
+    // 3. Update existing tasks concurrently
+    if (updatedTasks && updatedTasks.length > 0) {
+      await Promise.all(
+        updatedTasks.map((task) => {
+          const employeeToSend = (task.activities && task.activities.length > 0) ? "" : (task.employees || task.employee || "");
+          const updateData = {
+            taskName: task.taskName,
+            description: task.description || "",
+            startDate: task.startDate,
+            startTime: task.startTime || "09:30",
+            endDate: task.endDate,
+            endTime: task.endTime || "18:30",
+            employee: employeeToSend,
+            department: task.department || "",
+            activities: (task.activities || []).map((act) => {
+              const { _id, ...activityFields } = act;
+              const updatedAct = { ...activityFields };
+              if (_id && !String(_id).startsWith("temp_")) {
+                updatedAct._id = _id;
+              }
+              return updatedAct;
+            }),
+            points: task.points || [],
+            status: task.status || "In Progress",
+            supportingPersons: task.supportingPersons || [],
+            changedBy: task.changedBy || "Unknown",
+          };
+
+          if (updateData.activities.length > 0) {
+            updateData.percentage = calculateTaskPercentage(updateData.activities);
+          }
+
+          return Tasks.findByIdAndUpdate(task.id || task._id, updateData, { new: true });
         })
-          .select("_id")
-          .lean();
+      );
+    }
 
-        const projectIds = projectsWithSameType.map((p) => p._id);
-
-        assignedTasks = assignedTasks.filter((task) => {
-          const taskProjectId = task.projectId.toString();
-          return projectIds.some((id) => id.toString() === taskProjectId);
+    // Non-blocking background updates
+    setImmediate(() => {
+      updateProjectPercentage(projectId).catch((err) => console.error("Error updating project %:", err));
+      if (io) {
+        io.to(`project_${projectId}`).emit("tasks_updated", {
+          projectId,
+          timestamp: new Date().toISOString(),
         });
       }
-    }
+    });
 
-    const conflicts = [];
+    const duration = Date.now() - startTime;
+    console.log(`⚡ Batch save completed in ${duration}ms`);
 
-    for (const task of assignedTasks) {
-      let projectName = null;
-      if (task.projectId) {
-        const project = await Project_Details.findById(task.projectId)
-          .select("projectName companyName description")
-          .lean();
-
-        if (project) {
-          projectName = project.projectName || "Unknown Project";
-        }
-      }
-
-      if (
-        task.employee &&
-        task.employee === employeeId &&
-        task.startDate &&
-        task.endDate
-      ) {
-        if (!isActivityReport && excludeId && task._id.toString() === excludeId)
-          continue;
-
-        const taskPercentage = task.percentage || 0;
-        if (taskPercentage >= 100) continue;
-
-        const taskStart = task.startTime
-          ? `${task.startDate}T${task.startTime}`
-          : `${task.startDate}T09:30`;
-        const taskEnd = task.endTime
-          ? `${task.endDate}T${task.endTime}`
-          : `${task.endDate}T18:30`;
-
-        if (isTimeOverlapping(requestStart, requestEnd, taskStart, taskEnd)) {
-          conflicts.push({
-            taskId: task._id,
-            taskName: task.taskName || "Unnamed Task",
-            projectName: projectName || "Unknown Project",
-            startDate: task.startDate,
-            startTime: task.startTime || null,
-            endDate: task.endDate,
-            endTime: task.endTime || null,
-            percentage: taskPercentage,
-            type: "task",
-          });
-        }
-      }
-
-      if (task.activities && task.activities.length > 0) {
-        for (const activity of task.activities) {
-          if (
-            activity.employee === employeeId &&
-            activity.startDate &&
-            activity.endDate
-          ) {
-            if (
-              isActivityReport &&
-              excludeId &&
-              activity._id.toString() === excludeId
-            )
-              continue;
-
-            const activityPercentage = activity.percentage || 0;
-            if (activityPercentage >= 100) continue;
-
-            const activityStart = activity.startTime
-              ? `${activity.startDate}T${activity.startTime}`
-              : `${activity.startDate}T09:30`;
-            const activityEnd = activity.endTime
-              ? `${activity.endDate}T${activity.endTime}`
-              : `${activity.endDate}T18:30`;
-
-            if (
-              isTimeOverlapping(
-                requestStart,
-                requestEnd,
-                activityStart,
-                activityEnd
-              )
-            ) {
-              conflicts.push({
-                taskId: task._id,
-                taskName: task.taskName || "Unnamed Task",
-                activityName: activity.activityName,
-                projectName: projectName || "Unknown Project",
-                startDate: activity.startDate,
-                startTime: activity.startTime || null,
-                endDate: activity.endDate,
-                endTime: activity.endTime || null,
-                percentage: activityPercentage,
-                type: "activity",
-              });
-            }
-          }
-        }
-      }
-    }
-
-    res.json({
-      available: conflicts.length === 0,
-      conflicts,
-      message:
-        conflicts.length > 0
-          ? `Employee has ${conflicts.length} conflicting assignment(s)`
-          : "Employee is available",
+    return res.status(200).json({
+      success: true,
+      message: "Tasks saved successfully",
+      durationMs: duration,
     });
   } catch (error) {
-    console.error("Error checking availability:", error);
-    res.status(500).json({
-      error: "Failed to check availability",
-      available: true,
-      conflicts: [],
+    console.error("Error in batch-save tasks:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save tasks",
+      error: error.message,
     });
   }
 });
 
-
 router.post("/create", async (req, res) => {
   try {
-
     const { projectId, tasks } = req.body;
 
     if (!projectId || !tasks || !Array.isArray(tasks)) {
@@ -384,123 +325,6 @@ router.post("/create", async (req, res) => {
       if (!task.startDate || !task.endDate) {
         validationErrors.push(
           `Task ${i + 1}: Start and end dates are required`
-        );
-      }
-
-      if (task.startDate && task.endDate) {
-        let taskStart, taskEnd;
-
-        if (task.startTime && task.endTime) {
-          taskStart = new Date(`${task.startDate}T${task.startTime}`);
-          taskEnd = new Date(`${task.endDate}T${task.endTime}`);
-        } else {
-          const defaultStartTime = "09:30";
-          const defaultEndTime = "18:30";
-
-          taskStart = new Date(
-            `${task.startDate}T${task.startTime || defaultStartTime}`
-          ).toISOString();
-          taskEnd = new Date(
-            `${task.endDate}T${task.endTime || defaultEndTime}`
-          ).toISOString();
-        }
-
-        if (taskEnd <= taskStart) {
-          validationErrors.push(
-            `Task ${i + 1}: End time must be after start time`
-          );
-        }
-
-        if (task.activities && task.activities.length > 0) {
-          const validActivities = task.activities.filter(
-            (act) =>
-              act.activityName && act.activityName.trim() !== "" && act.employee
-          );
-
-          if (validActivities.length === 0) {
-            validationErrors.push(
-              `Task ${i + 1}: Activities must have name and employee assigned`
-            );
-          }
-
-          for (let j = 0; j < task.activities.length; j++) {
-            const activity = task.activities[j];
-
-            if (!activity.activityName || activity.activityName.trim() === "") {
-              validationErrors.push(
-                `Task ${i + 1}, Activity ${j + 1}: Activity name is required`
-              );
-            }
-
-            if (!activity.employee) {
-              validationErrors.push(
-                `Task ${i + 1}, Activity ${j + 1}: Employee must be assigned`
-              );
-            }
-
-            if (
-              activity.startDate &&
-              activity.startTime &&
-              activity.endDate &&
-              activity.endTime
-            ) {
-              const actStart = new Date(
-                `${activity.startDate}T${activity.startTime}`
-              );
-              const actEnd = new Date(
-                `${activity.endDate}T${activity.endTime}`
-              );
-
-              if (actEnd <= actStart) {
-                validationErrors.push(
-                  `Task ${i + 1}, Activity ${j + 1
-                  }: End time must be after start time`
-                );
-              }
-
-              if (task.startTime && task.endTime) {
-                if (actStart < taskStart || actEnd > taskEnd) {
-                  validationErrors.push(
-                    `Task ${i + 1}, Activity ${j + 1
-                    }: Activity time must be within task time range`
-                  );
-                }
-              }
-            }
-          }
-
-          // const internalConflicts = checkInternalActivityConflicts(
-          //   task.activities
-          // );
-          // if (internalConflicts.length > 0) {
-          //   internalConflicts.forEach((conflict) => {
-          //     validationErrors.push(
-          //       `Task ${i + 1}: ${conflict.activity1Name} and ${
-          //         conflict.activity2Name
-          //       } have overlapping times for the same employee`
-          //     );
-          //   });
-          // }
-        }
-      }
-
-      const hasTaskEmployees = task.employees && task.employees.length > 0;
-      const hasActivityEmployees =
-        task.activities &&
-        task.activities.length > 0 &&
-        task.activities.some((act) => act.employee);
-
-      if (hasTaskEmployees && hasActivityEmployees) {
-        validationErrors.push(
-          `Task ${i + 1
-          }: Cannot have both task-level and activity-level employee assignments`
-        );
-      }
-
-      if (!hasTaskEmployees && !hasActivityEmployees) {
-        validationErrors.push(
-          `Task ${i + 1
-          }: Must assign employees either at task level or through activities`
         );
       }
     }

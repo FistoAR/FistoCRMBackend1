@@ -620,43 +620,7 @@ export default function AdminReportsTable({
         }
       }
 
-      const conflictCheckPayload = {
-        employeeId: selectedTask.employee,
-        startDate: request.startDate,
-        startTime: request.startTime || "09:30",
-        endDate: request.endDate,
-        endTime: request.endTime || "18:30",
-        projectId: selectedTask.projectId,
-        excludeId: selectedTask._id,
-        isActivityReport: isActivityReport,
-      };
 
-      const conflictResponse = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/tasks/check-availability`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(conflictCheckPayload),
-        },
-      );
-
-      const conflictData = await conflictResponse.json();
-
-      if (!conflictData.available && conflictData.conflicts.length > 0) {
-        notify({
-          title: "Warning",
-          message: `Requested time zone conflicts with: ${conflictData.conflicts
-            .map((c) =>
-              c.activityName
-                ? `Project : ${c.projectName} | Task: ${c.taskName} | Group Task Name : ${c.activityName}`
-                : `Project : ${c.projectName} | Task: ${c.taskName} `,
-            )
-            .join(", ")}. Please update manually in Add Task page.`,
-        });
-
-        setUpdatingDateRequest(null);
-        return;
-      }
 
       const updatePayload = {
         taskName: selectedTask.taskName,
