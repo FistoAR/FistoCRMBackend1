@@ -56,8 +56,7 @@ const EmployeeCalendar = () => {
       if (data.employees && Array.isArray(data.employees)) {
         return data.employees.filter(
           (emp) =>
-            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) &&
-            emp.employment_type === "On Role",
+            ["Software Developer", "3D", "UI/UX"].includes(emp.designation) 
         );
       }
       return [];
