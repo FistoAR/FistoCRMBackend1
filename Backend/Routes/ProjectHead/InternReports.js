@@ -175,6 +175,7 @@ async function processAttendanceRecord(attendance) {
   return {
     employee_id: attendance.employee_id,
     employee_name: attendance.employee_name,
+    designation: attendance.designation || "",
     report_date: attendance.report_date,
     total_hours: attendance.total_hours,
     morning_in: attendance.morning_in,
@@ -281,7 +282,8 @@ router.get("/all-reports", async (req, res) => {
     // 1. Fetch Attendance Records
     let attendanceQuery = `
       SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
-             att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out
+             att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out,
+             ed.designation
       FROM attendance att 
       JOIN employees_details ed ON att.employee_id = ed.employee_id
       WHERE 1=1
@@ -297,7 +299,8 @@ router.get("/all-reports", async (req, res) => {
       filterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
                          AND ed.designation NOT LIKE '%SBU%' 
                          AND ed.designation NOT LIKE '%HR%' 
-                         AND ed.designation NOT LIKE '%Marketing%')`;
+                         AND ed.designation NOT LIKE '%Marketing%'
+                         AND ed.designation NOT LIKE '%Maid%')`;
 
       if (isTeamHead === "true" && designation) {
         filterClause += ` AND ed.designation = ?`;
@@ -345,7 +348,8 @@ router.get("/all-reports", async (req, res) => {
       leaveFilterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
                              AND ed.designation NOT LIKE '%SBU%' 
                              AND ed.designation NOT LIKE '%HR%' 
-                             AND ed.designation NOT LIKE '%Marketing%')`;
+                             AND ed.designation NOT LIKE '%Marketing%'
+                             AND ed.designation NOT LIKE '%Maid%')`;
 
       if (isTeamHead === "true" && designation) {
         leaveFilterClause += ` AND ed.designation = ?`;
@@ -704,8 +708,11 @@ router.get("/reports/:employee_id", async (req, res) => {
     // 1. Fetch Attendance
     let attendanceQuery = `
       SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
-             att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out
-      FROM attendance att WHERE att.employee_id = ?
+             att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out,
+             ed.designation
+      FROM attendance att
+      JOIN employees_details ed ON att.employee_id = ed.employee_id
+      WHERE att.employee_id = ?
     `;
     const params = [employee_id];
 

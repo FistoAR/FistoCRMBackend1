@@ -12,6 +12,15 @@ const {
 
 const router = express.Router();
 
+// Ensure MySQL index on employees_details for fast lookups
+(async () => {
+  try {
+    await queryWithRetry("CREATE INDEX idx_emp_details_empid ON employees_details (employee_id)");
+  } catch (e) {
+    // Index already exists, ignore
+  }
+})();
+
 const calculateHoldDuration = (statusHistory) => {
   if (!statusHistory || !Array.isArray(statusHistory)) return 0;
   let totalHoldMs = 0;
@@ -1096,8 +1105,335 @@ router.get("/working-projects", async (req, res) => {
   }
 });
 
+// Helper to enrich project tasks with batched MySQL employee lookups and MongoDB reviews/reports
+const getProjectEnrichedTasks = async (projectId) => {
+  const tasks = await Tasks.find({ projectId: projectId })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  if (!tasks || tasks.length === 0) {
+    return { tasks: [], percentage: 0 };
+  }
+
+  // 1. Batch fetch all employee details for tasks in 1 SQL query
+  const employeeIds = [...new Set(tasks.map((t) => t.employeeID).filter(Boolean))];
+  const assignedByMap = {};
+  if (employeeIds.length > 0) {
+    const placeholders = employeeIds.map(() => "?").join(",");
+    const empQuery = `
+      SELECT 
+        employee_id as id,
+        employee_name as name,
+        profile_url as profile
+      FROM employees_details 
+      WHERE employee_id IN (${placeholders})
+    `;
+    const empResults = await queryWithRetry(empQuery, employeeIds);
+    empResults.forEach((emp) => {
+      assignedByMap[emp.id] = emp;
+    });
+  }
+
+  // 2. Batch fetch all TaskReportsReview and TaskReports in 2 indexed Mongo queries
+  const allTaskIds = [];
+  tasks.forEach((t) => {
+    allTaskIds.push(t._id.toString());
+    if (mongoose.Types.ObjectId.isValid(t._id)) {
+      allTaskIds.push(new mongoose.Types.ObjectId(t._id));
+    }
+  });
+
+  const [reviews, reports] = await Promise.all([
+    TaskReportsReview.find({
+      taskId: { $in: allTaskIds },
+      status: "underReview",
+    })
+      .sort({ createdAt: -1 })
+      .select("taskId activityId status percentage budget createdAt")
+      .lean(),
+    TaskReports.find({
+      taskId: { $in: allTaskIds },
+    })
+      .sort({ createdAt: -1 })
+      .select("taskId activityId status percentage budget createdAt")
+      .lean(),
+  ]);
+
+  // Index reviews and reports in Maps for O(1) lookup
+  const reviewMap = new Map();
+  reviews.forEach((r) => {
+    const tId = r.taskId ? r.taskId.toString() : null;
+    if (!tId) return;
+    const actId = (r.activityId && r.activityId !== "undefined" && r.activityId !== "null") ? r.activityId.toString() : null;
+    const key = actId ? `${tId}_${actId}` : tId;
+    if (!reviewMap.has(key)) {
+      reviewMap.set(key, r);
+    }
+  });
+
+  const reportMap = new Map();
+  reports.forEach((r) => {
+    const tId = r.taskId ? r.taskId.toString() : null;
+    if (!tId) return;
+    const actId = (r.activityId && r.activityId !== "undefined" && r.activityId !== "null") ? r.activityId.toString() : null;
+    const key = actId ? `${tId}_${actId}` : tId;
+    if (!reportMap.has(key)) {
+      reportMap.set(key, r);
+    }
+  });
+
+  let tasksSum = 0;
+  let activeTasksCount = 0;
+  let completedTaskCount = 0;
+
+  const tasksWithAssignedBy = tasks.map((task) => {
+    const tIdStr = task._id.toString();
+    const assignedBy = task.employeeID ? (assignedByMap[task.employeeID] || null) : null;
+
+    let latestTaskReport = reviewMap.get(tIdStr) || reportMap.get(tIdStr) || null;
+    if (latestTaskReport?.status === "underReview") {
+      task.status = "underReview";
+      task.percentage = latestTaskReport.percentage ?? task.percentage;
+    }
+
+    let activitiesWithReports = task.activities;
+    if (task.activities?.length > 0) {
+      activitiesWithReports = task.activities.map((activity) => {
+        const actIdStr = activity._id ? activity._id.toString() : "";
+        const key = `${tIdStr}_${actIdStr}`;
+        let latestActivityReport = reviewMap.get(key) || reportMap.get(key) || null;
+
+        if (latestActivityReport?.status === "underReview") {
+          activity.status = "underReview";
+          activity.percentage = latestActivityReport.percentage ?? activity.percentage;
+        }
+
+        return {
+          ...activity,
+          latestReportDate: latestActivityReport?.createdAt || null,
+        };
+      });
+    }
+
+    if (task.activities && task.activities.length > 0) {
+      const activeActivities = (activitiesWithReports || []).filter((act) => act && act.status !== "Cancelled");
+      if (activeActivities.length > 0) {
+        const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
+        task.percentage = Math.round(activitiesSum / activeActivities.length);
+      } else {
+        task.percentage = 0;
+      }
+    }
+
+    if (task && task.status !== "Cancelled") {
+      tasksSum += (task.percentage || 0);
+      activeTasksCount++;
+      if ((task.percentage || 0) >= 100) {
+        completedTaskCount++;
+      }
+    }
+
+    return {
+      ...task,
+      activities: activitiesWithReports,
+      assignedBy,
+      assigned_by: assignedBy,
+      latestReportDate: latestTaskReport?.createdAt || null,
+    };
+  });
+
+  let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : 0;
+  if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+    calculatedPercentage = 99;
+  }
+
+  return {
+    tasks: tasksWithAssignedBy,
+    percentage: calculatedPercentage,
+  };
+};
+
+// Route to get lightweight project metrics for concurrent progressive rendering
+router.get("/metrics", async (req, res) => {
+  try {
+    const empID = req.query.empID || null;
+    const role = req.query.role || null;
+    const projectIdsQuery = req.query.projectIds ? req.query.projectIds.split(",") : null;
+
+    let projectIds = [];
+    if (projectIdsQuery && projectIdsQuery.length > 0) {
+      projectIds = projectIdsQuery;
+    } else {
+      let searchQuery = {};
+      if (
+        empID &&
+        empID !== "null" &&
+        empID !== "" &&
+        !["Admin", "SBU", "Project Head"].includes(role)
+      ) {
+        searchQuery.$or = [
+          { employeeID: empID },
+          { employees: empID },
+          { "accessGrantedTo.employeeId": empID },
+        ];
+      }
+      const projects = await Project_Details.find(searchQuery).select("_id").lean();
+      projectIds = projects.map((p) => p._id);
+    }
+
+    if (projectIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {},
+      });
+    }
+
+    const pIdStrings = projectIds.map((id) => id.toString());
+
+    // 1. Fetch tasks for projects
+    const allTasks = await Tasks.find({ projectId: { $in: projectIds } })
+      .select("projectId _id percentage activities status")
+      .lean();
+
+    const tasksByProjectId = {};
+    const allTaskIds = [];
+    allTasks.forEach((task) => {
+      if (!task.projectId) return;
+      const pId = task.projectId.toString();
+      if (!tasksByProjectId[pId]) tasksByProjectId[pId] = [];
+      tasksByProjectId[pId].push(task);
+      if (task._id) allTaskIds.push(task._id);
+    });
+
+    // 2. Concurrently fetch underReview reviews and latest reports
+    const [allUnderReviewDocs, latestReports] = await Promise.all([
+      allTaskIds.length > 0
+        ? TaskReportsReview.find({
+            taskId: { $in: allTaskIds },
+            status: "underReview",
+          })
+            .select("taskId activityId status")
+            .lean()
+        : [],
+      pIdStrings.length > 0
+        ? TaskReports.aggregate([
+            { $match: { projectId: { $in: pIdStrings } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: "$projectId", latestReportDate: { $first: "$createdAt" } } },
+          ])
+        : [],
+    ]);
+
+    const reviewsByTaskId = {};
+    allUnderReviewDocs.forEach((doc) => {
+      if (!doc.taskId) return;
+      const tId = doc.taskId.toString();
+      if (!reviewsByTaskId[tId]) reviewsByTaskId[tId] = [];
+      reviewsByTaskId[tId].push(doc);
+    });
+
+    const reportMap = {};
+    latestReports.forEach((r) => {
+      if (r._id) reportMap[r._id.toString()] = r.latestReportDate;
+    });
+
+    const metricsMap = {};
+    projectIds.forEach((pId) => {
+      const pIdStr = pId.toString();
+      const projectTasks = tasksByProjectId[pIdStr] || [];
+
+      let tasksSum = 0;
+      let activeTasksCount = 0;
+      let completedTaskCount = 0;
+
+      for (const task of projectTasks) {
+        if (!task) continue;
+        let taskPercentage = task.percentage || 0;
+        if (task.activities && Array.isArray(task.activities) && task.activities.length > 0) {
+          const activeActivities = task.activities.filter((act) => act && act.status !== "Cancelled");
+          if (activeActivities.length > 0) {
+            const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
+            taskPercentage = Math.round(activitiesSum / activeActivities.length);
+          } else {
+            taskPercentage = 0;
+          }
+        }
+
+        if (task.status !== "Cancelled") {
+          tasksSum += taskPercentage;
+          activeTasksCount++;
+          if (taskPercentage >= 100) {
+            completedTaskCount++;
+          }
+        }
+      }
+
+      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : 0;
+      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
+        calculatedPercentage = 99;
+      }
+
+      let underReviewCount = 0;
+      if (projectTasks.length > 0) {
+        const uniqueUnderReviewKeys = new Set();
+        projectTasks.forEach((task) => {
+          const reviews = reviewsByTaskId[task._id.toString()] || [];
+          reviews.forEach((doc) => {
+            const key = `${doc.taskId}_${doc.activityId || "null"}`;
+            uniqueUnderReviewKeys.add(key);
+          });
+        });
+        underReviewCount = uniqueUnderReviewKeys.size;
+      }
+
+      metricsMap[pIdStr] = {
+        percentage: calculatedPercentage,
+        taskCount: projectTasks.filter((t) => t && t.status !== "Cancelled").length,
+        completedTaskCount,
+        underReviewCount,
+        latestReportDate: reportMap[pIdStr] || null,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: metricsMap,
+    });
+  } catch (err) {
+    console.error("Error fetching project metrics:", err);
+    res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+      message: "Failed to fetch project metrics",
+    });
+  }
+});
+
+// Dedicated fast endpoint to fetch project tasks concurrently
+router.get("/:projectId/tasks", async (req, res) => {
+  try {
+    const { tasks, percentage } = await getProjectEnrichedTasks(req.params.projectId);
+    res.status(200).json({
+      success: true,
+      data: {
+        tasks,
+        percentage,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching project tasks:", err);
+    res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+      message: "Failed to fetch project tasks",
+    });
+  }
+});
+
 router.get("/:projectId", async (req, res) => {
   try {
+    const includeTasks = req.query.includeTasks !== "false";
+
     let project = await Project_Details.findById(req.params.projectId)
       .select("-__v")
       .lean();
@@ -1112,8 +1448,9 @@ router.get("/:projectId", async (req, res) => {
 
     const originalEmployeeIds = project.employees ? [...project.employees] : [];
 
-    let creator = null;
-    if (project.employeeID) {
+    // Parallelize MySQL lookups: creator, departments, employeesByDept, teamHeads
+    const creatorPromise = (async () => {
+      if (!project.employeeID) return null;
       const query = `
         SELECT 
           employee_id as id,
@@ -1124,28 +1461,23 @@ router.get("/:projectId", async (req, res) => {
         WHERE employee_id = ?
       `;
       const employees = await queryWithRetry(query, [project.employeeID]);
-      if (employees.length > 0) {
-        creator = employees[0];
-        project.creator = creator;
-      }
-    }
+      return employees.length > 0 ? employees[0] : null;
+    })();
 
-    if (project.department && project.department.length > 0) {
+    const deptPromise = (async () => {
+      if (!project.department || project.department.length === 0) return [];
       const deptPlaceholders = project.department.map(() => "?").join(",");
       const deptQuery = `
         SELECT id, designation as name
         FROM designations 
         WHERE id IN (${deptPlaceholders})
       `;
-      const departments = await queryWithRetry(deptQuery, project.department);
-      project.departmentDetails = departments;
-    }
+      return await queryWithRetry(deptQuery, project.department);
+    })();
 
-    if (!project.department || !project.department.length) {
-      project.allEmployees = [];
-    } else {
+    const employeesByDeptPromise = (async () => {
+      if (!project.department || project.department.length === 0) return [];
       const deptPlaceholders = project.department.map(() => "?").join(",");
-
       const employeesByDeptQuery = `
         SELECT 
           e.employee_id AS id,
@@ -1158,52 +1490,22 @@ router.get("/:projectId", async (req, res) => {
         WHERE d.id IN (${deptPlaceholders})
         AND e.working_status = 'Active'
       `;
-
-      const allEmployees = await queryWithRetry(
-        employeesByDeptQuery,
-        project.department,
-      );
-
-      if (allEmployees?.length > 0) {
-        project.allEmployees = allEmployees.map((e) => ({
-          id: e.id,
-          name: e.name,
-          profile: e.profile,
-          department: e.department,
-        }));
-      }
-    }
-
-    if (originalEmployeeIds.length > 0 && project.allEmployees) {
-      const enrichedEmployees = originalEmployeeIds
-        .map((empId) =>
-          project.allEmployees.find(
-            (e) => e.id.toString() === empId.toString(),
-          ),
-        )
-        .filter(Boolean);
-      project.employees = enrichedEmployees;
-    }
+      return await queryWithRetry(employeesByDeptQuery, project.department);
+    })();
 
     const allProjectEmployeeIds = [];
-
     if (project.accessGrantedTo && project.accessGrantedTo.length > 0) {
       project.accessGrantedTo.forEach((item) => {
-        if (item.employeeId) {
-          allProjectEmployeeIds.push(item.employeeId);
-        }
+        if (item.employeeId) allProjectEmployeeIds.push(item.employeeId);
       });
     }
-
     if (originalEmployeeIds.length > 0) {
-      originalEmployeeIds.forEach((empId) => {
-        allProjectEmployeeIds.push(empId.toString());
-      });
+      originalEmployeeIds.forEach((empId) => allProjectEmployeeIds.push(empId.toString()));
     }
-
     const uniqueProjectEmployeeIds = [...new Set(allProjectEmployeeIds)];
 
-    if (uniqueProjectEmployeeIds.length > 0) {
+    const teamHeadPromise = (async () => {
+      if (uniqueProjectEmployeeIds.length === 0) return [];
       const placeholders = uniqueProjectEmployeeIds.map(() => "?").join(",");
       const teamHeadQuery = `
         SELECT 
@@ -1216,183 +1518,63 @@ router.get("/:projectId", async (req, res) => {
         AND team_head = 1
         AND working_status = 'Active'
       `;
-      const teamHeadResult = await queryWithRetry(
-        teamHeadQuery,
-        uniqueProjectEmployeeIds,
-      );
+      return await queryWithRetry(teamHeadQuery, uniqueProjectEmployeeIds);
+    })();
 
-      if (teamHeadResult.length > 0) {
-        project.teamHead = teamHeadResult;
-      } else {
-        project.teamHead = creator;
-      }
+    const allTeamHeadsPromise = (async () => {
+      const allTeamHeadsQuery = `
+        SELECT 
+          employee_id as id,
+          employee_name as name,
+          profile_url as profile,
+          designation as department
+        FROM employees_details 
+        WHERE team_head = 1
+        AND designation IN ('Software Developer', '3D', 'UI/UX')
+        AND working_status = 'Active'
+      `;
+      return await queryWithRetry(allTeamHeadsQuery);
+    })();
+
+    const [creator, departments, allEmployees, teamHeadResult, teamHeads] =
+      await Promise.all([
+        creatorPromise,
+        deptPromise,
+        employeesByDeptPromise,
+        teamHeadPromise,
+        allTeamHeadsPromise,
+      ]);
+
+    if (creator) project.creator = creator;
+    project.departmentDetails = departments || [];
+
+    if (allEmployees?.length > 0) {
+      project.allEmployees = allEmployees.map((e) => ({
+        id: e.id,
+        name: e.name,
+        profile: e.profile,
+        department: e.department,
+      }));
+    } else {
+      project.allEmployees = [];
+    }
+
+    if (originalEmployeeIds.length > 0 && project.allEmployees) {
+      project.employees = originalEmployeeIds
+        .map((empId) =>
+          project.allEmployees.find((e) => e.id.toString() === empId.toString()),
+        )
+        .filter(Boolean);
+    }
+
+    if (teamHeadResult && teamHeadResult.length > 0) {
+      project.teamHead = teamHeadResult;
     } else {
       project.teamHead = creator;
     }
-
-    const allTeamHeadsQuery = `
-      SELECT 
-        employee_id as id,
-        employee_name as name,
-        profile_url as profile,
-        designation as department
-      FROM employees_details 
-      WHERE team_head = 1
-      AND designation IN ('Software Developer', '3D', 'UI/UX')
-      AND working_status = 'Active'
-    `;
-    const teamHeads = await queryWithRetry(allTeamHeadsQuery);
     project.teamHeads = teamHeads;
 
-    const tasks = await Tasks.find({ projectId: req.params.projectId })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    if (tasks.length > 0) {
-      let tasksSum = 0;
-      let activeTasksCount = 0;
-      let completedTaskCount = 0;
-      const tasksWithAssignedBy = await Promise.all(
-        tasks.map(async (task) => {
-          let assignedBy = null;
-
-          if (task.employeeID) {
-            const empQuery = `
-                  SELECT 
-                    employee_id as id,
-                    employee_name as name,
-                    profile_url as profile
-                  FROM employees_details 
-                  WHERE employee_id = ?
-                `;
-            const empResult = await queryWithRetry(empQuery, [task.employeeID]);
-            if (empResult.length > 0) {
-              assignedBy = empResult[0];
-            }
-          }
-
-          const queryTaskId = [task._id.toString()];
-          if (mongoose.Types.ObjectId.isValid(task._id)) {
-            queryTaskId.push(new mongoose.Types.ObjectId(task._id));
-          }
-
-          let latestTaskReport = await TaskReportsReview.findOne({
-            taskId: { $in: queryTaskId },
-            $or: [
-              { activityId: null },
-              { activityId: "" },
-              { activityId: { $exists: false } },
-              { activityId: "undefined" },
-            ],
-            status: "underReview",
-          })
-            .sort({ createdAt: -1 })
-            .select("createdAt status percentage budget")
-            .lean();
-
-          if (!latestTaskReport) {
-            latestTaskReport = await TaskReports.findOne({
-              taskId: { $in: queryTaskId },
-              $or: [
-                { activityId: null },
-                { activityId: "" },
-                { activityId: { $exists: false } },
-                { activityId: "undefined" },
-              ],
-            })
-              .sort({ createdAt: -1 })
-              .select("createdAt status budget")
-              .lean();
-          }
-
-          if (latestTaskReport?.status === "underReview") {
-            task.status = "underReview";
-            task.percentage = latestTaskReport.percentage ?? task.percentage;
-          }
-
-          let activitiesWithReports = task.activities;
-          if (task.activities?.length > 0) {
-            activitiesWithReports = await Promise.all(
-              task.activities.map(async (activity) => {
-                const queryActTaskId = [task._id.toString()];
-                if (mongoose.Types.ObjectId.isValid(task._id)) {
-                  queryActTaskId.push(new mongoose.Types.ObjectId(task._id));
-                }
-                const queryActivityId = [activity._id.toString()];
-                if (mongoose.Types.ObjectId.isValid(activity._id)) {
-                  queryActivityId.push(new mongoose.Types.ObjectId(activity._id));
-                }
-
-                let latestActivityReport = await TaskReportsReview.findOne({
-                  taskId: { $in: queryActTaskId },
-                  activityId: { $in: queryActivityId },
-                  status: "underReview",
-                })
-                  .sort({ createdAt: -1 })
-                  .select("createdAt status percentage budget")
-                  .lean();
-
-                if (!latestActivityReport) {
-                  latestActivityReport = await TaskReports.findOne({
-                    taskId: { $in: queryActTaskId },
-                    activityId: { $in: queryActivityId },
-                  })
-                    .sort({ createdAt: -1 })
-                    .select("createdAt status budget")
-                    .lean();
-                }
-
-                if (latestActivityReport?.status === "underReview") {
-                  activity.status = "underReview";
-                  activity.percentage =
-                    latestActivityReport.percentage ?? activity.percentage;
-                }
-
-                return {
-                  ...activity,
-                  latestReportDate: latestActivityReport?.createdAt || null,
-                };
-              }),
-            );
-          }
-
-          if (task.activities && task.activities.length > 0) {
-            const activeActivities = (activitiesWithReports || []).filter((act) => act && act.status !== "Cancelled");
-            if (activeActivities.length > 0) {
-              const activitiesSum = activeActivities.reduce((sum, act) => sum + (act.percentage || 0), 0);
-              task.percentage = Math.round(activitiesSum / activeActivities.length);
-            } else {
-              task.percentage = 0;
-            }
-          }
-
-          if (task && task.status !== "Cancelled") {
-            tasksSum += (task.percentage || 0);
-            activeTasksCount++;
-            if ((task.percentage || 0) >= 100) {
-              completedTaskCount++;
-            }
-          }
-
-          return {
-            ...task,
-            activities: activitiesWithReports,
-            assigned_by: assignedBy,
-            latestReportDate: latestTaskReport?.createdAt || null,
-          };
-        }),
-      );
-
-      project.tasks = tasksWithAssignedBy;
-      let calculatedPercentage = activeTasksCount > 0 ? Math.round(tasksSum / activeTasksCount) : (project.percentage || 0);
-      if (calculatedPercentage >= 100 && completedTaskCount < activeTasksCount) {
-        calculatedPercentage = 99;
-      }
-      project.percentage = calculatedPercentage;
-    } else {
-      project.tasks = null;
-    }
-
+    // Check correctionDate
     if (project.correctionDate && project.correctionDate.length > 0) {
       const projectTasks = await Tasks.find({ projectId: req.params.projectId })
         .select("createdAt")
@@ -1421,6 +1603,21 @@ router.get("/:projectId", async (req, res) => {
           isDelete: !hasNewTask,
         };
       });
+    }
+
+    // Fast-path: return basic project metadata immediately without loading tasks
+    if (!includeTasks) {
+      return res.status(200).json({
+        success: true,
+        data: project,
+      });
+    }
+
+    // Otherwise attach batched tasks for backward compatibility
+    const { tasks, percentage } = await getProjectEnrichedTasks(req.params.projectId);
+    project.tasks = tasks;
+    if (tasks.length > 0) {
+      project.percentage = percentage;
     }
 
     res.status(200).json({
@@ -1481,12 +1678,18 @@ router.get("/", async (req, res) => {
       });
     }
 
+    const projectIds = projects.map((p) => p._id);
+    const pIdStrings = projectIds.map((id) => id.toString());
     const employeeIds = [
       ...new Set(projects.map((p) => p.employeeID).filter(Boolean)),
     ];
+    const allDeptIds = [
+      ...new Set(projects.flatMap((p) => p.department || []).filter(Boolean)),
+    ];
 
-    let employeeMap = {};
-    if (employeeIds.length > 0) {
+    // 1. Fetch employees in MySQL (parallel task)
+    const fetchEmployeesPromise = (async () => {
+      if (employeeIds.length === 0) return {};
       const placeholders = employeeIds.map(() => "?").join(",");
       const query = `
         SELECT 
@@ -1498,17 +1701,16 @@ router.get("/", async (req, res) => {
         WHERE employee_id IN (${placeholders})
       `;
       const employees = await queryWithRetry(query, employeeIds);
+      const employeeMap = {};
       employees.forEach((emp) => {
         employeeMap[emp.id] = emp;
       });
-    }
+      return employeeMap;
+    })();
 
-    const allDeptIds = [
-      ...new Set(projects.flatMap((p) => p.department || []).filter(Boolean)),
-    ];
-
-    let deptMap = {};
-    if (allDeptIds.length > 0) {
+    // 2. Fetch departments in MySQL (parallel task)
+    const fetchDeptsPromise = (async () => {
+      if (allDeptIds.length === 0) return {};
       const deptPlaceholders = allDeptIds.map(() => "?").join(",");
       const deptQuery = `
         SELECT id, designation as name
@@ -1516,57 +1718,123 @@ router.get("/", async (req, res) => {
         WHERE id IN (${deptPlaceholders})
       `;
       const deptRows = await queryWithRetry(deptQuery, allDeptIds);
+      const deptMap = {};
       deptRows.forEach((d) => {
         deptMap[d.id] = d.name;
       });
+      return deptMap;
+    })();
+
+    const includeMetrics = req.query.includeMetrics !== "false";
+
+    // Fast-path: return projects list with basic employee and department info without scanning tasks or aggregations
+    if (!includeMetrics) {
+      const [employeeMap, deptMap] = await Promise.all([
+        fetchEmployeesPromise,
+        fetchDeptsPromise,
+      ]);
+
+      projects = projects.map((proj) => {
+        if (proj.employeeID && employeeMap[proj.employeeID]) {
+          proj.teamHead = employeeMap[proj.employeeID];
+        } else {
+          proj.teamHead = { id: null, name: "Unassigned", profile: null };
+        }
+
+        if (proj.department && proj.department.length > 0) {
+          proj.departmentDetails = proj.department
+            .map((dId) => (deptMap[dId] ? { id: dId, name: deptMap[dId] } : null))
+            .filter(Boolean);
+        } else {
+          proj.departmentDetails = [];
+        }
+
+        return proj;
+      });
+
+      if (search) {
+        projects = projects.filter(
+          (proj) =>
+            proj.projectName?.toLowerCase().includes(search.toLowerCase()) ||
+            proj.companyName?.toLowerCase().includes(search.toLowerCase()),
+        );
+      }
+
+      return res.status(200).json({
+        success: true,
+        count: projects.length,
+        data: projects,
+      });
     }
 
-    // Batch fetch all tasks for these projects
-    const projectIds = projects.map((p) => p._id);
-    const allTasks = await Tasks.find({ projectId: { $in: projectIds } })
-      .select("projectId _id percentage activities status")
-      .lean();
+    // 3. Batch fetch all tasks and their reviews (parallel task)
+    const fetchTasksAndReviewsPromise = (async () => {
+      const allTasks = await Tasks.find({ projectId: { $in: projectIds } })
+        .select("projectId _id percentage activities status")
+        .lean();
 
-    const tasksByProjectId = {};
-    allTasks.forEach((task) => {
-      if (!task.projectId) return;
-      const pId = task.projectId.toString();
-      if (!tasksByProjectId[pId]) {
-        tasksByProjectId[pId] = [];
+      const tasksByProjectId = {};
+      const allTaskIds = [];
+      allTasks.forEach((task) => {
+        if (!task.projectId) return;
+        const pId = task.projectId.toString();
+        if (!tasksByProjectId[pId]) {
+          tasksByProjectId[pId] = [];
+        }
+        tasksByProjectId[pId].push(task);
+        if (task._id) allTaskIds.push(task._id);
+      });
+
+      const reviewsByTaskId = {};
+      if (allTaskIds.length > 0) {
+        const allUnderReviewDocs = await TaskReportsReview.find({
+          taskId: { $in: allTaskIds },
+          status: "underReview",
+        })
+          .select("taskId activityId status percentage")
+          .lean();
+
+        allUnderReviewDocs.forEach((doc) => {
+          if (!doc.taskId) return;
+          const tId = doc.taskId.toString();
+          if (!reviewsByTaskId[tId]) {
+            reviewsByTaskId[tId] = [];
+          }
+          reviewsByTaskId[tId].push(doc);
+        });
       }
-      tasksByProjectId[pId].push(task);
-    });
 
-    // Batch fetch all TaskReportsReview status "underReview"
-    const allTaskIds = allTasks.map((t) => t._id);
-    const allUnderReviewDocs = await TaskReportsReview.find({
-      taskId: { $in: allTaskIds },
-      status: "underReview",
-    })
-      .select("taskId activityId status percentage")
-      .lean();
+      return { tasksByProjectId, reviewsByTaskId };
+    })();
 
-    const reviewsByTaskId = {};
-    allUnderReviewDocs.forEach((doc) => {
-      if (!doc.taskId) return;
-      const tId = doc.taskId.toString();
-      if (!reviewsByTaskId[tId]) {
-        reviewsByTaskId[tId] = [];
-      }
-      reviewsByTaskId[tId].push(doc);
-    });
+    // 4. Batch fetch latest report dates using index-backed aggregation (parallel task)
+    const fetchReportsPromise = (async () => {
+      if (pIdStrings.length === 0) return {};
+      const latestReports = await TaskReports.aggregate([
+        { $match: { projectId: { $in: pIdStrings } } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: "$projectId", latestReportDate: { $first: "$createdAt" } } },
+      ]);
 
-    // Batch fetch latest report dates for all projects using aggregation
-    const latestReports = await TaskReports.aggregate([
-      { $match: { projectId: { $in: projectIds.map((id) => id.toString()) } } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: "$projectId", latestReportDate: { $first: "$createdAt" } } }
+      const reportMap = {};
+      latestReports.forEach((r) => {
+        if (r._id) reportMap[r._id.toString()] = r.latestReportDate;
+      });
+      return reportMap;
+    })();
+
+    // Run all pipelines concurrently in parallel
+    const [
+      employeeMap,
+      deptMap,
+      { tasksByProjectId, reviewsByTaskId },
+      reportMap,
+    ] = await Promise.all([
+      fetchEmployeesPromise,
+      fetchDeptsPromise,
+      fetchTasksAndReviewsPromise,
+      fetchReportsPromise,
     ]);
-
-    const reportMap = {};
-    latestReports.forEach((r) => {
-      if (r._id) reportMap[r._id.toString()] = r.latestReportDate;
-    });
 
     projects = projects.map((proj) => {
       if (proj.employeeID && employeeMap[proj.employeeID]) {

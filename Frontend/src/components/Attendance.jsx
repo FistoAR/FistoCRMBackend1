@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { Clock, ChevronDown, AlertCircle, X } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Clock, ChevronDown, AlertCircle, X, CheckCircle2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/attendance`;
 
@@ -92,6 +93,7 @@ const Field = ({
   disabled = false,
   onChange,
   name,
+  loading = false,
 }) => {
   const isRequired = label.trim().endsWith("*");
   const labelText = isRequired ? label.trim().slice(0, -1) : label;
@@ -106,19 +108,23 @@ const Field = ({
           <span className="text-red-500 text-[1vw] ml-[0.2vw]">*</span>
         )}
       </label>
-      <input
-        type={type}
-        name={name}
-        placeholder={placeholder}
-        value={value}
-        disabled={disabled}
-        onChange={onChange}
-        className={`border px-[0.6vw] py-[0.4vw] rounded-lg text-[0.8vw] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-500 placeholder:text-[0.75vw] ${
-          disabled
-            ? "border-gray-200 text-black-500 cursor-not-allowed bg-gray-50"
-            : "border-gray-300 hover:border-gray-400 focus:border-blue-400"
-        }`}
-      />
+      {loading ? (
+        <div className="h-[2.2vw] bg-gray-200 rounded-lg animate-pulse" />
+      ) : (
+        <input
+          type={type}
+          name={name}
+          placeholder={placeholder}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
+          className={`border px-[0.6vw] py-[0.4vw] rounded-lg text-[0.8vw] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-500 placeholder:text-[0.75vw] ${
+            disabled
+              ? "border-gray-200 text-gray-700 cursor-not-allowed bg-gray-50"
+              : "border-gray-300 hover:border-gray-400 focus:border-blue-400"
+          }`}
+        />
+      )}
     </div>
   );
 };
@@ -477,24 +483,46 @@ const MissedAttendanceModal = ({ onClose, employeeData, showToast, morningInDone
 
 // ==================== MAIN ATTENDANCE COMPONENT ====================
 const Attendance = ({ onClose }) => {
+  const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState("");
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
   const [isTimeSynced, setIsTimeSynced] = useState(false);
   const [showMissedAttendanceModal, setShowMissedAttendanceModal] = useState(false);
 
+  // Synchronously load user data from storage to avoid blank render / timing mismatch
+  const storedUser = useMemo(() => {
+    try {
+      const data = sessionStorage.getItem("user") || localStorage.getItem("user");
+      if (data) return JSON.parse(data);
+    } catch (error) {
+      console.warn("Could not load user data:", error);
+    }
+    return null;
+  }, []);
+
+  const employeeId = storedUser?.employee_id || storedUser?.userName || "EMP001";
+  const employeeName = storedUser?.name || storedUser?.employeeName || "Employee";
+
+  // Standard ISO date for API query
+  const todayDate = useMemo(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  // Formatted date for UI display (DD/MM/YYYY per workspace standard)
+  const displayDate = useMemo(() => {
+    const [y, m, d] = todayDate.split("-");
+    return `${d}/${m}/${y}`;
+  }, [todayDate]);
+
   const [formData, setFormData] = useState({
-    userName: "",
-    employeeName: "",
-    date: new Date().toISOString().split("T")[0],
-    loginTime: "",
     attendanceType: "",
     action: "",
   });
 
-  const [attendanceStatus, setAttendanceStatus] = useState({
-    morning: { in: null, out: null },
-    afternoon: { in: null, out: null },
-  });
   const [showNotification, setShowNotification] = useState(false);
   const [notificationData, setNotificationData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -537,68 +565,67 @@ const Attendance = ({ onClose }) => {
     return () => clearInterval(interval);
   }, [serverTimeOffset]);
 
+  const formatTime = (timeStr) => {
+    if (!timeStr) return null;
+    try {
+      const [hours, minutes, seconds] = timeStr.split(":").map(Number);
+      const displayHours = hours % 12 || 12;
+      const ampm = hours >= 12 ? "PM" : "AM";
+      return `${displayHours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")} ${ampm}`;
+    } catch {
+      return timeStr;
+    }
+  };
+
+  // ✅ React Query: Fetch today's attendance record with caching and invalidation
+  const {
+    data: attendanceRecord,
+    isLoading: isAttendanceLoading,
+    isFetching: isAttendanceFetching,
+  } = useQuery({
+    queryKey: ["todayAttendance", employeeId, todayDate],
+    queryFn: async () => {
+      if (!employeeId) return null;
+      const response = await fetch(
+        `${API_BASE_URL}?employee_id=${employeeId}&date=${todayDate}`
+      );
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.status && data.data ? data.data : null;
+    },
+    enabled: !!employeeId,
+    staleTime: 1000 * 30, // 30 seconds
+  });
+
+  // Normalized attendance status for morning and afternoon
+  const attendanceStatus = useMemo(() => {
+    if (!attendanceRecord) {
+      return {
+        morning: { in: null, out: null },
+        afternoon: { in: null, out: null },
+      };
+    }
+    return {
+      morning: {
+        in: attendanceRecord.morning_in ? formatTime(attendanceRecord.morning_in) : null,
+        out: attendanceRecord.morning_out ? formatTime(attendanceRecord.morning_out) : null,
+      },
+      afternoon: {
+        in: attendanceRecord.afternoon_in ? formatTime(attendanceRecord.afternoon_in) : null,
+        out: attendanceRecord.afternoon_out ? formatTime(attendanceRecord.afternoon_out) : null,
+      },
+    };
+  }, [attendanceRecord]);
+
   const getLastActionTime = () => {
+    if (isAttendanceLoading) return "";
     const actions = [
       attendanceStatus.morning.in,
       attendanceStatus.morning.out,
       attendanceStatus.afternoon.in,
       attendanceStatus.afternoon.out,
     ].filter(Boolean);
-    return actions[actions.length - 1] || currentTime;
-  };
-
-  // Load user data
-  useEffect(() => {
-    try {
-      const storedUser = sessionStorage.getItem("user") || localStorage.getItem("user");
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        setFormData((prev) => ({
-          ...prev,
-          userName: user.employee_id || user.userName || "EMP001",
-          employeeName: user.name || user.employeeName || "John Doe",
-        }));
-      }
-    } catch (error) {
-      console.warn("Could not load user data:", error);
-    }
-  }, []);
-
-  // Load today's attendance
-  useEffect(() => {
-    const loadAttendance = async () => {
-      if (!formData.userName) return;
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}?employee_id=${formData.userName}&date=${formData.date}`
-        );
-        if (!response.ok) return;
-        const data = await response.json();
-        if (data.status && data.data) {
-          const record = data.data;
-          setAttendanceStatus({
-            morning: {
-              in: record.morning_in ? formatTime(record.morning_in) : null,
-              out: record.morning_out ? formatTime(record.morning_out) : null,
-            },
-            afternoon: {
-              in: record.afternoon_in ? formatTime(record.afternoon_in) : null,
-              out: record.afternoon_out ? formatTime(record.afternoon_out) : null,
-            },
-          });
-        }
-      } catch (error) {
-        console.warn("Could not load attendance:", error);
-      }
-    };
-    loadAttendance();
-  }, [formData.userName, formData.date]);
-
-  const formatTime = (timeStr) => {
-    const [hours, minutes, seconds] = timeStr.split(":").map(Number);
-    const displayHours = hours % 12 || 12;
-    const ampm = hours >= 12 ? "PM" : "AM";
-    return `${displayHours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")} ${ampm}`;
+    return actions[actions.length - 1] || "No login recorded today";
   };
 
   const showToast = (title, message) => {
@@ -606,8 +633,7 @@ const Attendance = ({ onClose }) => {
     setShowNotification(true);
   };
 
-  // ✅ KEY CHANGE: Each session (Morning/Afternoon) is evaluated independently.
-  // Returns the next pending action for a given session, or null if complete.
+  // Evaluates the next pending action for a session
   const getNextActionForSession = (session) => {
     const status = attendanceStatus[session.toLowerCase()];
     if (!status) return null;
@@ -616,14 +642,11 @@ const Attendance = ({ onClose }) => {
     return null;
   };
 
-  const isMorningComplete = attendanceStatus.morning.in && attendanceStatus.morning.out;
-  const isAfternoonComplete = attendanceStatus.afternoon.in && attendanceStatus.afternoon.out;
-  // ✅ Morning is "skippable" — afternoon available even if morning has no records at all
-  const isMorningAvailable = !isMorningComplete;
-  const isAfternoonAvailable = !isAfternoonComplete;
+  const isMorningComplete = Boolean(attendanceStatus.morning.in && attendanceStatus.morning.out);
+  const isAfternoonComplete = Boolean(attendanceStatus.afternoon.in && attendanceStatus.afternoon.out);
   const allComplete = isMorningComplete && isAfternoonComplete;
 
-  // When user selects a type, auto-set the correct next action for that session
+  // When user selects a type, auto-set the next pending action and enable the radio buttons
   const handleTypeChange = (e) => {
     const type = e.target.value;
     if (!type) return;
@@ -633,15 +656,13 @@ const Attendance = ({ onClose }) => {
     }
     const nextAction = getNextActionForSession(type);
     setFormData({
-      ...formData,
       attendanceType: type,
       action: nextAction || "",
-      loginTime: currentTime,
     });
   };
 
   const handleActionChange = (action) => {
-    setFormData({ ...formData, action, loginTime: currentTime });
+    setFormData((prev) => ({ ...prev, action }));
   };
 
   const handleSubmit = async () => {
@@ -649,15 +670,6 @@ const Attendance = ({ onClose }) => {
       showToast("Warning", "Please select Attendance Type and Action");
       return;
     }
-
-    // Sequence validation removed as per user request for no restrictions
-    /*
-    const expectedAction = getNextActionForSession(formData.attendanceType);
-    if (formData.action !== expectedAction) {
-      showToast("Error", "Invalid action sequence");
-      return;
-    }
-    */
 
     const type = formData.attendanceType.toLowerCase();
     const action = formData.action.toLowerCase();
@@ -669,9 +681,9 @@ const Attendance = ({ onClose }) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          employee_id: formData.userName,
-          employee_name: formData.employeeName,
-          login_date: formData.date,
+          employee_id: employeeId,
+          employee_name: employeeName,
+          login_date: todayDate,
           action: actionField,
           time: currentTime,
         }),
@@ -679,13 +691,10 @@ const Attendance = ({ onClose }) => {
 
       const data = await response.json();
       if (data.status) {
-        const recordedTime = data.recordedTime || currentTime;
-        setAttendanceStatus((prev) => ({
-          ...prev,
-          [type]: { ...prev[type], [action]: recordedTime },
-        }));
-        showToast("Success", data.message);
-        setFormData((prev) => ({ ...prev, attendanceType: "", action: "", loginTime: "" }));
+        // Invalidate React Query to refresh timeline and status immediately
+        await queryClient.invalidateQueries({ queryKey: ["todayAttendance"] });
+        showToast("Success", data.message || "Attendance recorded successfully");
+        setFormData({ attendanceType: "", action: "" });
         setTimeout(() => onClose?.(), 1500);
       } else {
         showToast("Error", data.message || "Failed to record attendance");
@@ -698,18 +707,16 @@ const Attendance = ({ onClose }) => {
     }
   };
 
-  // Derive disabled state for In/Out radios based on selected type's next action
-  const selectedSessionNextAction = formData.attendanceType
-    ? getNextActionForSession(formData.attendanceType)
-    : null;
+  // ✅ Radio Buttons logic:
+  // DISABLED until an Attendance Type is selected.
+  // Once selected, individually disable any action that is already recorded for that session.
+  const isTypeSelected = Boolean(formData.attendanceType);
+  const selectedSession = formData.attendanceType ? formData.attendanceType.toLowerCase() : null;
+  const isInAlreadyRecorded = selectedSession ? attendanceStatus[selectedSession]?.in !== null : false;
+  const isOutAlreadyRecorded = selectedSession ? attendanceStatus[selectedSession]?.out !== null : false;
 
-  // Check if In/Out are already recorded for the selected attendance type
-  const isInAlreadyRecorded = formData.attendanceType
-    ? attendanceStatus[formData.attendanceType.toLowerCase()]?.in !== null
-    : false;
-  const isOutAlreadyRecorded = formData.attendanceType
-    ? attendanceStatus[formData.attendanceType.toLowerCase()]?.out !== null
-    : false;
+  const isRadioInDisabled = !isTypeSelected || isInAlreadyRecorded;
+  const isRadioOutDisabled = !isTypeSelected || isOutAlreadyRecorded;
 
   return (
     <>
@@ -724,11 +731,13 @@ const Attendance = ({ onClose }) => {
 
       {showMissedAttendanceModal && (
         <MissedAttendanceModal
-          onClose={() => setShowMissedAttendanceModal(false)}
-          employeeData={{ userName: formData.userName, employeeName: formData.employeeName }}
+          onClose={() => {
+            setShowMissedAttendanceModal(false);
+            queryClient.invalidateQueries({ queryKey: ["todayAttendance"] });
+          }}
+          employeeData={{ userName: employeeId, employeeName }}
           showToast={showToast}
-          // ✅ Pass whether morning In is already done — hides Morning option in missed modal
-          morningInDone={!!attendanceStatus.morning.in &&  !!attendanceStatus.morning.out} 
+          morningInDone={!!attendanceStatus.morning.in && !!attendanceStatus.morning.out} 
         />
       )}
 
@@ -758,42 +767,107 @@ const Attendance = ({ onClose }) => {
 
           {/* Main Content */}
           <div className="flex-1 overflow-auto px-[1.2vw] py-[1.5vw]">
-            <div className="space-y-[1.5vw]">
+            <div className="space-y-[1.3vw]">
+              {/* Fields Grid */}
               <div className="grid grid-cols-2 gap-[1vw]">
-                <Field label="Employee ID" value={formData.userName} disabled />
-                <Field label="Employee Name" value={formData.employeeName} disabled />
-                <Field label="Date" type="date" value={formData.date} disabled />
-                <Field label="Last Login Time" value={getLastActionTime()} disabled />
+                <Field label="Employee ID" value={employeeId} disabled />
+                <Field label="Employee Name" value={employeeName} disabled />
+                <Field label="Date" value={displayDate} disabled />
+                <Field
+                  label="Last Login Time"
+                  value={getLastActionTime()}
+                  disabled
+                  loading={isAttendanceLoading}
+                />
+              </div>
+
+              {/* ✅ Today's Attendance Timeline Strip */}
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-[0.8vw]">
+                <div className="flex items-center justify-between mb-[0.5vw]">
+                  <span className="text-[0.8vw] font-medium text-gray-800  tracking-wider flex items-center gap-[0.3vw]">
+                    Today's Attendance Timeline
+                  </span>
+                  {isAttendanceFetching && !isAttendanceLoading && (
+                    <span className="text-[0.65vw] text-blue-600 font-medium animate-pulse">
+                      Syncing...
+                    </span>
+                  )}
+                </div>
+
+                {isAttendanceLoading ? (
+                  <div className="grid grid-cols-4 gap-[0.6vw]">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="h-[2.8vw] bg-gray-200 rounded-lg animate-pulse" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 gap-[0.6vw]">
+                    {[
+                      { label: "Morning In", time: attendanceStatus.morning.in },
+                      { label: "Morning Out", time: attendanceStatus.morning.out },
+                      { label: "Afternoon In", time: attendanceStatus.afternoon.in },
+                      { label: "Afternoon Out", time: attendanceStatus.afternoon.out },
+                    ].map((slot, idx) => {
+                      const isRecorded = Boolean(slot.time);
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-[0.4vw] px-[0.6vw] rounded-lg border text-center transition-all ${
+                            isRecorded
+                              ? "bg-green-50 border-green-200 text-green-800"
+                              : "bg-white border-gray-200 text-gray-400"
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-[0.2vw]">
+                            <span className="text-[0.68vw] font-medium">{slot.label}</span>
+                       
+                          </div>
+                          <p
+                            className={`text-[0.75vw] font-semibold mt-[0.1vw] ${
+                              isRecorded ? "text-green-700" : "text-gray-400 font-normal"
+                            }`}
+                          >
+                            {slot.time || "—"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Controls */}
               <div className="grid grid-cols-2 gap-[1.5vw]">
+                {/* Attendance Type Dropdown */}
                 <div className="flex flex-col">
                   <label className="text-[0.8vw] text-gray-900 font-medium mb-[0.3vw]">
                     Attendance Type
                   </label>
-                  <div className="relative">
-                    <select
-                      value={formData.attendanceType}
-                      onChange={handleTypeChange}
-                      disabled={allComplete}
-                      className={`w-full appearance-none border px-[0.6vw] py-[0.4vw] pr-[2vw] rounded-lg text-[0.8vw] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white ${
-                        allComplete
-                          ? "opacity-50 cursor-not-allowed border-gray-200 text-gray-500"
-                          : "border-gray-300 hover:border-gray-400 focus:border-blue-400 cursor-pointer"
-                      }`}
-                    >
-                      <option value="" disabled>Select type</option>
-                      {/* ✅ Morning and Afternoon are independently enabled/disabled */}
-                      <option value="Morning" disabled={isMorningComplete}>
-                        Morning {isMorningComplete ? "(✓ Completed)" : ""}
-                      </option>
-                      <option value="Afternoon" disabled={isAfternoonComplete}>
-                        Afternoon {isAfternoonComplete ? "(✓ Completed)" : ""}
-                      </option>
-                    </select>
-                    <ChevronDown className="absolute right-[0.5vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-400 pointer-events-none" />
-                  </div>
+                  {isAttendanceLoading ? (
+                    <div className="h-[2.2vw] bg-gray-200 rounded-lg animate-pulse" />
+                  ) : (
+                    <div className="relative">
+                      <select
+                        value={formData.attendanceType}
+                        onChange={handleTypeChange}
+                        disabled={allComplete}
+                        className={`w-full appearance-none border px-[0.6vw] py-[0.4vw] pr-[2vw] rounded-lg text-[0.8vw] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white ${
+                          allComplete
+                            ? "opacity-50 cursor-not-allowed border-gray-200 text-gray-500"
+                            : "border-gray-300 hover:border-gray-400 focus:border-blue-400 cursor-pointer"
+                        }`}
+                      >
+                        <option value="" disabled>Select type</option>
+                        <option value="Morning" disabled={isMorningComplete}>
+                          Morning {isMorningComplete ? "(✓ Completed)" : ""}
+                        </option>
+                        <option value="Afternoon" disabled={isAfternoonComplete}>
+                          Afternoon {isAfternoonComplete ? "(✓ Completed)" : ""}
+                        </option>
+                      </select>
+                      <ChevronDown className="absolute right-[0.5vw] top-1/2 -translate-y-1/2 w-[1vw] h-[1vw] text-gray-400 pointer-events-none" />
+                    </div>
+                  )}
                   {allComplete && (
                     <span className="text-[0.7vw] text-green-600 mt-[0.3vw] font-medium">
                       ✓ All sessions completed
@@ -801,53 +875,81 @@ const Attendance = ({ onClose }) => {
                   )}
                 </div>
 
+                {/* Action Radios */}
                 <div className="flex flex-col">
-                  <label className="text-[0.8vw] text-gray-900 font-medium mb-[0.3vw]">
-                    Action:
-                  </label>
-                  <div className="flex items-center gap-[2vw] h-[2.2vw]">
-                    {/* ✅ In/Out radios enabled based on the selected session's next action */}
-                    <label className="flex items-center gap-[0.4vw] cursor-pointer group">
-                      <input
-                        type="radio"
-                        name="action"
-                        value="In"
-                        checked={formData.action === "In"}
-                        onChange={() => handleActionChange("In")}
-                        disabled={isInAlreadyRecorded}
-                        className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
-                          isInAlreadyRecorded ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                        }`}
-                      />
-                      <span
-                        className={`text-[0.85vw] ${
-                          formData.action === "In" ? "text-gray-900 font-semibold" : "text-gray-600"
-                        } ${isInAlreadyRecorded ? "opacity-50 line-through" : ""}`}
-                      >
-                        In
-                      </span>
+                  <div className="flex items-center justify-between mb-[0.3vw]">
+                    <label className="text-[0.8vw] text-gray-900 font-medium">
+                      Action:
                     </label>
-                    <label className="flex items-center gap-[0.4vw] cursor-pointer group">
-                      <input
-                        type="radio"
-                        name="action"
-                        value="Out"
-                        checked={formData.action === "Out"}
-                        onChange={() => handleActionChange("Out")}
-                        disabled={isOutAlreadyRecorded}
-                        className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
-                          isOutAlreadyRecorded ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                        }`}
-                      />
-                      <span
-                        className={`text-[0.85vw] ${
-                          formData.action === "Out" ? "text-gray-900 font-semibold" : "text-gray-600"
-                        } ${isOutAlreadyRecorded ? "opacity-50 line-through" : ""}`}
-                      >
-                        Out
-                      </span>
-                    </label>
+                   
                   </div>
+                  {isAttendanceLoading ? (
+                    <div className="h-[2.2vw] bg-gray-200 rounded-lg animate-pulse w-3/4" />
+                  ) : (
+                    <div className="flex items-center gap-[2vw] h-[2.2vw]">
+                      <label
+                        className={`flex items-center gap-[0.4vw] ${
+                          isRadioInDisabled
+                            ? "cursor-not-allowed opacity-40"
+                            : "cursor-pointer group"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="action"
+                          value="In"
+                          checked={isTypeSelected && formData.action === "In"}
+                          onChange={() => handleActionChange("In")}
+                          disabled={isRadioInDisabled}
+                          className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
+                            isRadioInDisabled
+                              ? "cursor-not-allowed"
+                              : "cursor-pointer"
+                          }`}
+                        />
+                        <span
+                          className={`text-[0.85vw] ${
+                            formData.action === "In"
+                              ? "text-gray-900 font-semibold"
+                              : "text-gray-600"
+                          } ${isInAlreadyRecorded ? "line-through text-gray-400" : ""}`}
+                        >
+                          In {isInAlreadyRecorded ? "(Done)" : ""}
+                        </span>
+                      </label>
+
+                      <label
+                        className={`flex items-center gap-[0.4vw] ${
+                          isRadioOutDisabled
+                            ? "cursor-not-allowed opacity-40"
+                            : "cursor-pointer group"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="action"
+                          value="Out"
+                          checked={isTypeSelected && formData.action === "Out"}
+                          onChange={() => handleActionChange("Out")}
+                          disabled={isRadioOutDisabled}
+                          className={`w-[1vw] h-[1vw] text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 ${
+                            isRadioOutDisabled
+                              ? "cursor-not-allowed"
+                              : "cursor-pointer"
+                          }`}
+                        />
+                        <span
+                          className={`text-[0.85vw] ${
+                            formData.action === "Out"
+                              ? "text-gray-900 font-semibold"
+                              : "text-gray-600"
+                          } ${isOutAlreadyRecorded ? "line-through text-gray-400" : ""}`}
+                        >
+                          Out {isOutAlreadyRecorded ? "(Done)" : ""}
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -870,7 +972,7 @@ const Attendance = ({ onClose }) => {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={loading || !formData.attendanceType || !formData.action}
+                disabled={loading || isAttendanceLoading || !formData.attendanceType || !formData.action}
                 className="px-[2vw] py-[0.5vw] rounded-lg text-[0.9vw] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-[0.4vw]"
               >
                 {loading ? (
@@ -879,7 +981,7 @@ const Attendance = ({ onClose }) => {
                     Saving...
                   </>
                 ) : (
-                  <>Record {formData.action}</>
+                  <>Record {formData.action || "Attendance"}</>
                 )}
               </button>
             </div>

@@ -462,6 +462,31 @@ const driveAccess = new mongoose.Schema(
 
 
 
+// Index optimizations for fast queries and aggregations (< 300ms SLA)
+Project_details.index({ createdAt: -1 });
+Project_details.index({ employeeID: 1 });
+Project_details.index({ employees: 1 });
+Project_details.index({ "accessGrantedTo.employeeId": 1 });
+Project_details.index({ status: 1 });
+
+Project_request.index({ createdAt: -1 });
+Project_request.index({ employeeID: 1 });
+Project_request.index({ status: 1 });
+
+task.index({ projectId: 1 });
+task.index({ employeeID: 1 });
+task.index({ status: 1 });
+
+taskReport.index({ projectId: 1, createdAt: -1 });
+taskReport.index({ taskId: 1 });
+taskReport.index({ employeeID: 1 });
+
+taskReportReview.index({ taskId: 1, status: 1 });
+taskReportReview.index({ projectId: 1 });
+
+dayReport.index({ createdAt: -1, employeeID: 1 });
+dayReport.index({ projectId: 1 });
+
 const Project_Details = mongoose.model("Project_details", Project_details);
 const Project_Request = mongoose.model("Project_Request", Project_request);
 const Tasks = mongoose.model("tasks", task);

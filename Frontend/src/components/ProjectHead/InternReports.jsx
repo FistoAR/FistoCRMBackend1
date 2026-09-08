@@ -280,7 +280,14 @@ const InternReports = () => {
     // and ensuring no Sundays are displayed if they somehow slipped through.
     let filtered = allFetchedReports.filter((report) => {
       const date = new Date(report.report_date);
-      return date.getDay() !== 0; // Skip Sundays
+      if (date.getDay() === 0) return false; // Skip Sundays
+      
+      const designation = (report.designation || "").toLowerCase();
+      if (designation === "maid" || designation.includes("maid")) {
+        return false;
+      }
+
+      return true;
     });
 
     // Filter by local search term (on current fetched data)
@@ -649,6 +656,12 @@ const InternReports = () => {
                             {employees
                               .filter((emp) => {
                                 const designation = emp.designation || "";
+                                if (
+                                  designation.toLowerCase() === "maid" ||
+                                  designation.toLowerCase().includes("maid")
+                                ) {
+                                  return false;
+                                }
                                 const isManagementRole =
                                   designation.includes("Project Head") ||
                                   designation.includes("SBU") ||
@@ -682,6 +695,12 @@ const InternReports = () => {
                             {employees
                               .filter((emp) => {
                                 const designation = emp.designation || "";
+                                if (
+                                  designation.toLowerCase() === "maid" ||
+                                  designation.toLowerCase().includes("maid")
+                                ) {
+                                  return false;
+                                }
                                 const isManagementRole =
                                   designation.includes("Project Head") ||
                                   designation.includes("SBU") ||
