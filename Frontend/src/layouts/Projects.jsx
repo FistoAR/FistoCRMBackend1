@@ -54,7 +54,20 @@ const Projects = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(6);
 
-  const [loggedEmpDetails, setloggedEmpDetails] = useState({});
+  const [loggedEmpDetails, setloggedEmpDetails] = useState(() => {
+    try {
+      const userData =
+        sessionStorage.getItem("user") || localStorage.getItem("user");
+      const userObj = userData ? JSON.parse(userData) : null;
+      return {
+        role: userObj?.designation || "",
+        id: userObj?.userName || "",
+        teamHead: userObj?.teamHead || false,
+      };
+    } catch {
+      return { role: "", id: "", teamHead: false };
+    }
+  });
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [showYoursOnly, setShowYoursOnly] = useState(true);
   const [selectedPercentageRange, setSelectedPercentageRange] = useState("");
@@ -64,12 +77,13 @@ const Projects = () => {
     ? loggedEmpDetails.id
     : selectedEmployee || "";
 
-  const { data: allProjectsData, isLoading: queryLoading } = useQuery({
-    queryKey: ["projects", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+  // Level 1: Fast Base Projects Query (< 50ms instant render of company groups, names, dates, depts)
+  const { data: baseProjectsData, isLoading: baseLoading } = useQuery({
+    queryKey: ["projectsBase", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
     queryFn: async () => {
       if (!loggedEmpDetails.id) return [];
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
+        `${import.meta.env.VITE_API_BASE_URL}/project?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}&includeMetrics=false`,
       );
       const data = await response.json();
       if (!data.success) {
@@ -78,10 +92,45 @@ const Projects = () => {
       return data.data || [];
     },
     enabled: !!loggedEmpDetails.id,
+    staleTime: 1000 * 30,
   });
 
-  const allProjects = allProjectsData || [];
-  const loading = queryLoading;
+  // Level 2: Concurrent Progressive Metrics Query (enriches percentage, task counts, underReview badges)
+  const { data: metricsData, isLoading: metricsLoading } = useQuery({
+    queryKey: ["projectsMetrics", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+    queryFn: async () => {
+      if (!loggedEmpDetails.id) return {};
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/metrics?search=${debouncedSearchTerm}&empID=${empIDParam || ""}&role=${loggedEmpDetails.role}`,
+      );
+      const data = await response.json();
+      if (!data.success) {
+        return {};
+      }
+      return data.data || {};
+    },
+    enabled: !!loggedEmpDetails.id,
+    staleTime: 1000 * 30,
+  });
+
+  const allProjects = React.useMemo(() => {
+    if (!baseProjectsData) return [];
+    if (!metricsData) return baseProjectsData;
+    return baseProjectsData.map((project) => {
+      const m = metricsData[project._id];
+      if (!m) return project;
+      return {
+        ...project,
+        percentage: m.percentage !== undefined ? m.percentage : project.percentage,
+        taskCount: m.taskCount !== undefined ? m.taskCount : project.taskCount,
+        completedTaskCount: m.completedTaskCount !== undefined ? m.completedTaskCount : project.completedTaskCount,
+        underReviewCount: m.underReviewCount !== undefined ? m.underReviewCount : project.underReviewCount,
+        latestReportDate: m.latestReportDate !== undefined ? m.latestReportDate : project.latestReportDate,
+      };
+    });
+  }, [baseProjectsData, metricsData]);
+
+  const loading = baseLoading;
   const [employeeList, setEmployeeList] = useState([]);
   const filterRef = useRef(null);
 
@@ -126,17 +175,7 @@ const Projects = () => {
     return () => window.removeEventListener("resize", calculateItemsPerPage);
   }, []);
 
-  useEffect(() => {
-    const userData =
-      sessionStorage.getItem("user") || localStorage.getItem("user");
-    const userObj = userData ? JSON.parse(userData) : null;
-    const userRole = {
-      role: userObj?.designation || "",
-      id: userObj?.userName || "",
-      teamHead: userObj.teamHead || false,
-    };
-    setloggedEmpDetails(userRole);
-  }, []);
+
 
   useEffect(() => {
     const fetchEmployees = async () => {
@@ -1305,27 +1344,36 @@ const Projects = () => {
                                       )}
 
                                       <td className="px-[0.7vw] py-[0.6vw] border border-gray-300">
-                                        <div className="flex flex-col gap-[0.3vw]">
+                                        {metricsLoading && !metricsData?.[project._id] ? (
                                           <div className="flex items-center gap-[0.5vw]">
-                                            <ProgressBar proj={project} />
-                                            <span className="text-[0.75vw] text-gray-600 shrink-0">
-                                              {project.percentage || 0}%
-                                            </span>
-                                            {underReviewCount > 0 && (
-                                              <button
-                                                className="text-[0.7vw] bg-black text-white rounded-full px-[0.45vw] py-[0.05vw] font-medium "
-                                                title="Under Review Task's Count"
-                                              >
-                                                {underReviewCount}
-                                              </button>
-                                            )}
+                                            <div className="w-[70%] bg-gray-200 rounded-full h-[0.7vw] animate-pulse" />
+                                            <div className="h-[0.75vw] w-[2vw] bg-gray-200 animate-pulse rounded" />
                                           </div>
-                                        </div>
+                                        ) : (
+                                          <div className="flex flex-col gap-[0.3vw]">
+                                            <div className="flex items-center gap-[0.5vw]">
+                                              <ProgressBar proj={project} />
+                                              <span className="text-[0.75vw] text-gray-600 shrink-0">
+                                                {project.percentage || 0}%
+                                              </span>
+                                              {underReviewCount > 0 && (
+                                                <button
+                                                  className="text-[0.7vw] bg-black text-white rounded-full px-[0.45vw] py-[0.05vw] font-medium "
+                                                  title="Under Review Task's Count"
+                                                >
+                                                  {underReviewCount}
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
                                       </td>
 
                                       {/* Tasks completed column */}
                                       <td className="px-[0.7vw] py-[0.6vw] border border-gray-300 text-center">
-                                        {totalTasks > 0 ? (
+                                        {metricsLoading && !metricsData?.[project._id] ? (
+                                          <div className="h-[1vw] w-[3vw] bg-gray-200 animate-pulse rounded-full mx-auto" />
+                                        ) : totalTasks > 0 ? (
                                           <span
                                             className={`text-[0.78vw] font-semibold px-[0.55vw] py-[0.15vw] rounded-full ${
                                               completedTasks === totalTasks

@@ -2295,8 +2295,12 @@ const MeetingsCard = ({ apiBaseUrl }) => {
         const data = await res.json();
         const onlyMeetings = Array.isArray(data)
           ? data.filter((e) => {
-              const type = (e.event_type || e.eventtype || e.eventType || "").toLowerCase();
-              return type === "meeting" || type === "technical presentation" || type === "technicalpresentation" || type === "technical_presentation";
+              const type = (e.event_type || e.eventtype || e.eventType || "").toLowerCase().trim();
+              return (
+                type.includes("meeting") ||
+                type.includes("presentation") ||
+                type.includes("discuss")
+              );
             })
           : [];
         setMeetings(onlyMeetings);
@@ -2565,7 +2569,9 @@ const MeetingsCard = ({ apiBaseUrl }) => {
               const isTimeDone = (() => {
                 if (!meeting.date) return false;
                 try {
-                  const dateStr = meeting.date;
+                  const dateStr = String(meeting.date).includes("T")
+                    ? meeting.date.split("T")[0]
+                    : String(meeting.date);
                   const timeStr = meeting.start_time || meeting.startTime || "23:59";
                   const dt = new Date(`${dateStr}T${timeStr}`);
                   if (!isNaN(dt.getTime())) return dt < now;
@@ -2846,7 +2852,7 @@ const MeetingsCard = ({ apiBaseUrl }) => {
                   >
                     {meeting.title}
                   </p>
-                  {meeting.subtype && (
+                  {(meeting.event_type || meeting.eventtype || meeting.eventType || meeting.subtype) && (
                     <p
                       style={{
                         fontSize: "0.8vw",
@@ -2857,7 +2863,13 @@ const MeetingsCard = ({ apiBaseUrl }) => {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {meeting.subtype}
+                      {[
+                        meeting.event_type || meeting.eventtype || meeting.eventType,
+                        meeting.subtype,
+                      ]
+                        .filter(Boolean)
+                        .filter((v, i, a) => a.indexOf(v) === i)
+                        .join(" • ")}
                     </p>
                   )}
                   {meeting.agenda && (

@@ -126,12 +126,18 @@ export default function Overview() {
   const [deletingId, setDeletingId] = useState("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const { data: projectData, isLoading: loading, error, refetch } = useQuery({
-    queryKey: ["project", projectId],
+  // Level 1: Fast basic project info query (< 30ms instant render of header, dates, team head, correction dates)
+  const {
+    data: projectBasicData,
+    isLoading: basicLoading,
+    error: basicError,
+    refetch: refetchBasic,
+  } = useQuery({
+    queryKey: ["projectBasic", projectId],
     queryFn: async () => {
       if (!projectId) throw new Error("No project ID provided");
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}`,
+        `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}?includeTasks=false`,
       );
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -143,19 +149,69 @@ export default function Overview() {
       return data.data;
     },
     enabled: !!projectId,
+    staleTime: 1000 * 60 * 3, // 3 minutes cache validity
+    gcTime: 1000 * 60 * 10,   // 10 minutes memory retention
+    refetchOnWindowFocus: false,
   });
+
+  // Level 2: Concurrent project tasks query (enriches timeline, stats cards, and reports tables)
+  const {
+    data: tasksData,
+    isLoading: tasksLoading,
+    refetch: refetchTasks,
+  } = useQuery({
+    queryKey: ["projectTasks", projectId],
+    queryFn: async () => {
+      if (!projectId) return { tasks: [], percentage: 0 };
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/project/${projectId}/tasks`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.message || "Failed to load project tasks");
+      }
+      return data.data || { tasks: [], percentage: 0 };
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 60 * 3, // 3 minutes cache validity
+    gcTime: 1000 * 60 * 10,   // 10 minutes memory retention
+    refetchOnWindowFocus: false,
+  });
+
+  const refetch = () => {
+    refetchBasic();
+    refetchTasks();
+  };
+
+  const projectData = useMemo(() => {
+    if (!projectBasicData) return null;
+    return {
+      ...projectBasicData,
+      tasks: tasksData?.tasks || [],
+      percentage:
+        tasksData?.percentage !== undefined
+          ? tasksData.percentage
+          : projectBasicData.percentage || 0,
+    };
+  }, [projectBasicData, tasksData]);
+
+  const loading = basicLoading && !projectData;
+  const error = basicError ? basicError.message : null;
 
   useEffect(() => {
     if (refreshTrigger > 0) {
       refetch();
     }
-  }, [refreshTrigger, refetch]);
+  }, [refreshTrigger]);
 
   useEffect(() => {
     const handleRefresh = () => refetch();
     window.addEventListener("RefreshLoad", handleRefresh);
     return () => window.removeEventListener("RefreshLoad", handleRefresh);
-  }, [refetch]);
+  }, []);
 
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
 
@@ -710,11 +766,8 @@ export default function Overview() {
     setShowEmployeeModal(true);
   };
 
-  const handleEmployeeUpdate = (updatedEmployees) => {
-    setProjectData((prev) => ({
-      ...prev,
-      employees: updatedEmployees.data.employees,
-    }));
+  const handleEmployeeUpdate = () => {
+    refetch();
   };
 
   return (
@@ -784,9 +837,13 @@ export default function Overview() {
 
         <div className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]">
           <div className="flex items-center justify-between">
-            <p className="text-[1.1vw] font-bold text-[#08C1CE]">
-              {stats.total}
-            </p>
+            {tasksLoading && !tasksData ? (
+              <div className="h-[1.1vw] w-[2.5vw] bg-gray-200 animate-pulse rounded" />
+            ) : (
+              <p className="text-[1.1vw] font-bold text-[#08C1CE]">
+                {stats.total}
+              </p>
+            )}
             <img src={totalIcon} alt="Total" className="w-[1.5vw] h-[1.5vw]" />
           </div>
           <p className="text-[0.8vw] text-gray-700">Total</p>
@@ -794,9 +851,13 @@ export default function Overview() {
 
         <div className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]">
           <div className="flex items-center justify-between">
-            <p className="text-[1.1vw] font-bold text-green-500">
-              {stats.completed}
-            </p>
+            {tasksLoading && !tasksData ? (
+              <div className="h-[1.1vw] w-[2.5vw] bg-gray-200 animate-pulse rounded" />
+            ) : (
+              <p className="text-[1.1vw] font-bold text-green-500">
+                {stats.completed}
+              </p>
+            )}
             <img
               src={completedIcon}
               alt="Completed"
@@ -808,9 +869,13 @@ export default function Overview() {
 
         <div className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]">
           <div className="flex items-center justify-between">
-            <p className="text-[1.1vw] font-bold text-indigo-500">
-              {stats.ongoing}
-            </p>
+            {tasksLoading && !tasksData ? (
+              <div className="h-[1.1vw] w-[2.5vw] bg-gray-200 animate-pulse rounded" />
+            ) : (
+              <p className="text-[1.1vw] font-bold text-indigo-500">
+                {stats.ongoing}
+              </p>
+            )}
             <img
               src={onGoingIcon}
               alt="Ongoing"
@@ -822,9 +887,13 @@ export default function Overview() {
 
         <div className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]">
           <div className="flex items-center justify-between">
-            <p className="text-[1.1vw] font-bold text-yellow-500">
-              {stats.delayed}
-            </p>
+            {tasksLoading && !tasksData ? (
+              <div className="h-[1.1vw] w-[2.5vw] bg-gray-200 animate-pulse rounded" />
+            ) : (
+              <p className="text-[1.1vw] font-bold text-yellow-500">
+                {stats.delayed}
+              </p>
+            )}
             <img
               src={delayedIcon}
               alt="Delayed"
@@ -836,9 +905,13 @@ export default function Overview() {
 
         <div className="bg-white rounded-lg shadow-sm flex flex-col p-[0.6vw] gap-[0.7vw] w-[16%]">
           <div className="flex items-center justify-between">
-            <p className="text-[1.1vw] font-bold text-red-500">
-              {stats.overdue}
-            </p>
+            {tasksLoading && !tasksData ? (
+              <div className="h-[1.1vw] w-[2.5vw] bg-gray-200 animate-pulse rounded" />
+            ) : (
+              <p className="text-[1.1vw] font-bold text-red-500">
+                {stats.overdue}
+              </p>
+            )}
             <img
               src={overdueIcon}
               alt="Overdue"
@@ -1030,7 +1103,22 @@ export default function Overview() {
       </div>
 
       <div className="mt-[0.5vw] mb-[0.5vw] ">
-        {tableShow === "timeline" ? (
+        {tasksLoading && !tasksData ? (
+          <div className="bg-white rounded-xl shadow-sm p-[1vw] min-h-[350px] flex flex-col gap-[0.8vw]">
+            <div className="flex justify-between items-center">
+              <div className="h-[1.5vw] w-[20%] animate-shimmer rounded" />
+              <div className="h-[1.5vw] w-[15%] animate-shimmer rounded-full" />
+            </div>
+            <div className="space-y-[0.6vw] mt-[0.5vw]">
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <div
+                  key={`tab-skel-${idx}`}
+                  className="h-[3.5vw] animate-shimmer rounded-lg w-full"
+                />
+              ))}
+            </div>
+          </div>
+        ) : tableShow === "timeline" ? (
           <div>
             <Timeline
               EmployeeData={projectData.employees || []}
