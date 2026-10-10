@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -81,7 +81,6 @@ const TableSkeleton = ({ isManagement }) => {
 const InternReports = () => {
   // ✅ Lazy loading state
   const [allFetchedReports, setAllFetchedReports] = useState([]);
-  const [totalReportsCount, setTotalReportsCount] = useState(0);
   const [currentBatch, setCurrentBatch] = useState(0);
   const [loadedBatches, setLoadedBatches] = useState(new Set([0]));
 
@@ -171,6 +170,41 @@ const InternReports = () => {
   
   const employees = employeesData;
 
+  const filteredEmployeeList = useMemo(() => {
+    return employees.filter((emp) => {
+      const designation = emp.designation || "";
+      if (
+        designation.toLowerCase() === "maid" ||
+        designation.toLowerCase().includes("maid")
+      ) {
+        return false;
+      }
+      const isManagementRole =
+        designation.includes("Project Head") ||
+        designation.includes("SBU") ||
+        designation.includes("HR") ||
+        designation.includes("Marketing");
+      if (reportType === "management") {
+        return isManagementRole;
+      }
+      return !isManagementRole;
+    });
+  }, [employees, reportType]);
+
+  const isEmployeeActive = (emp) => {
+    const status = (emp.working_status || "").trim().toLowerCase();
+    return status === "working" || status === "active" || status === "";
+  };
+
+  const activeEmployees = useMemo(
+    () => filteredEmployeeList.filter(isEmployeeActive),
+    [filteredEmployeeList]
+  );
+  const inactiveEmployees = useMemo(
+    () => filteredEmployeeList.filter((emp) => !isEmployeeActive(emp)),
+    [filteredEmployeeList]
+  );
+
   const { data: reportsQueryData, isLoading: reportsQueryLoading } = useQuery({
     queryKey: ["internReports", userInfo?.employee_id, reportType, selectedEmployee, searchTerm, startDate, endDate, currentBatch],
     queryFn: async () => {
@@ -209,25 +243,37 @@ const InternReports = () => {
     enabled: !!userInfo,
   });
 
-  const loading = reportsQueryLoading && allFetchedReports.length === 0;
-  const fetchingMore = reportsQueryLoading && allFetchedReports.length > 0;
+  const totalReportsCount =
+    reportsQueryData?.total ?? (reportsQueryData?.reports?.length || 0);
+
+  const activeReports = useMemo(() => {
+    if (currentBatch === 0) {
+      return reportsQueryData?.reports || [];
+    }
+    return allFetchedReports.length > 0
+      ? allFetchedReports
+      : reportsQueryData?.reports || [];
+  }, [currentBatch, reportsQueryData, allFetchedReports]);
+
+  const loading = reportsQueryLoading && activeReports.length === 0;
+  const fetchingMore = reportsQueryLoading && activeReports.length > 0;
 
   useEffect(() => {
-    if (reportsQueryData) {
-      const newReports = reportsQueryData.reports;
+    if (reportsQueryData?.reports) {
       if (currentBatch > 0) {
         setAllFetchedReports((prev) => {
+          const base =
+            prev.length > 0 ? prev : reportsQueryData.reports;
           const existingKeys = new Set(
-            prev.map((r) => `${r.employee_id}_${r.report_date}`)
+            base.map((r) => `${r.employee_id}_${r.report_date}`)
           );
-          const uniqueNew = newReports.filter(
+          const uniqueNew = reportsQueryData.reports.filter(
             (r) => !existingKeys.has(`${r.employee_id}_${r.report_date}`)
           );
-          return [...prev, ...uniqueNew];
+          return [...base, ...uniqueNew];
         });
       } else {
-        setAllFetchedReports(newReports);
-        setTotalReportsCount(reportsQueryData.total);
+        setAllFetchedReports(reportsQueryData.reports);
       }
       setLoadedBatches((prev) => new Set([...prev, currentBatch]));
     }
@@ -239,7 +285,6 @@ const InternReports = () => {
     setCurrentBatch(0);
     setLoadedBatches(new Set([0]));
     setCurrentPage(1);
-    setTotalReportsCount(0);
   }, [reportType, selectedEmployee, searchTerm, startDate, endDate]);
 
   // ✅ loadAllRecordsForFiltering is no longer needed as the backend handles filtering
@@ -278,7 +323,7 @@ const InternReports = () => {
     // Note: Most filtering is now done on the server. 
     // This client-side filter handles only the local search term (on current results)
     // and ensuring no Sundays are displayed if they somehow slipped through.
-    let filtered = allFetchedReports.filter((report) => {
+    let filtered = activeReports.filter((report) => {
       const date = new Date(report.report_date);
       if (date.getDay() === 0) return false; // Skip Sundays
       
@@ -653,35 +698,30 @@ const InternReports = () => {
                             className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="all">All Employees</option>
-                            {employees
-                              .filter((emp) => {
-                                const designation = emp.designation || "";
-                                if (
-                                  designation.toLowerCase() === "maid" ||
-                                  designation.toLowerCase().includes("maid")
-                                ) {
-                                  return false;
-                                }
-                                const isManagementRole =
-                                  designation.includes("Project Head") ||
-                                  designation.includes("SBU") ||
-                                  designation.includes("HR") ||
-                                  designation.includes("Marketing");
-                                if (reportType === "management") {
-                                  // Management tab: only show management roles
-                                  return isManagementRole;
-                                }
-                                // Employees tab: exclude management roles
-                                return !isManagementRole;
-                              })
-                              .map((emp) => (
-                                <option
-                                  key={emp.employee_id}
-                                  value={emp.employee_id}
-                                >
-                                  {emp.employee_name}
-                                </option>
-                              ))}
+                            {activeEmployees.length > 0 && (
+                              <optgroup label="Active Employees">
+                                {activeEmployees.map((emp) => (
+                                  <option
+                                    key={emp.employee_id}
+                                    value={emp.employee_id}
+                                  >
+                                    {emp.employee_name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {inactiveEmployees.length > 0 && (
+                              <optgroup label="Inactive Employees">
+                                {inactiveEmployees.map((emp) => (
+                                  <option
+                                    key={emp.employee_id}
+                                    value={emp.employee_id}
+                                  >
+                                    {emp.employee_name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         ) : userInfo?.isTeamHead ? (
                           <select
@@ -692,35 +732,30 @@ const InternReports = () => {
                             className="w-full px-[0.4vw] py-[0.25vw] text-[0.75vw] border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="all">All Team Members</option>
-                            {employees
-                              .filter((emp) => {
-                                const designation = emp.designation || "";
-                                if (
-                                  designation.toLowerCase() === "maid" ||
-                                  designation.toLowerCase().includes("maid")
-                                ) {
-                                  return false;
-                                }
-                                const isManagementRole =
-                                  designation.includes("Project Head") ||
-                                  designation.includes("SBU") ||
-                                  designation.includes("HR") ||
-                                  designation.includes("Marketing");
-                                if (reportType === "management") {
-                                  // Management tab: only show management roles
-                                  return isManagementRole;
-                                }
-                                // Employees tab: exclude management roles
-                                return !isManagementRole;
-                              })
-                              .map((emp) => (
-                                <option
-                                  key={emp.employee_id}
-                                  value={emp.employee_id}
-                                >
-                                  {emp.employee_name}
-                                </option>
-                              ))}
+                            {activeEmployees.length > 0 && (
+                              <optgroup label="Active Employees">
+                                {activeEmployees.map((emp) => (
+                                  <option
+                                    key={emp.employee_id}
+                                    value={emp.employee_id}
+                                  >
+                                    {emp.employee_name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {inactiveEmployees.length > 0 && (
+                              <optgroup label="Inactive Employees">
+                                {inactiveEmployees.map((emp) => (
+                                  <option
+                                    key={emp.employee_id}
+                                    value={emp.employee_id}
+                                  >
+                                    {emp.employee_name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         ) : (
                           <div className="px-[0.4vw] py-[0.25vw] text-[0.75vw] bg-gray-100 border border-gray-300 rounded-lg text-gray-600">

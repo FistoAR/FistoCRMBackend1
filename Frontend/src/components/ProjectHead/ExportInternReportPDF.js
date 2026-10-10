@@ -112,32 +112,32 @@ class ExportInternReportPDF {
                   const isMgmt = reportType === "management";
                   row.push(
                     { 
-                      content: `Leave type\n${task.task_name}`,
+                      content: `Leave type\n\n${task.task_name}`,
                       isLeaveCell: true,
                       label: "Leave type",
-                      value: task.task_name,
+                      value: task.task_name || "-",
                       labelColor: [180, 124, 50],
                       valueColor: [17, 24, 39],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, fontSize: 6.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 12, fontSize: 6.5, textColor: [254, 249, 195] } 
                     },
                     { 
-                      content: `Reason\n${task.reason || task.outcome || "-"}`,
+                      content: `Reason\n\n${task.reason || task.outcome || "-"}`,
                       isLeaveCell: true,
                       label: "Reason",
                       value: task.reason || task.outcome || "-",
                       labelColor: [180, 124, 50],
                       valueColor: [60, 60, 60],
                       colSpan: isMgmt ? 5 : 8,
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "left", fontSize: 6.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 12, halign: "left", fontSize: 6.5, textColor: [254, 249, 195] } 
                     },
                     { 
-                      content: `Status\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
+                      content: `Status\n\nPH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
                       isLeaveCell: true,
                       label: "Status",
                       value: `PH: ${task.team_head_status || "Pending"}\nMgmt: ${task.management_status || "Pending"}`,
                       labelColor: [180, 124, 50],
                       valueColor: [60, 60, 60],
-                      styles: { fillColor: [254, 249, 195], minCellHeight: 8, halign: "center", fontSize: 6.5, textColor: [254, 249, 195] } 
+                      styles: { fillColor: [254, 249, 195], minCellHeight: 12, halign: "center", fontSize: 6.5, textColor: [254, 249, 195] } 
                     }
                   );
                 }
@@ -248,22 +248,26 @@ class ExportInternReportPDF {
                 const { label, value, labelColor, valueColor } = data.cell.raw;
                 const { doc } = data;
                 const { x, y, width } = data.cell;
-                const padding = 2;
+                const paddingX = 2;
+                const paddingTop = 1.8;
 
                 // Labels in Gold
                 doc.setFont("helvetica", "bold");
-                doc.setFontSize(7);
+                doc.setFontSize(6.5);
                 doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-                doc.text(label, x + padding, y + padding + 3);
+                const labelY = y + paddingTop + 2.0;
+                doc.text(label, x + paddingX, labelY);
 
                 // Values in Black/Dark Gray
                 doc.setFont("helvetica", "normal");
-                doc.setFontSize(7.5);
+                doc.setFontSize(6.5);
                 doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
                 
                 // Handle multi-line value with splitTextToSize
-                const splitValue = doc.splitTextToSize(value, width - (padding * 2));
-                doc.text(splitValue, x + padding, y + padding + 7);
+                const splitValue = doc.splitTextToSize(value, width - (paddingX * 2));
+                const valueLineSpacing = 2.7;
+                const valueStartY = labelY + valueLineSpacing;
+                doc.text(splitValue, x + paddingX, valueStartY, { lineHeightFactor: 1.2 });
                 
                 return false; // Prevents default text drawing
               }

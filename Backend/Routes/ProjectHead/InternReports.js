@@ -15,7 +15,7 @@ router.get("/team-by-designation/:designation", async (req, res) => {
   try {
     const { designation } = req.params;
     const query = `
-      SELECT employee_id, employee_name, designation
+      SELECT employee_id, employee_name, designation, working_status
       FROM employees_details
       WHERE designation = ?
       ORDER BY employee_name
@@ -193,36 +193,27 @@ async function processAttendanceRecord(attendance) {
 function expandLeaveToDays(leave, startDate, endDate) {
   const days = [];
 
-  // Parse date strings as local time (not UTC) to avoid timezone shifts
-  // "2026-04-24" -> new Date("2026-04-24") is UTC midnight, shifts to April 23 in IST
-  // Fix: parse manually as local midnight
-  const parseLocalDate = (dateStr) => {
-    if (!dateStr) return null;
-    const str = typeof dateStr === 'string' ? dateStr.slice(0, 10) : getISTDateString(dateStr);
-    const [y, m, d] = str.split('-').map(Number);
-    const dt = new Date(y, m - 1, d, 0, 0, 0, 0); // Local midnight
-    return dt;
-  };
   const leaveStartStr = getISTDateString(leave.from_date);
-  const leaveEndStr = getISTDateString(leave.to_date);
-  
+  // Fall back to from_date if to_date is null/empty (e.g. single day leave)
+  const leaveEndStr = getISTDateString(leave.to_date || leave.from_date);
+
+  if (!leaveStartStr) return days;
+
   console.log(`Expanding Leave ID ${leave.id}: ${leaveStartStr} to ${leaveEndStr}`);
 
   // Parse to UTC-based dates to avoid local DST/Timezone issues
   let current = new Date(leaveStartStr);
-  let end = new Date(leaveEndStr);
-
-  const filterStart = startDate ? new Date(startDate) : new Date(0);
-  const filterEnd = endDate ? new Date(endDate) : new Date("9999-12-31");
+  let end = new Date(leaveEndStr || leaveStartStr);
 
   const phStatus = leave.team_head_status || "Pending";
   const mgmtStatus = leave.management_status || leave.status || "Pending";
 
   while (current <= end) {
+    const reportDateStr = current.toISOString().slice(0, 10);
+    const isWithinRange = (!startDate || reportDateStr >= startDate) && (!endDate || reportDateStr <= endDate);
+
     // Only include if within filter range and NOT a Sunday (0)
-    if (current >= filterStart && current <= filterEnd && current.getUTCDay() !== 0) {
-      const reportDateStr = current.toISOString().slice(0, 10);
-      
+    if (isWithinRange && current.getUTCDay() !== 0) {
       days.push({
         employee_id: leave.employee_id,
         employee_name: leave.employee_name,
@@ -295,6 +286,9 @@ router.get("/all-reports", async (req, res) => {
     if (employee_id && employee_id !== "all") {
       filterClause += ` AND att.employee_id = ?`;
       params.push(employee_id);
+    } else if (isTeamHead === "true" && designation) {
+      filterClause += ` AND ed.designation = ?`;
+      params.push(designation);
     } else {
       filterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
                          AND ed.designation NOT LIKE '%SBU%' 
@@ -302,10 +296,7 @@ router.get("/all-reports", async (req, res) => {
                          AND ed.designation NOT LIKE '%Marketing%'
                          AND ed.designation NOT LIKE '%Maid%')`;
 
-      if (isTeamHead === "true" && designation) {
-        filterClause += ` AND ed.designation = ?`;
-        params.push(designation);
-      } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
+      if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
         filterClause += ` AND ed.designation = ?`;
         params.push(designation);
       }
@@ -343,25 +334,21 @@ router.get("/all-reports", async (req, res) => {
     if (employee_id && employee_id !== "all") {
       leaveFilterClause += ` AND lr.employee_id = ?`;
       leaveParams.push(employee_id);
+    } else if (isTeamHead === "true" && designation) {
+      leaveFilterClause += ` AND ed.designation = ?`;
+      leaveParams.push(designation);
     } else {
-      // Exclude management roles when viewing all
-      leaveFilterClause += ` AND (ed.designation NOT LIKE '%Project Head%' 
-                             AND ed.designation NOT LIKE '%SBU%' 
-                             AND ed.designation NOT LIKE '%HR%' 
-                             AND ed.designation NOT LIKE '%Marketing%'
-                             AND ed.designation NOT LIKE '%Maid%')`;
+      // Include leaves applied by everyone (including Project Head, interns, and employees), exclude Maid
+      leaveFilterClause += ` AND (ed.designation IS NULL OR ed.designation NOT LIKE '%Maid%')`;
 
-      if (isTeamHead === "true" && designation) {
-        leaveFilterClause += ` AND ed.designation = ?`;
-        leaveParams.push(designation);
-      } else if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
+      if (designation && !ADMIN_DESIGNATIONS.includes(designation)) {
         leaveFilterClause += ` AND ed.designation = ?`;
         leaveParams.push(designation);
       }
     }
 
     if (start_date) {
-      leaveFilterClause += ` AND lr.to_date >= ?`;
+      leaveFilterClause += ` AND COALESCE(lr.to_date, lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -586,7 +573,7 @@ router.get("/management-reports", async (req, res) => {
       leaveParams.push(employee_id);
     }
     if (start_date) {
-      leaveQuery += ` AND lr.to_date >= ?`;
+      leaveQuery += ` AND COALESCE(lr.to_date, lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -740,7 +727,7 @@ router.get("/reports/:employee_id", async (req, res) => {
     const leaveParams = [employee_id];
 
     if (start_date) {
-      leaveQuery += ` AND lr.to_date >= ?`;
+      leaveQuery += ` AND COALESCE(lr.to_date, lr.from_date) >= ?`;
       leaveParams.push(start_date);
     }
     if (end_date) {
@@ -778,18 +765,24 @@ router.get("/reports/:employee_id", async (req, res) => {
       }
     });
 
-    // 4. Sort by date DESC
-    combinedReports.sort((a, b) => {
+    // 4. Final Filtering (Hide future records)
+    const now = new Date();
+    const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
+    const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
+    const finalReports = combinedReports.filter(r => normalizeKey(r.report_date) <= todayStr);
+
+    // Sort by date DESC
+    finalReports.sort((a, b) => {
       const dateA = normalizeKey(a.report_date);
       const dateB = normalizeKey(b.report_date);
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return (a.is_leave ? 1 : 0) - (b.is_leave ? 1 : 0);
     });
 
-    const totalCount = combinedReports.length;
+    const totalCount = finalReports.length;
 
     // 5. Paginate
-    let paginatedReports = combinedReports;
+    let paginatedReports = finalReports;
     if (fetchAll !== "true") {
       paginatedReports = combinedReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
     }

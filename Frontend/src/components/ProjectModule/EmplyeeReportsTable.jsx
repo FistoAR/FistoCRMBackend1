@@ -18,7 +18,28 @@ import filterIcon from "../../assets/ProjectPages/filter.webp";
 import searchIcon from "../../assets/ProjectPages/search.webp";
 import clearFiterIcon from "../../assets/ProjectPages/overview/clear-filter.webp";
 import HistoryIcon from "../../assets/ProjectPages/overview/history.webp"
-import PrevIcon from "../../assets/ProjectPages/overview/back.webp"
+const calculateHoldDuration = (statusHistory) => {
+  if (!statusHistory || !Array.isArray(statusHistory)) return 0;
+  let totalHoldMs = 0;
+  let holdStartTime = null;
+
+  statusHistory.forEach((historyItem) => {
+    if (historyItem.status === "Hold" && !holdStartTime) {
+      holdStartTime = new Date(historyItem.createdAt);
+    } else if (historyItem.status !== "Hold" && holdStartTime) {
+      const holdEndTime = new Date(historyItem.createdAt);
+      totalHoldMs += holdEndTime.getTime() - holdStartTime.getTime();
+      holdStartTime = null;
+    }
+  });
+
+  if (holdStartTime) {
+    const now = new Date();
+    totalHoldMs += now.getTime() - holdStartTime.getTime();
+  }
+
+  return totalHoldMs;
+};
 
 export default function EmployeeTaskTable({
   currentEmployees,
@@ -309,11 +330,14 @@ export default function EmployeeTaskTable({
     const endDateTime = new Date(endDate);
     endDateTime.setHours(endHour, endMinute, 0, 0);
 
-    const isOverdue = endDateTime < currentIST && taskProgress < 100;
+    const holdPeriodMs = calculateHoldDuration(task.statusHistory);
+    const effectiveEndDateTime = new Date(endDateTime.getTime() + holdPeriodMs);
+
+    const isOverdue = effectiveEndDateTime < currentIST && taskProgress < 100;
     const isDelayed =
       taskProgress === 100 &&
       task.latestReportDate &&
-      new Date(task.latestReportDate) > endDateTime;
+      new Date(task.latestReportDate) > effectiveEndDateTime;
 
     let matchesStatus = true;
     if (filterStatus === "all") {
@@ -1036,28 +1060,7 @@ export default function EmployeeTaskTable({
     return currentEmployees?.find((emp) => emp.id === employeeId) || null;
   };
 
-  const calculateHoldDuration = (statusHistory) => {
-    if (!statusHistory || !Array.isArray(statusHistory)) return 0;
-    let totalHoldMs = 0;
-    let holdStartTime = null;
 
-    statusHistory.forEach((historyItem) => {
-      if (historyItem.status === "Hold" && !holdStartTime) {
-        holdStartTime = new Date(historyItem.createdAt);
-      } else if (historyItem.status !== "Hold" && holdStartTime) {
-        const holdEndTime = new Date(historyItem.createdAt);
-        totalHoldMs += holdEndTime.getTime() - holdStartTime.getTime();
-        holdStartTime = null;
-      }
-    });
-
-    if (holdStartTime) {
-      const now = new Date();
-      totalHoldMs += now.getTime() - holdStartTime.getTime();
-    }
-
-    return totalHoldMs;
-  };
 
   const getStatusColor = (status) => {
     switch (status) {

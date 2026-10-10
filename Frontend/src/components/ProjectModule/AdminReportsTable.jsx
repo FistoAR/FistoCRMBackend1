@@ -261,11 +261,14 @@ export default function AdminReportsTable({
     const endDateTime = new Date(endDate);
     endDateTime.setHours(endHour, endMinute, 0, 0);
 
-    const isOverdue = endDateTime < currentIST && taskProgress < 100;
+    const holdPeriodMs = calculateHoldDuration(task.statusHistory);
+    const effectiveEndDateTime = new Date(endDateTime.getTime() + holdPeriodMs);
+
+    const isOverdue = effectiveEndDateTime < currentIST && taskProgress < 100;
     const isDelayed =
       taskProgress === 100 &&
       task.latestReportDate &&
-      new Date(task.latestReportDate) > endDateTime;
+      new Date(task.latestReportDate) > effectiveEndDateTime;
 
     let matchesStatus = true;
     if (filterStatus === "all") {

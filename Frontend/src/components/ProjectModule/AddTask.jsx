@@ -42,6 +42,7 @@ export default function AddTask({
   const [activityPointInput, setActivityPointInput] = useState({});
   const [deadlineCrossed, setDeadlineCrossed] = useState(false);
   const [isCorrectionsExpanded, setIsCorrectionsExpanded] = useState(false);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(Boolean(projectId));
 
   const getTodayDate = () => {
     const today = new Date();
@@ -1229,8 +1230,12 @@ export default function AddTask({
     }
 
     const fetchExistingTasks = async () => {
-      if (!projectId) return;
+      if (!projectId) {
+        setIsLoadingTasks(false);
+        return;
+      }
 
+      setIsLoadingTasks(true);
       try {
         const response = await fetch(
           `${import.meta.env.VITE_API_BASE_URL}/tasks/project/${projectId}`,
@@ -1349,6 +1354,8 @@ export default function AddTask({
         setTimeout(() => {
           initialTasksRef.current = JSON.stringify(tasks);
         }, 100);
+      } finally {
+        setIsLoadingTasks(false);
       }
     };
 
@@ -1513,7 +1520,7 @@ export default function AddTask({
           <span
             className="mr-[0.5vw] mt-[0.1vw]"
             onClick={async () => {
-              if (hasUnsavedChanges) {
+              if (hasUnsavedChanges && !isLoadingTasks) {
                 const ok = await confirm({
                   type: "warning",
                   title: "Unsaved Changes",
@@ -1541,7 +1548,7 @@ export default function AddTask({
       </div>
 
 
-      <div className="max-h-[75vh] h-auto w-full overflow-y-auto overflow-x-hidden pr-[0.3vw] pt-[0.3vw] scrollbar-thin scrollbar-thumb-gray-300">
+      <div className="flex-1 max-h-[75vh] h-auto w-full overflow-y-auto overflow-x-hidden pr-[0.3vw] pt-[0.3vw] pb-[1vw] scrollbar-thin scrollbar-thumb-gray-300">
         {correctionDate && correctionDate.length > 0 && (
           <div className="px-[0.8vw] py-[0.3vw] mx-[1vw] my-[0.7vw] mb-[1vw] bg-orange-50 border-2 border-orange-300 rounded-lg">
             <div 
@@ -1577,7 +1584,12 @@ export default function AddTask({
             )}
           </div>
         )}
-        {deadlineCrossed && tasks.length === 0 ? (
+        {isLoadingTasks ? (
+          <div className="flex flex-col items-center justify-center min-h-[40vh] h-full gap-[0.8vw] py-[3vw]">
+            <Loader2 className="w-[2.2vw] h-[2.2vw] animate-spin text-blue-500" />
+            <p className="text-[0.8vw] text-gray-500 font-medium">Loading tasks...</p>
+          </div>
+        ) : deadlineCrossed && tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-[1vw] py-[2vw]">
             <div className="text-center max-w-[36vw]">
               {/* Icon */}
@@ -1627,18 +1639,86 @@ export default function AddTask({
             </div>
           </div>
         ) : (
-          tasks.map((task, taskIndex) => (
-            <div
-              key={task.id || taskIndex}
-              className="flex flex-col rounded-b-lg bg-white"
-            >
-              <div className="relative flex items-start">
-                <div className="flex flex-col items-center mt-[1.25vw] px-[0.7vw]">
-                  <div className="w-[1.9vw] h-[1.8vw] text-[0.85vw] flex items-center justify-center rounded-full border bg-white inset-0 z-[1] border-blue-400 text-blue-400 font-bold">
-                    {String(taskIndex + 1).padStart(2, "0")}
+          <>
+            {!deadlineCrossed && (
+              <div className="relative flex items-center pl-[0.7vw] gap-[0.6vw] mb-[0.6vw] pt-[0.3vw]">
+                <div className="flex flex-col items-center">
+                  <div className="w-[1.9vw] h-[1.8vw] text-[0.85vw] bg-white z-[1] flex items-center justify-center rounded-full border border-blue-400 text-blue-400 font-bold">
+                    {String(tasks.length + 1).padStart(2, "0")}
                   </div>
-                  <div className="absolute overflow-hidden border-l border-dashed text-blue-400 border-blue-500 flex-1 h-[100%]"></div>
+                  {tasks.length > 0 && (
+                    <div className="absolute top-[0.9vw] bottom-[-1.5vw] overflow-hidden border-l border-dashed text-blue-400 border-blue-500"></div>
+                  )}
                 </div>
+                <button
+                  onClick={handleAddTask}
+                  disabled={
+                    deadlineCrossed ||
+                    (tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
+                    (() => {
+                      const todayStr = getTodayDate();
+
+                      // Check if today is within any correction date range
+                      if (correctionDate && correctionDate.length > 0) {
+                        const isInCorrectionRange = correctionDate.some((correction) => {
+                          const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+                          const endStr = correction.date ? correction.date.split("T")[0] : "";
+                          return todayStr >= startStr && todayStr <= endStr;
+                        });
+                        if (isInCorrectionRange) return false;
+                      }
+
+                      // Check if today is within project start and end date range
+                      const startStr = startDate ? startDate.split("T")[0] : "";
+                      const endStr = endDate ? endDate.split("T")[0] : "";
+                      return !(todayStr >= startStr && todayStr <= endStr);
+                    })()
+                  }
+                  className={`flex items-center text-white px-[0.6vw] py-[0.3vw] text-[0.75vw] rounded-full transition-colors ${(tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
+                    (() => {
+                      const todayStr = getTodayDate();
+
+                      if (correctionDate && correctionDate.length > 0) {
+                        const isInCorrectionRange = correctionDate.some((correction) => {
+                          const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+                          const endStr = correction.date ? correction.date.split("T")[0] : "";
+                          return todayStr >= startStr && todayStr <= endStr;
+                        });
+                        if (isInCorrectionRange) return false;
+                      }
+
+                      const startStr = startDate ? startDate.split("T")[0] : "";
+                      const endStr = endDate ? endDate.split("T")[0] : "";
+                      return !(todayStr >= startStr && todayStr <= endStr);
+                    })()
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-gray-700 hover:bg-gray-500 cursor-pointer"
+                    }`}
+                >
+                  + Add task {tasks.length + 1}
+                </button>
+              </div>
+            )}
+
+            {[...tasks]
+              .map((task, taskIndex) => ({ task, taskIndex }))
+              .reverse()
+              .map(({ task, taskIndex }) => (
+                <div
+                  key={task.id || taskIndex}
+                  className="flex flex-col rounded-b-lg bg-white"
+                >
+                  <div className="relative flex items-start">
+                    <div className="flex flex-col items-center mt-[1.25vw] px-[0.7vw]">
+                      <div className="w-[1.9vw] h-[1.8vw] text-[0.85vw] flex items-center justify-center rounded-full border bg-white inset-0 z-[1] border-blue-400 text-blue-400 font-bold">
+                        {String(taskIndex + 1).padStart(2, "0")}
+                      </div>
+                      <div
+                        className={`absolute overflow-hidden border-l border-dashed text-blue-400 border-blue-500 flex-1 ${
+                          taskIndex === 0 ? "h-[1.8vw]" : "h-[100%]"
+                        }`}
+                      ></div>
+                    </div>
 
                 <div
                   className={`flex-1 rounded-xl bg-white mt-[1vw] ${expandedTask === taskIndex ? "z-[20] relative" : "z-[10]"
@@ -2851,73 +2931,19 @@ export default function AddTask({
                       </div>
                     </div>
                   </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )))
-        }
+            ))}
+          </>
+        )}
       </div>
 
-      {!deadlineCrossed && (
-        <div className="flex items-center pl-[0.7vw] gap-[0.6vw] mt-[0.8vw]">
-          <div className="w-[1.9vw] h-[1.8vw] text-[0.85vw] bg-white inset-0 z-[1] flex items-center justify-center rounded-full border border-blue-400 text-blue-400 font-bold">
-            {String(tasks.length + 1).padStart(2, "0")}
-          </div>
-          <button
-            onClick={handleAddTask}
-            disabled={
-              deadlineCrossed ||
-              (tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
-              (() => {
-                const todayStr = getTodayDate();
-
-                // Check if today is within any correction date range
-                if (correctionDate && correctionDate.length > 0) {
-                  const isInCorrectionRange = correctionDate.some((correction) => {
-                    const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
-                    const endStr = correction.date ? correction.date.split("T")[0] : "";
-                    return todayStr >= startStr && todayStr <= endStr;
-                  });
-                  if (isInCorrectionRange) return false;
-                }
-
-                // Check if today is within project start and end date range
-                const startStr = startDate ? startDate.split("T")[0] : "";
-                const endStr = endDate ? endDate.split("T")[0] : "";
-                return !(todayStr >= startStr && todayStr <= endStr);
-              })()
-            }
-            className={`flex items-center text-white px-[0.5vw] py-[0.3vw] text-[0.75vw] rounded-full ${(tasks.length > 0 && !tasks[tasks.length - 1].canAddNext) ||
-              (() => {
-                const todayStr = getTodayDate();
-
-                if (correctionDate && correctionDate.length > 0) {
-                  const isInCorrectionRange = correctionDate.some((correction) => {
-                    const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
-                    const endStr = correction.date ? correction.date.split("T")[0] : "";
-                    return todayStr >= startStr && todayStr <= endStr;
-                  });
-                  if (isInCorrectionRange) return false;
-                }
-
-                const startStr = startDate ? startDate.split("T")[0] : "";
-                const endStr = endDate ? endDate.split("T")[0] : "";
-                return !(todayStr >= startStr && todayStr <= endStr);
-              })()
-              ? "bg-gray-400 cursor-not-allowed"
-              : "bg-gray-700 hover:bg-gray-500 cursor-pointer"
-              }`}
-          >
-            + Add task {tasks.length + 1}
-          </button>
-        </div>
-      )}
-
-      <div className="flex justify-end gap-[0.7vw] absolute bottom-[0.6vw] right-[0.6vw]">
+      <div className="flex justify-end items-center gap-[0.7vw] pt-[0.6vw] pb-[0.2vw] px-[0.3vw] bg-white z-[30] shrink-0">
         <button
           className="bg-gray-300 px-[0.9vw] py-[0.3vw] text-[0.8vw] rounded-full text-gray-700 hover:bg-gray-200 cursor-pointer"
           onClick={async () => {
-            if (hasUnsavedChanges) {
+            if (hasUnsavedChanges && !isLoadingTasks) {
               const ok = await confirm({
                 type: "warning",
                 title: "Unsaved Changes",
@@ -2939,11 +2965,12 @@ export default function AddTask({
         </button>
         <button
           onClick={handleSubmit}
-          disabled={isSubmitting}
-          className={`${isSubmitting
-            ? "bg-blue-400 cursor-not-allowed"
-            : "bg-blue-600 hover:bg-blue-500 cursor-pointer"
-            } text-white px-[1.3vw] py-[0.3vw] text-[0.8vw] rounded-full flex items-center gap-2`}
+          disabled={isSubmitting || isLoadingTasks}
+          className={`${
+            isSubmitting || isLoadingTasks
+              ? "bg-blue-300 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-500 cursor-pointer"
+          } text-white px-[1.3vw] py-[0.3vw] text-[0.8vw] rounded-full flex items-center gap-2`}
         >
           {isSubmitting && (
             <Loader2 className="w-[1.2vw] h-[1.2vw] animate-spin" />
