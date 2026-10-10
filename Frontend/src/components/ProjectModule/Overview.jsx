@@ -113,7 +113,6 @@ export default function Overview() {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [showYours, setShowYours] = useState(true);
 
-  const [tableShow, setTableShow] = useState("timeline");
   const {
     projectId,
     projectName,
@@ -121,7 +120,12 @@ export default function Overview() {
     status,
     projectTab,
     statusHistory,
+    autoOpenReport,
+    openTaskId,
+    openActivityId,
   } = location.state || {};
+
+  const [tableShow, setTableShow] = useState(autoOpenReport ? "list" : "timeline");
   const [buttonLoading, setbuttonLoading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -1152,6 +1156,8 @@ export default function Overview() {
             projectType={projectData.projectType || projectType}
             projectTab={projectTab}
             statusHistory={statusHistory}
+            autoOpenTaskId={openTaskId}
+            autoOpenActivityId={openActivityId}
           />
         )}
       </div>

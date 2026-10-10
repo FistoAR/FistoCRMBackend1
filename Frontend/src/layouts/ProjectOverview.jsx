@@ -13,6 +13,9 @@ const ProjectOverview = () => {
     status,
     projectTab,
     statusHistory,
+    autoOpenReport,
+    openTaskId,
+    openActivityId,
   } = location.state || {};
 
   const activetab = location.pathname
@@ -26,7 +29,10 @@ const ProjectOverview = () => {
   const inactiveClass = "bg-gray-200 text-gray-600 hover:bg-gray-300";
 
   useEffect(() => {
-    if (location.pathname.endsWith("projectOverview/")) {
+    if (
+      location.pathname.endsWith("projectOverview/") ||
+      location.pathname.endsWith("projectOverview")
+    ) {
       navigate("overview", {
         replace: true,
         state: {
@@ -36,6 +42,9 @@ const ProjectOverview = () => {
           status,
           projectTab,
           statusHistory,
+          autoOpenReport,
+          openTaskId,
+          openActivityId,
         },
       });
     }
@@ -46,6 +55,11 @@ const ProjectOverview = () => {
     projectName,
     projectType,
     status,
+    projectTab,
+    statusHistory,
+    autoOpenReport,
+    openTaskId,
+    openActivityId,
   ]);
 
   useEffect(() => {
@@ -57,14 +71,7 @@ const ProjectOverview = () => {
     }
   }, []);
 
-  const getProjectsPath = (designation) => {
-    if (designation === "Software Developer")
-      return "/softwareDeveloper/projects";
-    if (designation === "UI/UX") return "/designer/projects";
-    if (designation === "3D") return "/threeD/projects";
-    if (designation === "Project Head") return "/projectHead/projects";
-    if (designation === "Admin") return "/admin/project";
-    if (designation === "SBU") return "/sbu/projects";
+  const getProjectsPath = () => {
     return "/projects";
   };
 

@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useNotification } from "../NotificationContext";
 import searchIcon from "../../assets/ProjectPages/search.webp";
 
 const DayTask = () => {
+  const navigate = useNavigate();
   const { notify } = useNotification();
   const [processingItems, setProcessingItems] = useState(new Set());
 
@@ -164,14 +165,26 @@ const DayTask = () => {
     }
   };
 
-  const getProjectsPath = (designation) => {
-    if (designation === "Software Developer")
-      return "/softwareDeveloper/projects";
-    if (designation === "UI/UX") return "/designer/projects";
-    if (designation === "3D") return "/threeD/projects";
-    if (designation === "Project Head") return "/projectHead/projects";
-    if (designation === "Admin") return "/admin/project";
+  const getProjectsPath = () => {
     return "/projects";
+  };
+
+  const handleOpenTaskReport = (task, activity = null) => {
+    const projectId =
+      task.project?.projectId || task.project?._id || task.projectId;
+    const projectName = task.project?.projectName || task.projectName;
+
+    navigate("/projects/projectOverview/overview", {
+      state: {
+        projectId,
+        projectName,
+        status: task.project?.status,
+        projectTab: task.project?.status || "In Progress",
+        autoOpenReport: true,
+        openTaskId: task.taskId || task._id,
+        openActivityId: activity?._id || null,
+      },
+    });
   };
 
   const isAddedToday = (type, id) => {
@@ -490,45 +503,54 @@ const DayTask = () => {
                 </div>
               </div>
             </div>
-            <button
-              className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
-                isAddedToday("activity", activity._id)
-                  ? "bg-red-100 hover:bg-red-200 border border-red-300 text-red-700"
-                  : "bg-green-100 border border-green-300 text-green-700"
-              } ${
-                isItemProcessing
-                  ? "opacity-50 cursor-not-allowed"
-                  : "cursor-pointer hover:bg-green-200"
-              }`}
-              disabled={isItemProcessing}
-              onClick={() =>
-                handleAddToToday("activity", activity._id, task, activity)
-              }
-            >
-              {isItemProcessing && (
-                <svg
-                  className="animate-spin h-[1vw] w-[1vw]"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-              )}
-              {isAddedToday("activity", activity._id) ? "Remove" : "Start now"}
-            </button>
+            <div className="flex items-center gap-[0.5vw]">
+              <button
+                className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
+                onClick={() => handleOpenTaskReport(task, activity)}
+                title="Open Project & Add Report"
+              >
+                Add Report
+              </button>
+              <button
+                className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
+                  isAddedToday("activity", activity._id)
+                    ? "bg-red-100 hover:bg-red-200 border border-red-300 text-red-700"
+                    : "bg-green-100 border border-green-300 text-green-700"
+                } ${
+                  isItemProcessing
+                    ? "opacity-50 cursor-not-allowed"
+                    : "cursor-pointer hover:bg-green-200"
+                }`}
+                disabled={isItemProcessing}
+                onClick={() =>
+                  handleAddToToday("activity", activity._id, task, activity)
+                }
+              >
+                {isItemProcessing && (
+                  <svg
+                    className="animate-spin h-[1vw] w-[1vw]"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                )}
+                {isAddedToday("activity", activity._id) ? "Remove" : "Start now"}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="bg-gray-50 rounded px-[1vw] py-[0.8vw] flex justify-between items-center">
@@ -568,43 +590,52 @@ const DayTask = () => {
                 </div>
               </div>
             </div>
-            <button
-              className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
-                isAddedToday("task", task.taskId)
-                  ? "bg-red-100 hover:bg-red-200 border border-red-300 text-red-700"
-                  : "bg-green-100 border border-green-300 text-green-700"
-              } ${
-                isItemProcessing
-                  ? "opacity-50 cursor-not-allowed"
-                  : "cursor-pointer hover:bg-green-200"
-              }`}
-              disabled={isItemProcessing}
-              onClick={() => handleAddToToday("task", task.taskId, task)}
-            >
-              {isItemProcessing && (
-                <svg
-                  className="animate-spin h-[1vw] w-[1vw]"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-              )}
-              {isAddedToday("task", task.taskId) ? "Remove" : "Start now"}
-            </button>
+            <div className="flex items-center gap-[0.5vw]">
+              <button
+                className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
+                onClick={() => handleOpenTaskReport(task)}
+                title="Open Project & Add Report"
+              >
+                Add Report
+              </button>
+              <button
+                className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
+                  isAddedToday("task", task.taskId)
+                    ? "bg-red-100 hover:bg-red-200 border border-red-300 text-red-700"
+                    : "bg-green-100 border border-green-300 text-green-700"
+                } ${
+                  isItemProcessing
+                    ? "opacity-50 cursor-not-allowed"
+                    : "cursor-pointer hover:bg-green-200"
+                }`}
+                disabled={isItemProcessing}
+                onClick={() => handleAddToToday("task", task.taskId, task)}
+              >
+                {isItemProcessing && (
+                  <svg
+                    className="animate-spin h-[1vw] w-[1vw]"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                )}
+                {isAddedToday("task", task.taskId) ? "Remove" : "Start now"}
+              </button>
+            </div>
           </div>
         )}
       </div>

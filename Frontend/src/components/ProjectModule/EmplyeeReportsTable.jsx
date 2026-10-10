@@ -53,6 +53,8 @@ export default function EmployeeTaskTable({
   projectType,
   projectTab,
   statusHistory,
+  autoOpenTaskId,
+  autoOpenActivityId,
 }) {
   const { notify } = useNotification();
   const [showReportModal, setShowReportModal] = useState(false);
@@ -610,6 +612,75 @@ export default function EmployeeTaskTable({
       setshowHistory(true);
     }
   };
+
+  const autoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoOpenTaskId || autoOpenedRef.current) return;
+    if (!employeeFilteredTasks.length && !flattenedTasks.length) return;
+
+    const candidateList =
+      employeeFilteredTasks.length > 0 ? employeeFilteredTasks : flattenedTasks;
+
+    let matchedTask = null;
+    if (autoOpenActivityId) {
+      matchedTask =
+        candidateList.find(
+          (t) =>
+            t.isActivityReport &&
+            (String(t.activityId) === String(autoOpenActivityId) ||
+              String(t._id) === String(autoOpenActivityId)) &&
+            (!autoOpenTaskId ||
+              String(t.taskId) === String(autoOpenTaskId) ||
+              String(t._id) === String(autoOpenTaskId)),
+        ) ||
+        flattenedTasks.find(
+          (t) =>
+            t.isActivityReport &&
+            (String(t.activityId) === String(autoOpenActivityId) ||
+              String(t._id) === String(autoOpenActivityId)),
+        );
+    } else {
+      matchedTask =
+        candidateList.find(
+          (t) =>
+            !t.isActivityReport &&
+            (String(t.taskId) === String(autoOpenTaskId) ||
+              String(t._id) === String(autoOpenTaskId)),
+        ) ||
+        candidateList.find(
+          (t) =>
+            String(t.taskId) === String(autoOpenTaskId) ||
+            String(t._id) === String(autoOpenTaskId),
+        ) ||
+        flattenedTasks.find(
+          (t) =>
+            String(t.taskId) === String(autoOpenTaskId) ||
+            String(t._id) === String(autoOpenTaskId),
+        );
+    }
+
+    if (matchedTask) {
+      autoOpenedRef.current = true;
+      const taskIndex = filteredTasks.findIndex(
+        (t) =>
+          (matchedTask.activityId
+            ? t.activityId === matchedTask.activityId
+            : (t._id || t.taskId) === (matchedTask._id || matchedTask.taskId)),
+      );
+      if (taskIndex !== -1) {
+        const pageNumber = Math.floor(taskIndex / itemsPerPage) + 1;
+        setCurrentPage(pageNumber);
+      }
+      handleAddReport(matchedTask, true);
+    }
+  }, [
+    autoOpenTaskId,
+    autoOpenActivityId,
+    employeeFilteredTasks,
+    flattenedTasks,
+    filteredTasks,
+  ]);
 
   const handleOpenCommunicate = (task) => {
     setSelectedTask(task);
