@@ -552,18 +552,26 @@ const EmployeeCalendar = () => {
                     className="cursor-pointer hover:bg-blue-100 text-gray-800 text-[0.9vw] border-b border-gray-200 px-[0.4vw] rounded-[0.2vw] py-[0.3vw] flex items-center gap-[0.5vw]"
                   >
                     <div className="relative w-[1.6vw] h-[1.6vw]">
-                      <img
-                        src={`${import.meta.env.VITE_API_BASE_URL1}${
-                          employee.profile_url
-                        }`}
-                        alt="profile"
-                        className="w-full h-full rounded-full object-cover"
-                        onError={(e) => {
-                          e.target.style.display = "none";
-                          e.target.nextSibling.style.display = "flex";
-                        }}
-                      />
-                      <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.9vw]">
+                      {employee.profile_url ? (
+                        <img
+                          src={`${import.meta.env.VITE_API_BASE_URL1}${
+                            employee.profile_url
+                          }`}
+                          alt="profile"
+                          className="w-full h-full rounded-full object-cover"
+                          onError={(e) => {
+                            e.target.style.display = "none";
+                            if (e.target.nextSibling) {
+                              e.target.nextSibling.style.display = "flex";
+                            }
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        className={`${
+                          employee.profile_url ? "hidden" : "flex"
+                        } absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.9vw]`}
+                      >
                         {employee.employee_name?.[0]?.toUpperCase() || "?"}
                       </div>
                     </div>

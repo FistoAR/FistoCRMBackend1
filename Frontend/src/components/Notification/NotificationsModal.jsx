@@ -172,6 +172,103 @@ const ToggleSwitch = ({ isChecked, onToggle }) => (
   </div>
 );
 
+// Helper to safely extract notification details across flat, double-nested, or status-update structures
+const getNotificationDetails = (notification) => {
+  if (!notification) return {};
+  const topData =
+    typeof notification.data === "object" && notification.data !== null
+      ? notification.data
+      : {};
+  const innerData =
+    typeof topData.data === "object" && topData.data !== null ? topData.data : {};
+
+  return {
+    ...innerData,
+    ...topData,
+    leaveType:
+      topData.leaveType ||
+      innerData.leaveType ||
+      topData.leave_type ||
+      innerData.leave_type,
+    numberOfDays:
+      topData.numberOfDays ??
+      innerData.numberOfDays ??
+      topData.number_of_days ??
+      innerData.number_of_days,
+    fromDate:
+      topData.fromDate ||
+      innerData.fromDate ||
+      topData.from_date ||
+      innerData.from_date,
+    toDate:
+      topData.toDate ||
+      innerData.toDate ||
+      topData.to_date ||
+      innerData.to_date,
+    reason:
+      topData.reason ||
+      innerData.reason,
+    permissionDate:
+      topData.permissionDate ||
+      innerData.permissionDate ||
+      topData.permission_date ||
+      innerData.permission_date,
+    fromTime:
+      topData.fromTime ||
+      innerData.fromTime ||
+      topData.from_time ||
+      innerData.from_time,
+    toTime:
+      topData.toTime ||
+      innerData.toTime ||
+      topData.to_time ||
+      innerData.to_time,
+    duration:
+      topData.duration ??
+      innerData.duration ??
+      topData.duration_minutes ??
+      innerData.duration_minutes,
+    approvedBy:
+      topData.approvedBy ||
+      innerData.approvedBy ||
+      topData.updatedBy ||
+      innerData.updatedBy,
+    rejectedBy:
+      topData.rejectedBy ||
+      innerData.rejectedBy,
+    remark:
+      topData.remark ||
+      innerData.remark,
+    rejectionReason:
+      topData.rejectionReason ||
+      innerData.rejectionReason,
+    designation:
+      topData.designation ||
+      innerData.designation,
+    requestId:
+      topData.requestId ||
+      innerData.requestId,
+    employee_name:
+      topData.employee_name ||
+      innerData.employee_name,
+    employee_id:
+      topData.employee_id ||
+      innerData.employee_id,
+    meetingTitle:
+      topData.meetingTitle ||
+      innerData.meetingTitle,
+    organizer_name:
+      topData.organizer_name ||
+      innerData.organizer_name,
+    meetingDate:
+      topData.meetingDate ||
+      innerData.meetingDate,
+    description:
+      topData.description ||
+      innerData.description,
+  };
+};
+
 // NotificationListItem Component with Delete Animation
 const NotificationListItem = ({
   notification,
@@ -179,6 +276,7 @@ const NotificationListItem = ({
   onDelete,
   isDeleting,
 }) => {
+  const itemData = getNotificationDetails(notification);
   const timeData = useMemo(
     () => ({
       time: new Date(notification.timestamp).toLocaleTimeString("en-US", {
@@ -239,10 +337,11 @@ const NotificationListItem = ({
               {notification.title}
             </p>
             <p className="text-[0.75vw] text-gray-600 mt-1">
-              {notification.data?.employee_name ||
-                notification.data?.organizer_name ||
-                notification.data?.updatedBy ||
-                notification.data?.assignedTo?.employeeName ||
+              {itemData?.employee_name ||
+                itemData?.organizer_name ||
+                itemData?.updatedBy ||
+                itemData?.approvedBy ||
+                itemData?.assignedTo?.employeeName ||
                 ""}
             </p>
             <p className="text-[0.7vw] text-gray-500 mt-1">
@@ -322,6 +421,7 @@ const NotificationDetailView = ({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const submittingRef = useRef(false);
+  const data = getNotificationDetails(notification);
   useEffect(() => {
     if (!notification.read) {
       onMarkAsRead(notification.id);
@@ -358,8 +458,9 @@ const NotificationDetailView = ({
     setSubmitting(true);
     try {
       const userData = JSON.parse(localStorage.getItem("userData") || "{}");
+      const targetRequestId = data.requestId || notification.data?.requestId;
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/hr/leave-requests/${notification.data.requestId}/update-approval`,
+        `${import.meta.env.VITE_API_BASE_URL}/hr/leave-requests/${targetRequestId}/update-approval`,
         {
           method: "PATCH",
           headers: {
@@ -398,9 +499,10 @@ const NotificationDetailView = ({
           "{}",
       );
       const endpoint = action === "approve" ? "approve" : "reject";
+      const targetRequestId = data.requestId || notification.data?.requestId;
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/attendance/missed-attendance/${notification.data.requestId}/${endpoint}`,
+        `${import.meta.env.VITE_API_BASE_URL}/attendance/missed-attendance/${targetRequestId}/${endpoint}`,
         {
           method: "PATCH",
           headers: {
@@ -446,8 +548,9 @@ const NotificationDetailView = ({
     try {
       const userData = JSON.parse(localStorage.getItem("userData") || "{}");
       const endpoint = action === "approve" ? "approve" : "reject";
+      const targetRequestId = data.requestId || notification.data?.requestId;
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/hr/permission-requests/${notification.data.requestId}/${endpoint}`,
+        `${import.meta.env.VITE_API_BASE_URL}/hr/permission-requests/${targetRequestId}/${endpoint}`,
         {
           method: "PATCH",
           headers: {
@@ -548,7 +651,9 @@ const NotificationDetailView = ({
 
             {/* Leave Request */}
             {(notification.type === "leave" ||
-              notification.data?.type === "leave") && (
+              notification.data?.type === "leave" ||
+              data.type === "leave" ||
+              data.leaveType) && (
               <div className="border border-gray-200 rounded-lg shadow-sm bg-gray-50 p-[1vw]">
                 <div className="grid grid-cols-2 gap-x-[2vw] gap-y-[1.5vh]">
                   <div>
@@ -556,7 +661,7 @@ const NotificationDetailView = ({
                       Leave Type
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold capitalize">
-                      {notification.data?.leaveType}
+                      {data.leaveType || "-"}
                     </p>
                   </div>
                   <div>
@@ -564,8 +669,9 @@ const NotificationDetailView = ({
                       Duration
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {notification.data?.numberOfDays} day
-                      {notification.data?.numberOfDays > 1 ? "s" : ""}
+                      {data.numberOfDays !== undefined && data.numberOfDays !== null
+                        ? `${data.numberOfDays} day${Number(data.numberOfDays) > 1 ? "s" : ""}`
+                        : "-"}
                     </p>
                   </div>
                   <div>
@@ -573,7 +679,7 @@ const NotificationDetailView = ({
                       From Date
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {formatDate(notification.data?.fromDate)}
+                      {formatDate(data.fromDate) || "-"}
                     </p>
                   </div>
                   <div>
@@ -581,7 +687,7 @@ const NotificationDetailView = ({
                       To Date
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {formatDate(notification.data?.toDate)}
+                      {formatDate(data.toDate) || "-"}
                     </p>
                   </div>
                 </div>
@@ -590,7 +696,7 @@ const NotificationDetailView = ({
                     Reason
                   </p>
                   <p className="text-[0.8vw] text-gray-700">
-                    {notification.data?.reason}
+                    {data.reason || "No reason provided"}
                   </p>
                 </div>
               </div>
@@ -598,7 +704,9 @@ const NotificationDetailView = ({
 
             {/* Permission Request */}
             {(notification.type === "permission" ||
-              notification.data?.type === "permission") && (
+              notification.data?.type === "permission" ||
+              data.type === "permission" ||
+              data.permissionDate) && (
               <div className="border border-gray-200 rounded-lg shadow-sm bg-gray-50 p-[1vw]">
                 <div className="grid grid-cols-2 gap-x-[2vw] gap-y-[1.5vh]">
                   <div>
@@ -606,7 +714,7 @@ const NotificationDetailView = ({
                       Date
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {formatDate(notification.data?.permissionDate)}
+                      {formatDate(data.permissionDate) || "-"}
                     </p>
                   </div>
                   <div>
@@ -614,7 +722,7 @@ const NotificationDetailView = ({
                       Duration
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {notification.data?.duration} minutes
+                      {data.duration ? `${data.duration} minutes` : "-"}
                     </p>
                   </div>
                   <div>
@@ -622,7 +730,7 @@ const NotificationDetailView = ({
                       From Time
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {formatTime(notification.data?.fromTime)}
+                      {formatTime(data.fromTime) || "-"}
                     </p>
                   </div>
                   <div>
@@ -630,7 +738,7 @@ const NotificationDetailView = ({
                       To Time
                     </p>
                     <p className="text-[0.9vw] text-gray-800 font-semibold">
-                      {formatTime(notification.data?.toTime)}
+                      {formatTime(data.toTime) || "-"}
                     </p>
                   </div>
                 </div>
@@ -639,7 +747,7 @@ const NotificationDetailView = ({
                     Reason
                   </p>
                   <p className="text-[0.8vw] text-gray-700">
-                    {notification.data?.reason}
+                    {data.reason || "No reason provided"}
                   </p>
                 </div>
               </div>
@@ -1030,8 +1138,9 @@ const NotificationDetailView = ({
             )}
 
             {/* Rejection/Approval Info */}
-            {(notification.data?.approvedBy ||
-              notification.data?.rejectedBy) && (
+            {(data.approvedBy ||
+              data.rejectedBy ||
+              data.updatedBy) && (
               <div
                 className={`mt-[1.5vh] p-[0.8vw] rounded-lg ${
                   notification.status === "approved"
@@ -1048,14 +1157,23 @@ const NotificationDetailView = ({
                 >
                   {notification.status === "approved" ? "Approved" : "Rejected"}{" "}
                   by:{" "}
-                  <span className="font-normal">
-                    {notification.data.approvedBy ||
-                      notification.data.rejectedBy}
+                  <span className="font-semibold text-gray-800">
+                    {data.approvedBy ||
+                      data.updatedBy ||
+                      data.rejectedBy}
                   </span>
+                  {data.designation && (
+                    <span className="text-gray-600 font-normal ml-[0.3vw]">
+                      ({data.designation})
+                    </span>
+                  )}
                 </p>
-                {notification.data.rejectionReason && (
-                  <p className="text-[0.75vw] text-red-600 mt-1">
-                    Reason: {notification.data.rejectionReason}
+                {(data.rejectionReason || data.remark) && (
+                  <p className="text-[0.75vw] text-gray-600 mt-1">
+                    Remark:{" "}
+                    <span className="italic">
+                      {data.rejectionReason || data.remark}
+                    </span>
                   </p>
                 )}
               </div>
