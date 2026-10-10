@@ -39,11 +39,35 @@ function getISTDateString(date) {
   if (!date) return "";
   const d = new Date(date);
   if (isNaN(d.getTime())) return "";
-  // en-CA gives YYYY-MM-DD format
+// en-CA gives YYYY-MM-DD format
   return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-async function processAttendanceRecord(attendance) {
+function isSundayDate(date) {
+  if (!date) return false;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return false;
+  const weekday = d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    timeZone: 'Asia/Kolkata',
+  });
+  return weekday === 'Sun';
+}
+
+function hasWorkTasksOrReports(record) {
+  if (!record || record.is_leave) return false;
+  if (!Array.isArray(record.tasks) || record.tasks.length === 0) return false;
+  return record.tasks.some(
+    (t) =>
+      t.task_type !== 'leave' &&
+      (t.task_name || t.project_name || t.description || t.outcome || t.reports)
+  );
+}
+
+async function processAttendanceRecord(attendance, context = {}) {
+  const projectCache = context.projectCache || new Map();
+  const taskCache = context.taskCache || new Map();
+
   // Normalize date from MySQL (YYYY-MM-DD) to a full day range in UTC that covers IST 00:00 to 23:59
   const reportDateStr = getISTDateString(attendance.report_date);
   
@@ -56,28 +80,41 @@ async function processAttendanceRecord(attendance) {
   const endOfDay = new Date(reportDateStr + "T23:59:59.999Z");
   endOfDay.setMinutes(endOfDay.getMinutes() - 330); // Shift to UTC
 
-  const dayReports = await DayReport.find({
-    employeeID: attendance.employee_id,
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
-  }).lean();
-
-  const unscheduledTasks = await UnscheduledTask.find({
-    employeeID: attendance.employee_id,
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
-  }).lean();
+  const [dayReports, unscheduledTasks] = await Promise.all([
+    DayReport.find({
+      employeeID: attendance.employee_id,
+      createdAt: { $gte: startOfDay, $lte: endOfDay },
+    }).lean(),
+    UnscheduledTask.find({
+      employeeID: attendance.employee_id,
+      createdAt: { $gte: startOfDay, $lte: endOfDay },
+    }).lean(),
+  ]);
 
   const scheduledTasksData = await Promise.all(
     dayReports.map(async (dayReport) => {
       try {
-        const project = await Project_Details.findById(
-          dayReport.projectId,
-        ).lean();
+        let project = null;
+        const projIdStr = dayReport.projectId ? dayReport.projectId.toString() : null;
+        if (projIdStr && projectCache.has(projIdStr)) {
+          project = projectCache.get(projIdStr);
+        } else if (dayReport.projectId) {
+          project = await Project_Details.findById(dayReport.projectId).lean();
+          if (projIdStr) projectCache.set(projIdStr, project);
+        }
         if (!project) return null;
 
-        const mongoTask = await Tasks.findOne({
-          projectId: dayReport.projectId,
-          _id: dayReport.taskId,
-        }).lean();
+        let mongoTask = null;
+        const taskIdStr = dayReport.taskId ? dayReport.taskId.toString() : null;
+        if (taskIdStr && taskCache.has(taskIdStr)) {
+          mongoTask = taskCache.get(taskIdStr);
+        } else if (taskIdStr) {
+          mongoTask = await Tasks.findOne({
+            projectId: dayReport.projectId,
+            _id: dayReport.taskId,
+          }).lean();
+          if (mongoTask) taskCache.set(taskIdStr, mongoTask);
+        }
 
         let taskDetails = null;
         let taskPercentage = 0;
@@ -97,27 +134,23 @@ async function processAttendanceRecord(attendance) {
           taskStatus = taskPercentage >= 100 ? "Completed" : "In Progress";
         }
 
-        // ✅ Check TaskReports (approved)
-        const taskReport = await TaskReports.findOne({
-          projectId: dayReport.projectId,
-          taskId: dayReport.taskId,
-          activityId: dayReport.activityId,
-          employeeID: attendance.employee_id,
-          // Use a slightly wider range for reports as they might be submitted slightly after the day ends
-          createdAt: { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) },
-        }).lean();
-
-        // ✅ Check TaskReportsReview (underReview / declined)
-        let reviewReport = null;
-        if (!taskReport) {
-          reviewReport = await TaskReportsReview.findOne({
+        const reportCreatedAt = { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) };
+        const [taskReport, reviewReport] = await Promise.all([
+          TaskReports.findOne({
             projectId: dayReport.projectId,
             taskId: dayReport.taskId,
             activityId: dayReport.activityId,
             employeeID: attendance.employee_id,
-            createdAt: { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) },
-          }).lean();
-        }
+            createdAt: reportCreatedAt,
+          }).lean(),
+          TaskReportsReview.findOne({
+            projectId: dayReport.projectId,
+            taskId: dayReport.taskId,
+            activityId: dayReport.activityId,
+            employeeID: attendance.employee_id,
+            createdAt: reportCreatedAt,
+          }).lean(),
+        ]);
 
         const activeReport = taskReport || reviewReport;
         let reportStatus = taskStatus;
@@ -315,11 +348,7 @@ router.get("/all-reports", async (req, res) => {
       params.push(`%${search}%`);
     }
 
-    // Filter out Sundays from attendance query too
-    filterClause += ` AND DAYOFWEEK(att.login_date) != 1`;
-
     attendanceQuery += filterClause;
-    const attendanceRecords = await queryWithRetry(attendanceQuery, params);
 
     // 2. Fetch Leave Records
     let leaveQuery = `
@@ -361,7 +390,12 @@ router.get("/all-reports", async (req, res) => {
     }
 
     leaveQuery += leaveFilterClause;
-    const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
+
+    // Run Attendance and Leave queries in parallel
+    const [attendanceRecords, leaveRequests] = await Promise.all([
+      queryWithRetry(attendanceQuery, params),
+      queryWithRetry(leaveQuery, leaveParams),
+    ]);
     console.log("Raw Leave Requests from DB:", leaveRequests.length, "records found");
     if (leaveRequests.length > 0) {
       console.log("First Leave Request ID:", leaveRequests[0].id, "for", leaveRequests[0].employee_name);
@@ -429,19 +463,16 @@ router.get("/all-reports", async (req, res) => {
       paginatedReports = finalReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
     }
 
-    // 6. Process Records (Mongo fetch for attendance)
+    // 6. Process Records (Mongo fetch for attendance) with project and task cache
+    const context = { projectCache: new Map(), taskCache: new Map() };
     const processedReports = await Promise.all(
       paginatedReports.map(async (record) => {
-
-        console.log(record)
         if (record.is_leave) {
-          console.log(`Processing Standalone Leave for ${record.employee_name} on ${record.report_date}`);
           return record;
         }
 
-        const processed = await processAttendanceRecord(record);
+        const processed = await processAttendanceRecord(record, context);
         if (record.merged_leave) {
-          console.log(`Processing Merged Leave for ${record.employee_name} on ${record.report_date}`);
           processed.tasks.push(record.merged_leave);
         }
         return processed;
@@ -454,13 +485,21 @@ router.get("/all-reports", async (req, res) => {
       console.log("Last record date:", processedReports[processedReports.length - 1].report_date);
     }
 
+    // Sunday exception: if Sunday, only include if employee put a report
+    const filteredProcessedReports = processedReports.filter((record) => {
+      if (isSundayDate(record.report_date)) {
+        return hasWorkTasksOrReports(record);
+      }
+      return true;
+    });
+
     res.json({
       success: true,
-      count: processedReports.length,
+      count: filteredProcessedReports.length,
       total: totalCount,
       offset: fetchAll === "true" ? 0 : parseInt(offset),
       limit: fetchAll === "true" ? totalCount : parseInt(limit),
-      reports: processedReports,
+      reports: filteredProcessedReports,
     });
   } catch (error) {
     console.error("Get all intern reports error:", error);
@@ -506,31 +545,30 @@ router.get("/management-reports", async (req, res) => {
       params.push(end_date);
     }
 
-    attendanceQuery += ` AND DAYOFWEEK(att.login_date) != 1 ORDER BY att.login_date DESC`;
-
-    const attendanceRecords = await queryWithRetry(attendanceQuery, params);
+    attendanceQuery += ` ORDER BY att.login_date DESC`;
 
     // Fetch Workdone Reports (for SBU & Project Head)
     let workdoneQuery = `
-      SELECT employee_id, project_name, description, DATE(created_at) as report_date
-      FROM workdone_reports
+      SELECT wd.employee_id, wd.project_name, wd.description,
+             DATE(CONVERT_TZ(wd.created_at, '+00:00', '+05:30')) as report_date,
+             ed.employee_name, ed.designation
+      FROM workdone_reports wd
+      LEFT JOIN employees_details ed ON wd.employee_id = ed.employee_id
       WHERE 1=1
     `;
     const workdoneParams = [];
     if (employee_id && employee_id !== "all") {
-      workdoneQuery += ` AND employee_id = ?`;
+      workdoneQuery += ` AND wd.employee_id = ?`;
       workdoneParams.push(employee_id);
     }
     if (start_date) {
-      workdoneQuery += ` AND created_at >= ?`;
+      workdoneQuery += ` AND DATE(CONVERT_TZ(wd.created_at, '+00:00', '+05:30')) >= ?`;
       workdoneParams.push(start_date);
     }
     if (end_date) {
-      workdoneQuery += ` AND created_at <= ?`;
+      workdoneQuery += ` AND DATE(CONVERT_TZ(wd.created_at, '+00:00', '+05:30')) <= ?`;
       workdoneParams.push(end_date);
     }
-
-    const workdoneRecords = await queryWithRetry(workdoneQuery, workdoneParams);
 
     // Fetch Marketing Tasks
     let marketingQuery = `
@@ -552,8 +590,6 @@ router.get("/management-reports", async (req, res) => {
       marketingQuery += ` AND mta.assigned_date <= ?`;
       marketingParams.push(end_date);
     }
-
-    const marketingRecords = await queryWithRetry(marketingQuery, marketingParams);
 
     // Fetch Leave Records for Management
     let leaveQuery = `
@@ -581,7 +617,13 @@ router.get("/management-reports", async (req, res) => {
       leaveParams.push(end_date);
     }
 
-    const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
+    // Run all 4 queries in parallel for high performance
+    const [attendanceRecords, workdoneRecords, marketingRecords, leaveRequests] = await Promise.all([
+      queryWithRetry(attendanceQuery, params),
+      queryWithRetry(workdoneQuery, workdoneParams),
+      queryWithRetry(marketingQuery, marketingParams),
+      queryWithRetry(leaveQuery, leaveParams),
+    ]);
     const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
 
     // Combine reports
@@ -601,34 +643,58 @@ router.get("/management-reports", async (req, res) => {
 
     workdoneRecords.forEach(wd => {
       const key = `${wd.employee_id}_${normalizeKey(wd.report_date)}`;
-      if (reportMap.has(key)) {
-        const report = reportMap.get(key);
-        report.tasks.push({
-          ...wd,
-          task_type: "workdone",
-          project_name: wd.project_name || "HR/Management",
-          task_name: wd.description || "-",
-          outcome: wd.description || "-",
-          status: "Completed",
-          percentage: 100
+      if (!reportMap.has(key)) {
+        reportMap.set(key, {
+          employee_id: wd.employee_id,
+          employee_name: wd.employee_name || "",
+          report_date: wd.report_date,
+          morning_in: null,
+          morning_out: null,
+          afternoon_in: null,
+          afternoon_out: null,
+          total_hours: "-",
+          designation: wd.designation || "",
+          tasks: []
         });
       }
+      const report = reportMap.get(key);
+      report.tasks.push({
+        ...wd,
+        task_type: "workdone",
+        project_name: wd.project_name || "HR/Management",
+        task_name: wd.description || "-",
+        outcome: wd.description || "-",
+        status: "Completed",
+        percentage: 100
+      });
     });
 
     marketingRecords.forEach(mt => {
       const key = `${mt.employee_id}_${normalizeKey(mt.report_date)}`;
-      if (reportMap.has(key)) {
-        const report = reportMap.get(key);
-        report.tasks.push({
-          ...mt,
-          task_type: "marketing",
-          project_name: mt.task_name || "Marketing",
-          task_name: mt.remarks || "-",
-          outcome: mt.remarks || "-",
-          status: "Completed",
-          percentage: 100
+      if (!reportMap.has(key)) {
+        reportMap.set(key, {
+          employee_id: mt.employee_id,
+          employee_name: mt.employee_name || "",
+          report_date: mt.report_date,
+          morning_in: null,
+          morning_out: null,
+          afternoon_in: null,
+          afternoon_out: null,
+          total_hours: "-",
+          designation: "",
+          tasks: []
         });
       }
+      const report = reportMap.get(key);
+      report.tasks.push({
+        ...mt,
+        task_type: "marketing",
+        project_name: mt.task_name || "Marketing",
+        task_name: mt.remarks || "-",
+        outcome: mt.remarks || "-",
+        status: "Completed",
+        percentage: 100
+      });
     });
 
     // Merge Leave Days
@@ -649,11 +715,19 @@ router.get("/management-reports", async (req, res) => {
       }
     });
 
-    // Final Filtering (Hide future records)
+    // Final Filtering (Hide future records and apply Sunday exception)
     const now = new Date();
     const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
     const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
-    const combinedReports = Array.from(reportMap.values()).filter(r => normalizeKey(r.report_date) <= todayStr);
+    const combinedReports = Array.from(reportMap.values())
+      .filter(r => normalizeKey(r.report_date) <= todayStr)
+      .filter(r => {
+        // Sunday exception: if Sunday, only include if employee put a report
+        if (isSundayDate(r.report_date)) {
+          return hasWorkTasksOrReports(r);
+        }
+        return true;
+      });
 
     // Sort by date DESC
     combinedReports.sort((a, b) => {
@@ -711,9 +785,6 @@ router.get("/reports/:employee_id", async (req, res) => {
       attendanceQuery += ` AND att.login_date <= ?`;
       params.push(end_date);
     }
-
-    // Filter out Sundays
-    attendanceQuery += ` AND DAYOFWEEK(att.login_date) != 1`;
 
     const attendanceRecords = await queryWithRetry(attendanceQuery, params);
 
@@ -799,13 +870,21 @@ router.get("/reports/:employee_id", async (req, res) => {
       }),
     );
 
+    // Sunday exception: if Sunday, only include if employee put a report
+    const filteredReports = reports.filter((record) => {
+      if (isSundayDate(record.report_date)) {
+        return hasWorkTasksOrReports(record);
+      }
+      return true;
+    });
+
     res.json({
       success: true,
-      count: reports.length,
+      count: filteredReports.length,
       total: totalCount,
       offset: fetchAll === "true" ? 0 : parseInt(offset),
       limit: fetchAll === "true" ? totalCount : parseInt(limit),
-      reports,
+      reports: filteredReports,
     });
   } catch (error) {
     console.error("Get intern reports by employee error:", error);

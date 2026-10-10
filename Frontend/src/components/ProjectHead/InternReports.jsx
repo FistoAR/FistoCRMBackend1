@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -79,10 +79,12 @@ const TableSkeleton = ({ isManagement }) => {
 };
 
 const InternReports = () => {
+  const queryClient = useQueryClient();
   // ✅ Lazy loading state
   const [allFetchedReports, setAllFetchedReports] = useState([]);
   const [currentBatch, setCurrentBatch] = useState(0);
   const [loadedBatches, setLoadedBatches] = useState(new Set([0]));
+  const [serverTotalCount, setServerTotalCount] = useState(0);
 
   const [loadingAllRecords, setLoadingAllRecords] = useState(false); // Load all records for filtering
   const [reportType, setReportType] = useState("intern"); // ✅ New state for report type
@@ -205,7 +207,11 @@ const InternReports = () => {
     [filteredEmployeeList]
   );
 
-  const { data: reportsQueryData, isLoading: reportsQueryLoading } = useQuery({
+  const {
+    data: reportsQueryData,
+    isLoading: reportsQueryLoading,
+    isFetching: reportsQueryFetching,
+  } = useQuery({
     queryKey: ["internReports", userInfo?.employee_id, reportType, selectedEmployee, searchTerm, startDate, endDate, currentBatch],
     queryFn: async () => {
       if (!userInfo) return { reports: [], total: 0 };
@@ -240,11 +246,18 @@ const InternReports = () => {
         total: data.success ? (data.total || (data.reports?.length || 0)) : 0
       };
     },
+    placeholderData: keepPreviousData,
     enabled: !!userInfo,
   });
 
+  useEffect(() => {
+    if (reportsQueryData?.total !== undefined && reportsQueryData.total > 0) {
+      setServerTotalCount(reportsQueryData.total);
+    }
+  }, [reportsQueryData?.total]);
+
   const totalReportsCount =
-    reportsQueryData?.total ?? (reportsQueryData?.reports?.length || 0);
+    reportsQueryData?.total ?? serverTotalCount ?? (reportsQueryData?.reports?.length || 0);
 
   const activeReports = useMemo(() => {
     if (currentBatch === 0) {
@@ -256,7 +269,7 @@ const InternReports = () => {
   }, [currentBatch, reportsQueryData, allFetchedReports]);
 
   const loading = reportsQueryLoading && activeReports.length === 0;
-  const fetchingMore = reportsQueryLoading && activeReports.length > 0;
+  const fetchingMore = reportsQueryFetching && activeReports.length > 0;
 
   useEffect(() => {
     if (reportsQueryData?.reports) {
@@ -325,11 +338,31 @@ const InternReports = () => {
     // and ensuring no Sundays are displayed if they somehow slipped through.
     let filtered = activeReports.filter((report) => {
       const date = new Date(report.report_date);
-      if (date.getDay() === 0) return false; // Skip Sundays
+      const isSunday =
+        !isNaN(date.getTime()) &&
+        date.toLocaleDateString("en-US", {
+          weekday: "short",
+          timeZone: "Asia/Kolkata",
+        }) === "Sun";
       
       const designation = (report.designation || "").toLowerCase();
       if (designation === "maid" || designation.includes("maid")) {
         return false;
+      }
+
+      // If Sunday, only display if the employee worked and submitted a report
+      if (isSunday) {
+        const hasWorkReport =
+          !report.is_leave &&
+          Array.isArray(report.tasks) &&
+          report.tasks.some(
+            (t) =>
+              t.task_type !== "leave" &&
+              (t.task_name || t.project_name || t.description || t.outcome || t.reports)
+          );
+        if (!hasWorkReport) {
+          return false; // Skip Sunday if no work report was submitted
+        }
       }
 
       return true;
@@ -372,14 +405,64 @@ const InternReports = () => {
   const endIndex = startIndex + RECORDS_PER_PAGE;
   
   // We slice from the local set that corresponds to the current page's batch
-  // Since we fetch in batches of 30 and show 10 per page, 
-  // the data for the current page should be in allFetchedReports.
   const displayedReports = filteredReports.slice(startIndex, endIndex);
   const displayStartIndex = startIndex;
 
+  // Detect when current page data is still being fetched from the server
+  const isPageDataLoading =
+    (reportsQueryLoading || reportsQueryFetching) &&
+    (displayedReports.length === 0 || startIndex >= filteredReports.length);
 
   // ✅ Calculate total pages based on server total, not filtered length
   const totalPages = Math.ceil(totalReportsCount / RECORDS_PER_PAGE);
+
+  // Background prefetch for seamless next-batch navigation
+  useEffect(() => {
+    if (!userInfo) return;
+    const currentRecordIndex = (currentPage - 1) * RECORDS_PER_PAGE;
+    const currentBatchIdx = Math.floor(currentRecordIndex / FETCH_BATCH_SIZE);
+    const nextBatchIdx = currentBatchIdx + 1;
+    const nextBatchRecordStart = nextBatchIdx * FETCH_BATCH_SIZE;
+
+    if (totalReportsCount > 0 && nextBatchRecordStart < totalReportsCount && !loadedBatches.has(nextBatchIdx)) {
+      const params = new URLSearchParams({
+        limit: FETCH_BATCH_SIZE,
+        offset: nextBatchRecordStart,
+      });
+
+      if (selectedEmployee !== "all") params.append("employee_id", selectedEmployee);
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+      if (searchTerm) params.append("search", searchTerm);
+
+      let url = "";
+      if (reportType === "management") {
+        url = `${API_URL}/intern-reports/management-reports?${params.toString()}`;
+      } else if (userInfo.isAdmin) {
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else if (userInfo.isTeamHead) {
+        params.append("designation", userInfo.designation);
+        params.append("isTeamHead", "true");
+        url = `${API_URL}/intern-reports/all-reports?${params.toString()}`;
+      } else if (userInfo.employee_id) {
+        url = `${API_URL}/intern-reports/reports/${userInfo.employee_id}?${params.toString()}`;
+      }
+
+      if (url) {
+        queryClient.prefetchQuery({
+          queryKey: ["internReports", userInfo?.employee_id, reportType, selectedEmployee, searchTerm, startDate, endDate, nextBatchIdx],
+          queryFn: async () => {
+            const response = await fetch(url);
+            const data = await response.json();
+            return {
+              reports: data.success ? data.reports || [] : [],
+              total: data.success ? (data.total || (data.reports?.length || 0)) : 0
+            };
+          }
+        });
+      }
+    }
+  }, [currentPage, totalReportsCount, loadedBatches, selectedEmployee, startDate, endDate, searchTerm, reportType, userInfo, queryClient, API_URL]);
 
   // ✅ Smart page change handler
   const handlePageChange = async (newPage) => {
@@ -965,7 +1048,7 @@ const InternReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading ? (
+                    {loading || isPageDataLoading ? (
                       <TableSkeleton isManagement={reportType === "management"} />
                     ) : (
                       displayedReports.map((report, reportIndex) => {

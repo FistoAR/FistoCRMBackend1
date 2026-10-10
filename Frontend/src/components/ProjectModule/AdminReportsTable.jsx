@@ -85,6 +85,7 @@ export default function AdminReportsTable({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterDepartment, setFilterDepartment] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterProgress, setFilterProgress] = useState("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -241,6 +242,36 @@ export default function AdminReportsTable({
     ];
   });
 
+  const getEmployeeDetails = (employeeId) => {
+    if (!employeeId) return null;
+    return currentEmployees?.find((emp) => emp.id === employeeId) || null;
+  };
+
+  const departmentOptions = useMemo(() => {
+    const depts = new Set();
+    currentEmployees?.forEach((emp) => {
+      if (emp.department && emp.department.trim().toLowerCase() !== "unassigned") {
+        depts.add(emp.department.trim());
+      }
+    });
+    tasks?.forEach((t) => {
+      const dept = t.department || getEmployeeDetails(t.employee)?.department;
+      if (dept && dept.trim().toLowerCase() !== "unassigned") {
+        depts.add(dept.trim());
+      }
+      t.activities?.forEach((act) => {
+        const actDept =
+          act.department ||
+          t.department ||
+          getEmployeeDetails(act.employee || t.employee)?.department;
+        if (actDept && actDept.trim().toLowerCase() !== "unassigned") {
+          depts.add(actDept.trim());
+        }
+      });
+    });
+    return Array.from(depts).filter(Boolean).sort();
+  }, [currentEmployees, tasks]);
+
   const filteredTasks = flattenedTasks.filter((task) => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch =
@@ -299,13 +330,20 @@ export default function AdminReportsTable({
     else if (filterProgress === "76-100")
       matchesProgress = taskProgress > 75 && taskProgress <= 100;
 
-    return matchesSearch && matchesStatus && matchesProgress;
-  });
+    let matchesDepartment = true;
+    if (filterDepartment !== "all") {
+      const taskDept =
+        task.department ||
+        getEmployeeDetails(task.employee)?.department ||
+        "Unassigned";
+      matchesDepartment =
+        taskDept.toLowerCase() === filterDepartment.toLowerCase();
+    }
 
-  const getEmployeeDetails = (employeeId) => {
-    if (!employeeId) return null;
-    return currentEmployees?.find((emp) => emp.id === employeeId) || null;
-  };
+    return (
+      matchesSearch && matchesStatus && matchesProgress && matchesDepartment
+    );
+  });
 
   const getInitials = (name) => {
     if (!name) return "?";
@@ -322,7 +360,10 @@ export default function AdminReportsTable({
   const getGroupedAndSortedTasks = () => {
     const groupedByDepartment = {};
     filteredTasks.forEach((task) => {
-      const department = task.department || "Unassigned";
+      const department =
+        task.department ||
+        getEmployeeDetails(task.employee)?.department ||
+        "Unassigned";
       
       if (!groupedByDepartment[department]) {
         groupedByDepartment[department] = [];
@@ -368,7 +409,7 @@ export default function AdminReportsTable({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterProgress]);
+  }, [searchTerm, filterStatus, filterProgress, filterDepartment]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -1040,6 +1081,7 @@ export default function AdminReportsTable({
 
   const clearFilters = () => {
     setSearchTerm("");
+    setFilterDepartment("all");
     setFilterStatus("all");
     setFilterProgress("all");
   };
@@ -1211,13 +1253,33 @@ export default function AdminReportsTable({
               >
                 <img src={filterIcon} alt="" className="w-[1.1vw] h-[1.1vw]" />
                 <span>Filter</span>
-                {(filterStatus !== "all" || filterProgress !== "all") && (
+                {(filterStatus !== "all" ||
+                  filterProgress !== "all" ||
+                  filterDepartment !== "all") && (
                   <span className="w-[0.4vw] h-[0.4vw] bg-blue-500 rounded-full"></span>
                 )}
               </button>
 
               {showFilterDropdown && (
                 <div className="absolute right-0 mt-[0.3vw] bg-white border border-gray-300 rounded-lg shadow-lg p-[0.8vw] w-[13vw] z-10">
+                  <div className="mb-[0.7vw]">
+                    <label className="text-[0.7vw] font-medium text-gray-700 block mb-[0.3vw]">
+                      Department
+                    </label>
+                    <select
+                      value={filterDepartment}
+                      onChange={(e) => setFilterDepartment(e.target.value)}
+                      className="w-full px-[0.5vw] py-[0.3vw] border border-gray-300 rounded text-[0.7vw] focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Departments</option>
+                      {departmentOptions.map((dept) => (
+                        <option key={dept} value={dept}>
+                          {dept}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="mb-[0.7vw]">
                     <label className="text-[0.7vw] font-medium text-gray-700 block mb-[0.3vw]">
                       Status
@@ -1318,7 +1380,8 @@ export default function AdminReportsTable({
                   <td colSpan="12" className="px-[0.5vw] py-[0.4vw] text-center">
                     {searchTerm ||
                     filterStatus !== "all" ||
-                    filterProgress !== "all"
+                    filterProgress !== "all" ||
+                    filterDepartment !== "all"
                       ? "No tasks match your filters"
                       : "No tasks found"}
                   </td>
