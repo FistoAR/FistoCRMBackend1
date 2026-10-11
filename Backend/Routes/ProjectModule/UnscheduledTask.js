@@ -27,12 +27,24 @@ router.get("/projectNames", async (req, res) => {
       FROM employees_details 
       WHERE (team_head = 1 OR designation = 'Project Head')
       AND working_status = 'Active'
+      ORDER BY employee_name ASC
+    `);
+
+    const allEmployeesData = await queryWithRetry(`
+      SELECT 
+        employee_id as id,
+        employee_name as name,
+        designation as department,
+        working_status as workingStatus
+      FROM employees_details 
+      ORDER BY CASE WHEN working_status = 'Active' THEN 0 ELSE 1 END, employee_name ASC
     `);
 
     const FinalData = {
       projectNames: data,
-      employees: employeeData
-    }
+      employees: employeeData,
+      allEmployees: allEmployeesData || [],
+    };
 
     res.status(200).json(FinalData);
   } catch (error) {
@@ -45,9 +57,36 @@ router.get("/projectNames", async (req, res) => {
 
 router.post("/create", async (req, res) => {
   try {
-    const { taskName, projectName, startTime, endTime, report, reportingPerson, employeeID } = req.body;
+    const { taskName, projectName, startTime, endTime, report, reportingPerson, employeeID, date } = req.body;
     if (!taskName) {
       return res.status(400).json({ message: "Task name is required" });
+    }
+
+    // Date calculations in IST
+    const now = new Date();
+    const getISTDate = (d) =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(d);
+
+    const todayIST = getISTDate(now);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const minDateIST = getISTDate(sevenDaysAgo);
+
+    let selectedDate = date ? date.trim() : todayIST;
+
+    if (selectedDate > todayIST) {
+      return res.status(400).json({ message: "Report date cannot be in the future." });
+    }
+    if (selectedDate < minDateIST) {
+      return res.status(400).json({
+        message: `Report date cannot be older than past 7 days (minimum allowed: ${minDateIST}).`,
+      });
+    }
+
+    let taskCreatedAt;
+    if (selectedDate === todayIST) {
+      taskCreatedAt = new Date();
+    } else {
+      taskCreatedAt = new Date(`${selectedDate}T18:30:00+05:30`);
     }
 
     const newTask = new UnscheduledTask({
@@ -61,6 +100,7 @@ router.post("/create", async (req, res) => {
       outcomes: "",
       adminApprovedAt: "",
       employeeID,
+      createdAt: taskCreatedAt,
     });
 
     await newTask.save();
@@ -77,30 +117,135 @@ router.post("/create", async (req, res) => {
   }
 });
 
-router.get("/reports/:employeeID", async (req, res) => {
+// Get all unscheduled reports (for Admin, SBU, Project Head, Team Head) with optional filters
+router.get("/all-reports", async (req, res) => {
   try {
-    const { employeeID } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, employeeID, status, projectName } = req.query;
 
-    const query = { employeeID };
+    const query = {};
+
+    if (employeeID && employeeID !== "all") {
+      query.employeeID = employeeID;
+    }
+
+    if (status && status !== "all") {
+      query.status = status;
+    }
+
+    if (projectName && projectName !== "all") {
+      query.projectName = projectName;
+    }
 
     if (startDate && endDate) {
       const start = new Date(startDate);
       start.setHours(0, 0, 0, 0);
-      
+
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
 
       query.createdAt = {
         $gte: start,
-        $lte: end
+        $lte: end,
       };
+    } else if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      query.createdAt = { $gte: start };
+    } else if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      query.createdAt = { $lte: end };
     }
 
     const reports = await UnscheduledTask.find(query)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    res.status(200).json(reports);
+    // Fetch employee details in one query for O(1) Map lookup
+    const employees = await queryWithRetry(`
+      SELECT employee_id, employee_name 
+      FROM employees_details
+    `);
+
+    const employeeMap = new Map();
+    (employees || []).forEach((emp) => {
+      employeeMap.set(emp.employee_id, emp.employee_name);
+    });
+
+    const enrichedReports = reports.map((task) => ({
+      ...task,
+      employeeName: employeeMap.get(task.employeeID) || task.employeeID || "N/A",
+      reportingPersonName:
+        employeeMap.get(task.reportingPerson) || task.reportingPerson || "N/A",
+    }));
+
+    res.status(200).json(enrichedReports);
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching all unscheduled reports",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/reports/:employeeID", async (req, res) => {
+  try {
+    const { employeeID } = req.params;
+    const { startDate, endDate, status, projectName } = req.query;
+
+    const query = { employeeID };
+
+    if (status && status !== "all") {
+      query.status = status;
+    }
+
+    if (projectName && projectName !== "all") {
+      query.projectName = projectName;
+    }
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      query.createdAt = {
+        $gte: start,
+        $lte: end,
+      };
+    } else if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      query.createdAt = { $gte: start };
+    } else if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      query.createdAt = { $lte: end };
+    }
+
+    const reports = await UnscheduledTask.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const employees = await queryWithRetry(`
+      SELECT employee_id, employee_name 
+      FROM employees_details
+    `);
+
+    const employeeMap = new Map();
+    (employees || []).forEach((emp) => {
+      employeeMap.set(emp.employee_id, emp.employee_name);
+    });
+
+    const enrichedReports = reports.map((task) => ({
+      ...task,
+      employeeName: employeeMap.get(task.employeeID) || task.employeeID || "N/A",
+      reportingPersonName:
+        employeeMap.get(task.reportingPerson) || task.reportingPerson || "N/A",
+    }));
+
+    res.status(200).json(enrichedReports);
   } catch (error) {
     res.status(500).json({
       message: "Error fetching reports",
@@ -109,23 +254,27 @@ router.get("/reports/:employeeID", async (req, res) => {
   }
 });
 
-// Get today's tasks for update
+// Get today's tasks for update (only tasks where outcomes have not been put yet)
 router.get("/today/:employeeID", async (req, res) => {
   try {
     const { employeeID } = req.params;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Fetch tasks created in the past 7 days so user can see and update recent tasks
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
 
     const todayTasks = await UnscheduledTask.find({
       employeeID,
       createdAt: {
-        $gte: today,
-        $lt: tomorrow
-      }
+        $gte: sevenDaysAgo,
+      },
+      $or: [
+        { outcomes: { $exists: false } },
+        { outcomes: null },
+        { outcomes: "" },
+      ],
+      status: { $nin: ["Under Review", "Completed", "Delayed Completed"] },
     }).sort({ createdAt: -1 });
 
     res.status(200).json(todayTasks);
@@ -151,9 +300,9 @@ router.put("/update/:taskId", async (req, res) => {
       taskId,
       {
         outcomes,
-        status: "Under Review"
+        status: "Under Review",
       },
-      { new: true }
+      { new: true },
     );
 
     if (!updatedTask) {
@@ -172,17 +321,36 @@ router.put("/update/:taskId", async (req, res) => {
   }
 });
 
-// Get all tasks under review filtered by reportingPerson (for admin/team head)
+// Get all tasks under review for privileged users (Admin, SBU, Project Head see all; Team Head sees assigned or self)
 router.get("/review-reports/:employeeID", async (req, res) => {
   try {
     const { employeeID } = req.params;
-    
+
+    // Determine employee permissions
+    const empData = await queryWithRetry(
+      `SELECT employee_id, designation, team_head FROM employees_details WHERE employee_id = ?`,
+      [employeeID]
+    );
+
+    const emp = empData && empData[0];
+    const designation = (emp?.designation || "").toLowerCase();
+    const isGlobalReviewer =
+      employeeID === "all" ||
+      designation === "admin" ||
+      designation.includes("project head") ||
+      designation.includes("sbu");
+
+    const matchCriteria = { status: "Under Review" };
+    if (!isGlobalReviewer) {
+      matchCriteria.$or = [
+        { reportingPerson: employeeID },
+        { employeeID: employeeID },
+      ];
+    }
+
     const reviewTasks = await UnscheduledTask.aggregate([
       {
-        $match: { 
-          status: "Under Review",
-          reportingPerson: employeeID
-        }
+        $match: matchCriteria,
       },
       {
         $project: {
@@ -196,36 +364,28 @@ router.get("/review-reports/:employeeID", async (req, res) => {
           status: 1,
           createdAt: 1,
           employeeID: 1,
-          employeeName: 1,
-          reportingPerson: 1
-        }
+          reportingPerson: 1,
+        },
       },
       {
-        $sort: { createdAt: -1 }
-      }
+        $sort: { createdAt: -1 },
+      },
     ]);
 
-    const tasksWithEmployeeNames = await Promise.all(
-      reviewTasks.map(async (task) => {
-        try {
-          const employeeDetails = await queryWithRetry(`
-            SELECT employee_name 
-            FROM employees_details 
-            WHERE employee_id = ?
-          `, [task.employeeID]);
-          
-          return {
-            ...task,
-            employeeName: employeeDetails?.[0]?.employee_name || "N/A"
-          };
-        } catch (err) {
-          return {
-            ...task,
-            employeeName: "N/A"
-          };
-        }
-      })
-    );
+    const employees = await queryWithRetry(`
+      SELECT employee_id, employee_name 
+      FROM employees_details
+    `);
+
+    const employeeMap = new Map();
+    (employees || []).forEach((emp) => {
+      employeeMap.set(emp.employee_id, emp.employee_name);
+    });
+
+    const tasksWithEmployeeNames = reviewTasks.map((task) => ({
+      ...task,
+      employeeName: employeeMap.get(task.employeeID) || task.employeeID || "N/A",
+    }));
 
     res.status(200).json(tasksWithEmployeeNames);
   } catch (error) {
@@ -267,6 +427,28 @@ router.put("/admin-update/:taskId", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       message: "Error updating status",
+      error: error.message,
+    });
+  }
+});
+
+// Delete unscheduled task
+router.delete("/delete/:taskId", async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const deletedTask = await UnscheduledTask.findByIdAndDelete(taskId);
+
+    if (!deletedTask) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    res.status(200).json({
+      message: "Task deleted successfully",
+      data: deletedTask,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error deleting task",
       error: error.message,
     });
   }

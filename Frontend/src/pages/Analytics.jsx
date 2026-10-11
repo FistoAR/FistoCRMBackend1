@@ -146,6 +146,8 @@ const Analytics = () => {
       const result = await response.json();
       return result.status ? result.employees || [] : [];
     },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
   });
 
   const { data: analyticsResult, isLoading: analyticsQueryLoading } = useQuery({
@@ -170,6 +172,8 @@ const Analytics = () => {
       }
       return null;
     },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   const { data: projectDetailData } = useQuery({
@@ -183,6 +187,7 @@ const Analytics = () => {
       return result.success ? result.data : null;
     },
     enabled: selectedProject !== "all",
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: timelineResult = [], isLoading: timelineQueryLoading } = useQuery({
@@ -194,6 +199,8 @@ const Analytics = () => {
       const result = await response.json();
       return result.success ? result.data.timeline || [] : [];
     },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   const { data: teamMembersResult, isLoading: teamQueryLoading } = useQuery({
@@ -219,6 +226,8 @@ const Analytics = () => {
       }
       return null;
     },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   const queriesLoading = employeesQueryLoading || analyticsQueryLoading || timelineQueryLoading || teamQueryLoading;

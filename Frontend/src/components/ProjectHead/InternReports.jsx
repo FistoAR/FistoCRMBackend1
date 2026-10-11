@@ -168,6 +168,8 @@ const InternReports = () => {
       return [];
     },
     enabled: !!userInfo,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
   
   const employees = employeesData;
@@ -248,6 +250,8 @@ const InternReports = () => {
     },
     placeholderData: keepPreviousData,
     enabled: !!userInfo,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 
   useEffect(() => {
@@ -621,7 +625,14 @@ const InternReports = () => {
   }
 
   function formatTime(timeString) {
-    if (!timeString || timeString === "LEAVE") return "-";
+    if (
+      !timeString ||
+      timeString === "LEAVE" ||
+      timeString === "00:00:00" ||
+      timeString === "00:00" ||
+      timeString === "-"
+    )
+      return "-";
     const parts = timeString.split(":");
     if (parts.length < 2) return "-";
     const hours = parseInt(parts[0]);

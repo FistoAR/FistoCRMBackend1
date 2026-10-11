@@ -64,57 +64,139 @@ function hasWorkTasksOrReports(record) {
   );
 }
 
-async function processAttendanceRecord(attendance, context = {}) {
-  const projectCache = context.projectCache || new Map();
-  const taskCache = context.taskCache || new Map();
+async function batchProcessAttendanceRecords(records) {
+  if (!records || records.length === 0) return [];
 
-  // Normalize date from MySQL (YYYY-MM-DD) to a full day range in UTC that covers IST 00:00 to 23:59
-  const reportDateStr = getISTDateString(attendance.report_date);
-  
-  // IST is UTC+5:30. 
-  // IST Day Start (00:00) = UTC 18:30 (Previous Day)
-  // IST Day End (23:59) = UTC 18:29 (Current Day)
-  const startOfDay = new Date(reportDateStr + "T00:00:00.000Z");
-  startOfDay.setMinutes(startOfDay.getMinutes() - 330); // Shift to UTC
-  
-  const endOfDay = new Date(reportDateStr + "T23:59:59.999Z");
-  endOfDay.setMinutes(endOfDay.getMinutes() - 330); // Shift to UTC
+  const nonLeaveRecords = records.filter((r) => !r.is_leave);
+  if (nonLeaveRecords.length === 0) return records;
 
-  const [dayReports, unscheduledTasks] = await Promise.all([
+  // 1. Gather unique employee IDs and global date boundaries
+  const employeeIds = [
+    ...new Set(nonLeaveRecords.map((r) => r.employee_id).filter(Boolean)),
+  ];
+
+  let minStart = null;
+  let maxEnd = null;
+
+  nonLeaveRecords.forEach((r) => {
+    const reportDateStr = getISTDateString(r.report_date);
+    if (!reportDateStr) return;
+
+    // IST 00:00 = UTC 18:30 (prev day)
+    const startOfDay = new Date(reportDateStr + "T00:00:00.000Z");
+    startOfDay.setMinutes(startOfDay.getMinutes() - 330);
+
+    // IST 23:59:59.999 = UTC 18:29:59.999 (curr day)
+    const endOfDay = new Date(reportDateStr + "T23:59:59.999Z");
+    endOfDay.setMinutes(endOfDay.getMinutes() - 330);
+
+    if (!minStart || startOfDay < minStart) minStart = startOfDay;
+    if (!maxEnd || endOfDay > maxEnd) maxEnd = endOfDay;
+  });
+
+  if (!minStart || !maxEnd || employeeIds.length === 0) {
+    return records;
+  }
+
+  // 2. Parallel batch fetch DayReports and UnscheduledTasks
+  const [allDayReports, allUnscheduledTasks] = await Promise.all([
     DayReport.find({
-      employeeID: attendance.employee_id,
-      createdAt: { $gte: startOfDay, $lte: endOfDay },
+      employeeID: { $in: employeeIds },
+      createdAt: { $gte: minStart, $lte: maxEnd },
     }).lean(),
     UnscheduledTask.find({
-      employeeID: attendance.employee_id,
-      createdAt: { $gte: startOfDay, $lte: endOfDay },
+      employeeID: { $in: employeeIds },
+      createdAt: { $gte: minStart, $lte: maxEnd },
     }).lean(),
   ]);
 
-  const scheduledTasksData = await Promise.all(
-    dayReports.map(async (dayReport) => {
-      try {
-        let project = null;
-        const projIdStr = dayReport.projectId ? dayReport.projectId.toString() : null;
-        if (projIdStr && projectCache.has(projIdStr)) {
-          project = projectCache.get(projIdStr);
-        } else if (dayReport.projectId) {
-          project = await Project_Details.findById(dayReport.projectId).lean();
-          if (projIdStr) projectCache.set(projIdStr, project);
-        }
+  // Index dayReports by `${employeeID}_${ISTDate}`
+  const dayReportsByEmpDate = new Map();
+  allDayReports.forEach((dr) => {
+    const dStr = getISTDateString(dr.createdAt);
+    const key = `${dr.employeeID}_${dStr}`;
+    if (!dayReportsByEmpDate.has(key)) dayReportsByEmpDate.set(key, []);
+    dayReportsByEmpDate.get(key).push(dr);
+  });
+
+  // Index unscheduledTasks by `${employeeID}_${ISTDate}`
+  const unscheduledByEmpDate = new Map();
+  allUnscheduledTasks.forEach((ut) => {
+    const dStr = getISTDateString(ut.createdAt);
+    const key = `${ut.employeeID}_${dStr}`;
+    if (!unscheduledByEmpDate.has(key)) unscheduledByEmpDate.set(key, []);
+    unscheduledByEmpDate.get(key).push(ut);
+  });
+
+  // 3. Collect unique projectIds and taskIds from dayReports
+  const projectIds = [
+    ...new Set(allDayReports.map((d) => d.projectId).filter(Boolean)),
+  ];
+  const taskIds = [
+    ...new Set(allDayReports.map((d) => d.taskId).filter(Boolean)),
+  ];
+
+  // Extended end of day for task reports review
+  const extendedMaxEnd = new Date(maxEnd.getTime() + 6 * 60 * 60 * 1000);
+
+  const [projectsList, tasksList, taskReportsList, reviewsList] =
+    await Promise.all([
+      projectIds.length > 0
+        ? Project_Details.find({ _id: { $in: projectIds } }).lean()
+        : [],
+      taskIds.length > 0 ? Tasks.find({ _id: { $in: taskIds } }).lean() : [],
+      TaskReports.find({
+        employeeID: { $in: employeeIds },
+        createdAt: { $gte: minStart, $lte: extendedMaxEnd },
+      }).lean(),
+      TaskReportsReview.find({
+        employeeID: { $in: employeeIds },
+        createdAt: { $gte: minStart, $lte: extendedMaxEnd },
+      }).lean(),
+    ]);
+
+  const projectMap = new Map(
+    projectsList.map((p) => [p._id.toString(), p]),
+  );
+  const taskMap = new Map(tasksList.map((t) => [t._id.toString(), t]));
+
+  // Index taskReports and reviewReports by `${projectId}_${taskId}_${activityId}_${employeeID}_${dateStr}`
+  const taskReportMap = new Map();
+  taskReportsList.forEach((tr) => {
+    const dStr = getISTDateString(tr.createdAt);
+    const act = tr.activityId ? String(tr.activityId) : "";
+    const key = `${tr.projectId}_${tr.taskId}_${act}_${tr.employeeID}_${dStr}`;
+    taskReportMap.set(key, tr);
+  });
+
+  const reviewReportMap = new Map();
+  reviewsList.forEach((rr) => {
+    const dStr = getISTDateString(rr.createdAt);
+    const act = rr.activityId ? String(rr.activityId) : "";
+    const key = `${rr.projectId}_${rr.taskId}_${act}_${rr.employeeID}_${dStr}`;
+    reviewReportMap.set(key, rr);
+  });
+
+  // 4. Transform records into final output synchronously (O(1) lookups)
+  return records.map((record) => {
+    if (record.is_leave) return record;
+
+    const reportDateStr = getISTDateString(record.report_date);
+    const empKey = `${record.employee_id}_${reportDateStr}`;
+
+    const dayReports = dayReportsByEmpDate.get(empKey) || [];
+    const unscheduledTasks = unscheduledByEmpDate.get(empKey) || [];
+
+    const scheduledTasksData = dayReports
+      .map((dayReport) => {
+        const projIdStr = dayReport.projectId
+          ? dayReport.projectId.toString()
+          : null;
+        const project = projIdStr ? projectMap.get(projIdStr) : null;
         if (!project) return null;
 
-        let mongoTask = null;
         const taskIdStr = dayReport.taskId ? dayReport.taskId.toString() : null;
-        if (taskIdStr && taskCache.has(taskIdStr)) {
-          mongoTask = taskCache.get(taskIdStr);
-        } else if (taskIdStr) {
-          mongoTask = await Tasks.findOne({
-            projectId: dayReport.projectId,
-            _id: dayReport.taskId,
-          }).lean();
-          if (mongoTask) taskCache.set(taskIdStr, mongoTask);
-        }
+        const mongoTask = taskIdStr ? taskMap.get(taskIdStr) : null;
 
         let taskDetails = null;
         let taskPercentage = 0;
@@ -134,31 +216,20 @@ async function processAttendanceRecord(attendance, context = {}) {
           taskStatus = taskPercentage >= 100 ? "Completed" : "In Progress";
         }
 
-        const reportCreatedAt = { $gte: startOfDay, $lte: new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000) };
-        const [taskReport, reviewReport] = await Promise.all([
-          TaskReports.findOne({
-            projectId: dayReport.projectId,
-            taskId: dayReport.taskId,
-            activityId: dayReport.activityId,
-            employeeID: attendance.employee_id,
-            createdAt: reportCreatedAt,
-          }).lean(),
-          TaskReportsReview.findOne({
-            projectId: dayReport.projectId,
-            taskId: dayReport.taskId,
-            activityId: dayReport.activityId,
-            employeeID: attendance.employee_id,
-            createdAt: reportCreatedAt,
-          }).lean(),
-        ]);
+        const act = dayReport.activityId ? String(dayReport.activityId) : "";
+        const reportKey = `${dayReport.projectId}_${dayReport.taskId}_${act}_${record.employee_id}_${reportDateStr}`;
+        const taskReport = taskReportMap.get(reportKey);
+        const reviewReport = reviewReportMap.get(reportKey);
 
         const activeReport = taskReport || reviewReport;
         let reportStatus = taskStatus;
 
         if (taskReport) {
-          reportStatus = taskReport.percentage >= 100 ? "Completed" : "In Progress";
+          reportStatus =
+            taskReport.percentage >= 100 ? "Completed" : "In Progress";
         } else if (reviewReport) {
-          reportStatus = reviewReport.status === "declined" ? "Declined" : "Under Review";
+          reportStatus =
+            reviewReport.status === "declined" ? "Declined" : "Under Review";
         }
 
         return {
@@ -170,56 +241,71 @@ async function processAttendanceRecord(attendance, context = {}) {
           percentage: activeReport?.percentage ?? taskPercentage,
           status: reportStatus,
           outcome: activeReport?.outcome || "-",
-          admin_remarks: activeReport?.adminRemarks || reviewReport?.remarks || "-",
+          admin_remarks:
+            activeReport?.adminRemarks || reviewReport?.remarks || "-",
           day_report_id: dayReport._id.toString(),
           activity_id: dayReport.activityId,
-          reporting_person: taskReport?.verifiedBy || reviewReport?.reviewedBy || "-",
+          reporting_person:
+            taskReport?.verifiedBy || reviewReport?.reviewedBy || "-",
           start_time: mongoTask?.startTime || "-",
           end_time: mongoTask?.endTime || "-",
-          report_source: taskReport ? "approved" : reviewReport ? "review" : "none",
+          report_source: taskReport
+            ? "approved"
+            : reviewReport
+              ? "review"
+              : "none",
         };
-      } catch (error) {
-        console.error("Error processing day report:", error);
-        return null;
-      }
-    }),
-  );
+      })
+      .filter(Boolean);
 
-  const unscheduledTasksData = unscheduledTasks.map((unscheduledTask) => ({
-    task_type: "unscheduled",
-    project_name: unscheduledTask.projectName || "-",
-    company_name: "-",
-    task_name: unscheduledTask.taskName || "-",
-    task_id: unscheduledTask._id.toString(),
-    percentage: "-",
-    status: unscheduledTask.status || "In Progress",
-    outcome: unscheduledTask.outcomes || "-",
-    admin_remarks: "-",
-    day_report_id: null,
-    activity_id: null,
-    reporting_person: unscheduledTask.reportingPerson || "-",
-    start_time: unscheduledTask.startTime || "-",
-    end_time: unscheduledTask.endTime || "-",
-    reports: unscheduledTask.reports || "-",
-    admin_approved_at: unscheduledTask.adminApprovedAt || null,
-    report_source: "unscheduled",
-  }));
+    const unscheduledTasksData = unscheduledTasks.map((unscheduledTask) => ({
+      task_type: "unscheduled",
+      project_name: unscheduledTask.projectName || "-",
+      company_name: "-",
+      task_name: unscheduledTask.taskName || "-",
+      task_id: unscheduledTask._id.toString(),
+      percentage: "-",
+      status: unscheduledTask.status || "In Progress",
+      outcome: unscheduledTask.outcomes || "-",
+      admin_remarks: "-",
+      day_report_id: null,
+      activity_id: null,
+      reporting_person: unscheduledTask.reportingPerson || "-",
+      start_time: unscheduledTask.startTime || "-",
+      end_time: unscheduledTask.endTime || "-",
+      reports: unscheduledTask.reports || "-",
+      admin_approved_at: unscheduledTask.adminApprovedAt || null,
+      report_source: "unscheduled",
+    }));
 
-  return {
-    employee_id: attendance.employee_id,
-    employee_name: attendance.employee_name,
-    designation: attendance.designation || "",
-    report_date: attendance.report_date,
-    total_hours: attendance.total_hours,
-    morning_in: attendance.morning_in,
-    morning_out: attendance.morning_out,
-    afternoon_in: attendance.afternoon_in,
-    afternoon_out: attendance.afternoon_out,
-    tasks: [
-      ...scheduledTasksData.filter((task) => task !== null),
-      ...unscheduledTasksData,
-    ],
-  };
+    const result = {
+      employee_id: record.employee_id,
+      employee_name: record.employee_name,
+      designation: record.designation || "",
+      report_date: record.report_date,
+      total_hours: record.total_hours,
+      morning_in: record.morning_in,
+      morning_out: record.morning_out,
+      afternoon_in: record.afternoon_in,
+      afternoon_out: record.afternoon_out,
+      tasks: [
+        ...scheduledTasksData,
+        ...unscheduledTasksData,
+      ],
+    };
+
+    if (record.merged_leave) {
+      result.tasks.push(record.merged_leave);
+    }
+
+    return result;
+  });
+}
+
+// Fallback helper for single record
+async function processAttendanceRecord(attendance) {
+  const [res] = await batchProcessAttendanceRecords([attendance]);
+  return res;
 }
 
 // ✅ Helper: Expand a leave request into daily records
@@ -280,9 +366,18 @@ function expandLeaveToDays(leave, startDate, endDate) {
   return days;
 }
 
+const reportsCache = new Map();
+const CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
 // ✅ GET - All reports (Admin / Team Head)
 router.get("/all-reports", async (req, res) => {
   try {
+    const cacheKey = `all_${req.originalUrl}`;
+    const cached = reportsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return res.json(cached.data);
+    }
+
     const {
       limit = 30,
       offset = 0,
@@ -396,12 +491,83 @@ router.get("/all-reports", async (req, res) => {
       queryWithRetry(attendanceQuery, params),
       queryWithRetry(leaveQuery, leaveParams),
     ]);
-    console.log("Raw Leave Requests from DB:", leaveRequests.length, "records found");
-    if (leaveRequests.length > 0) {
-      console.log("First Leave Request ID:", leaveRequests[0].id, "for", leaveRequests[0].employee_name);
+
+    // 3. Fetch MongoDB Task Days (DayReport & UnscheduledTask) to include records where tasks exist without punch in/out
+    const mongoTaskMatch = {
+      employeeID: { $exists: true, $ne: "" },
+      createdAt: { $exists: true, $ne: null },
+    };
+
+    if (employee_id && employee_id !== "all") {
+      mongoTaskMatch.employeeID = employee_id;
     }
 
-    // 3. Expand leaves and combine
+    if (start_date || end_date) {
+      mongoTaskMatch.createdAt = {};
+      if (start_date) {
+        const s = new Date(start_date + "T00:00:00.000Z");
+        s.setMinutes(s.getMinutes() - 330);
+        mongoTaskMatch.createdAt.$gte = s;
+      }
+      if (end_date) {
+        const e = new Date(end_date + "T23:59:59.999Z");
+        e.setMinutes(e.getMinutes() - 330);
+        mongoTaskMatch.createdAt.$lte = e;
+      }
+    } else {
+      // Default to last 90 days when no date filter specified so MongoDB does not scan entire database history
+      const defaultLookback = new Date();
+      defaultLookback.setDate(defaultLookback.getDate() - 90);
+      mongoTaskMatch.createdAt = { $gte: defaultLookback };
+    }
+
+    const [dayReportDates, unscheduledDates, allEmployeesList] = await Promise.all([
+      DayReport.aggregate([
+        { $match: mongoTaskMatch },
+        {
+          $group: {
+            _id: {
+              employee_id: "$employeeID",
+              report_date: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$createdAt",
+                  timezone: "+05:30",
+                },
+              },
+            },
+          },
+        },
+      ]),
+      UnscheduledTask.aggregate([
+        { $match: mongoTaskMatch },
+        {
+          $group: {
+            _id: {
+              employee_id: "$employeeID",
+              report_date: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$createdAt",
+                  timezone: "+05:30",
+                },
+              },
+            },
+          },
+        },
+      ]),
+      queryWithRetry(`
+        SELECT employee_id, employee_name, designation
+        FROM employees_details
+      `),
+    ]);
+
+    const employeeMap = new Map();
+    (allEmployeesList || []).forEach((emp) => {
+      employeeMap.set(emp.employee_id, emp);
+    });
+
+    // 4. Expand leaves and combine
     const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
     console.log("Expanded Leave Days:", leaveDays.length, "total days generated");
     if (leaveDays.length > 0) {
@@ -425,6 +591,60 @@ router.get("/all-reports", async (req, res) => {
     });
 
     const combinedReports = [...attendanceRecords];
+
+    // Merge task days where employee has tasks but punch in/out was not present (no attendance record)
+    const allTaskDays = [...(dayReportDates || []), ...(unscheduledDates || [])];
+    allTaskDays.forEach((item) => {
+      const empId = item._id?.employee_id;
+      const rDate = item._id?.report_date;
+      if (!empId || !rDate) return;
+
+      const key = `${empId}_${rDate}`;
+      if (!attendanceMap.has(key)) {
+        const emp = employeeMap.get(empId);
+        if (!emp) return;
+
+        const desig = (emp.designation || "").trim();
+        if (desig.toLowerCase().includes("maid")) return;
+
+        // Respect same designation/role filters as attendance query
+        if (isTeamHead === "true" && designation) {
+          if (desig !== designation) return;
+        } else if (employee_id && employee_id !== "all") {
+          if (empId !== employee_id) return;
+        } else {
+          const isMgmt = ADMIN_DESIGNATIONS.some((d) =>
+            desig.toLowerCase().includes(d.toLowerCase())
+          );
+          if (isMgmt) return;
+          if (designation && desig !== designation) return;
+        }
+
+        if (
+          search &&
+          !emp.employee_name.toLowerCase().includes(search.toLowerCase())
+        ) {
+          return;
+        }
+
+        const standaloneTaskRecord = {
+          employee_id: empId,
+          employee_name: emp.employee_name,
+          designation: desig,
+          report_date: rDate,
+          total_hours: "-",
+          morning_in: null,
+          morning_out: null,
+          afternoon_in: null,
+          afternoon_out: null,
+          tasks: [],
+        };
+
+        attendanceMap.set(key, standaloneTaskRecord);
+        combinedReports.push(standaloneTaskRecord);
+      }
+    });
+
     leaveDays.forEach(leaveDay => {
       const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
       if (!attendanceMap.has(key)) {
@@ -463,21 +683,8 @@ router.get("/all-reports", async (req, res) => {
       paginatedReports = finalReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
     }
 
-    // 6. Process Records (Mongo fetch for attendance) with project and task cache
-    const context = { projectCache: new Map(), taskCache: new Map() };
-    const processedReports = await Promise.all(
-      paginatedReports.map(async (record) => {
-        if (record.is_leave) {
-          return record;
-        }
-
-        const processed = await processAttendanceRecord(record, context);
-        if (record.merged_leave) {
-          processed.tasks.push(record.merged_leave);
-        }
-        return processed;
-      }),
-    );
+    // 6. Process Records (Mongo batch fetch for attendance)
+    const processedReports = await batchProcessAttendanceRecords(paginatedReports);
 
     console.log(`Sending All-Reports: Total ${totalCount}, Paginated ${processedReports.length}`);
     if (processedReports.length > 0) {
@@ -493,14 +700,16 @@ router.get("/all-reports", async (req, res) => {
       return true;
     });
 
-    res.json({
+    const responseData = {
       success: true,
       count: filteredProcessedReports.length,
       total: totalCount,
       offset: fetchAll === "true" ? 0 : parseInt(offset),
       limit: fetchAll === "true" ? totalCount : parseInt(limit),
       reports: filteredProcessedReports,
-    });
+    };
+    reportsCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+    res.json(responseData);
   } catch (error) {
     console.error("Get all intern reports error:", error);
     res
@@ -513,9 +722,14 @@ router.get("/all-reports", async (req, res) => {
   }
 });
 
-// ✅ GET - Management Roles Reports (Project Head, SBU, HR, Marketing)
 router.get("/management-reports", async (req, res) => {
   try {
+    const cacheKey = `mgmt_${req.originalUrl}`;
+    const cached = reportsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return res.json(cached.data);
+    }
+
     const { start_date, end_date, employee_id } = req.query;
 
     // Fetch Attendance (Login Details) - Base for all reports
@@ -697,6 +911,76 @@ router.get("/management-reports", async (req, res) => {
       });
     });
 
+    // Also fetch Unscheduled Tasks for Management roles
+    const mgmtMongoMatch = {
+      createdAt: { $exists: true, $ne: null }
+    };
+    if (employee_id && employee_id !== "all") {
+      mgmtMongoMatch.employeeID = employee_id;
+    }
+    if (start_date || end_date) {
+      mgmtMongoMatch.createdAt = {};
+      if (start_date) {
+        const s = new Date(start_date + "T00:00:00.000Z");
+        s.setMinutes(s.getMinutes() - 330);
+        mgmtMongoMatch.createdAt.$gte = s;
+      }
+      if (end_date) {
+        const e = new Date(end_date + "T23:59:59.999Z");
+        e.setMinutes(e.getMinutes() - 330);
+        mgmtMongoMatch.createdAt.$lte = e;
+      }
+    }
+
+    const [mgmtUnscheduledList, mgmtEmpList] = await Promise.all([
+      UnscheduledTask.find(mgmtMongoMatch).lean(),
+      queryWithRetry(`
+        SELECT employee_id, employee_name, designation
+        FROM employees_details
+        WHERE designation LIKE '%Project Head%' 
+           OR designation LIKE '%SBU%' 
+           OR designation LIKE '%HR%' 
+           OR designation LIKE '%Marketing%'
+      `),
+    ]);
+
+    const mgmtEmpMap = new Map();
+    (mgmtEmpList || []).forEach(emp => {
+      mgmtEmpMap.set(emp.employee_id, emp);
+    });
+
+    mgmtUnscheduledList.forEach(ut => {
+      if (!mgmtEmpMap.has(ut.employeeID)) return;
+      const emp = mgmtEmpMap.get(ut.employeeID);
+      const rDate = getISTDateString(ut.createdAt);
+      if (!rDate) return;
+      const key = `${ut.employeeID}_${rDate}`;
+
+      if (!reportMap.has(key)) {
+        reportMap.set(key, {
+          employee_id: ut.employeeID,
+          employee_name: emp.employee_name || ut.employeeID,
+          report_date: rDate,
+          morning_in: null,
+          morning_out: null,
+          afternoon_in: null,
+          afternoon_out: null,
+          total_hours: "-",
+          designation: emp.designation || "",
+          tasks: []
+        });
+      }
+      const report = reportMap.get(key);
+      report.tasks.push({
+        task_type: "unscheduled",
+        project_name: ut.projectName || "Management",
+        task_name: ut.taskName || "-",
+        outcome: ut.outcomes || ut.reports || "-",
+        status: ut.status || "Completed",
+        percentage: 100
+      });
+    });
+
     // Merge Leave Days
     leaveDays.forEach(leaveDay => {
       const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
@@ -742,11 +1026,13 @@ router.get("/management-reports", async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
     const paginatedReports = combinedReports.slice(offset, offset + limit);
 
-    res.json({
+    const responseData = {
       success: true,
       reports: paginatedReports,
       total: combinedReports.length
-    });
+    };
+    reportsCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+    res.json(responseData);
 
   } catch (error) {
     console.error("Management reports error:", error);
@@ -757,6 +1043,12 @@ router.get("/management-reports", async (req, res) => {
 // ✅ GET - Reports by specific employee
 router.get("/reports/:employee_id", async (req, res) => {
   try {
+    const cacheKey = `emp_${req.originalUrl}`;
+    const cached = reportsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return res.json(cached.data);
+    }
+
     const { employee_id } = req.params;
     const {
       limit = 30,
@@ -808,7 +1100,78 @@ router.get("/reports/:employee_id", async (req, res) => {
 
     const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
     
-    // 3. Expand leaves and combine
+    // 3. Fetch MongoDB Task Days for this employee
+    const empMongoMatch = {
+      employeeID: employee_id,
+      createdAt: { $exists: true, $ne: null },
+    };
+
+    if (start_date || end_date) {
+      empMongoMatch.createdAt = {};
+      if (start_date) {
+        const s = new Date(start_date + "T00:00:00.000Z");
+        s.setMinutes(s.getMinutes() - 330);
+        empMongoMatch.createdAt.$gte = s;
+      }
+      if (end_date) {
+        const e = new Date(end_date + "T23:59:59.999Z");
+        e.setMinutes(e.getMinutes() - 330);
+        empMongoMatch.createdAt.$lte = e;
+      }
+    } else {
+      const defaultLookback = new Date();
+      defaultLookback.setDate(defaultLookback.getDate() - 90);
+      empMongoMatch.createdAt = { $gte: defaultLookback };
+    }
+
+    const [empDayDates, empUnscheduledDates, empDetails] = await Promise.all([
+      DayReport.aggregate([
+        { $match: empMongoMatch },
+        {
+          $group: {
+            _id: {
+              employee_id: "$employeeID",
+              report_date: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$createdAt",
+                  timezone: "+05:30",
+                },
+              },
+            },
+          },
+        },
+      ]),
+      UnscheduledTask.aggregate([
+        { $match: empMongoMatch },
+        {
+          $group: {
+            _id: {
+              employee_id: "$employeeID",
+              report_date: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$createdAt",
+                  timezone: "+05:30",
+                },
+              },
+            },
+          },
+        },
+      ]),
+      queryWithRetry(
+        `SELECT employee_id, employee_name, designation FROM employees_details WHERE employee_id = ?`,
+        [employee_id]
+      ),
+    ]);
+
+    const targetEmp = empDetails?.[0] || {
+      employee_id,
+      employee_name: employee_id,
+      designation: "",
+    };
+
+    // 4. Expand leaves and combine
     const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
 
     const attendanceMap = new Map();
@@ -823,6 +1186,31 @@ router.get("/reports/:employee_id", async (req, res) => {
     });
 
     const combinedReports = [...attendanceRecords];
+
+    // Merge task days where employee has tasks but punch in/out was not present
+    const allEmpTaskDays = [...(empDayDates || []), ...(empUnscheduledDates || [])];
+    allEmpTaskDays.forEach((item) => {
+      const rDate = item._id?.report_date;
+      if (!rDate) return;
+      const key = `${employee_id}_${rDate}`;
+      if (!attendanceMap.has(key)) {
+        const standaloneTaskRecord = {
+          employee_id,
+          employee_name: targetEmp.employee_name,
+          designation: targetEmp.designation || "",
+          report_date: rDate,
+          total_hours: "-",
+          morning_in: null,
+          morning_out: null,
+          afternoon_in: null,
+          afternoon_out: null,
+          tasks: [],
+        };
+        attendanceMap.set(key, standaloneTaskRecord);
+        combinedReports.push(standaloneTaskRecord);
+      }
+    });
+
     leaveDays.forEach(leaveDay => {
       const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
       if (!attendanceMap.has(key)) {
@@ -836,7 +1224,7 @@ router.get("/reports/:employee_id", async (req, res) => {
       }
     });
 
-    // 4. Final Filtering (Hide future records)
+    // 5. Final Filtering (Hide future records)
     const now = new Date();
     const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
     const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
@@ -852,23 +1240,14 @@ router.get("/reports/:employee_id", async (req, res) => {
 
     const totalCount = finalReports.length;
 
-    // 5. Paginate
+    // 6. Paginate
     let paginatedReports = finalReports;
     if (fetchAll !== "true") {
-      paginatedReports = combinedReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+      paginatedReports = finalReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
     }
 
     // 6. Process
-    const reports = await Promise.all(
-      paginatedReports.map(async (record) => {
-        if (record.is_leave) return record;
-        const processed = await processAttendanceRecord(record);
-        if (record.merged_leave) {
-          processed.tasks.push(record.merged_leave);
-        }
-        return processed;
-      }),
-    );
+    const reports = await batchProcessAttendanceRecords(paginatedReports);
 
     // Sunday exception: if Sunday, only include if employee put a report
     const filteredReports = reports.filter((record) => {
@@ -878,14 +1257,16 @@ router.get("/reports/:employee_id", async (req, res) => {
       return true;
     });
 
-    res.json({
+    const responseData = {
       success: true,
       count: filteredReports.length,
       total: totalCount,
       offset: fetchAll === "true" ? 0 : parseInt(offset),
       limit: fetchAll === "true" ? totalCount : parseInt(limit),
       reports: filteredReports,
-    });
+    };
+    reportsCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+    res.json(responseData);
   } catch (error) {
     console.error("Get intern reports by employee error:", error);
     res

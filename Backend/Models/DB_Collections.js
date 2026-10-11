@@ -485,7 +485,11 @@ taskReportReview.index({ taskId: 1, status: 1 });
 taskReportReview.index({ projectId: 1 });
 
 dayReport.index({ createdAt: -1, employeeID: 1 });
+dayReport.index({ employeeID: 1, createdAt: -1 });
 dayReport.index({ projectId: 1 });
+
+unscheduledTask.index({ createdAt: -1, employeeID: 1 });
+unscheduledTask.index({ employeeID: 1, createdAt: -1 });
 
 const Project_Details = mongoose.model("Project_details", Project_details);
 const Project_Request = mongoose.model("Project_Request", Project_request);
