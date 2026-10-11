@@ -19,7 +19,6 @@ export default function useAttendanceWorker() {
         sessionStorage.getItem("user") || localStorage.getItem("user");
 
       if (!storedUser) {
-        console.error("useAttendanceWorker: No user found in storage");
         return null;
       }
 
@@ -215,7 +214,6 @@ export default function useAttendanceWorker() {
     const currentEmployeeId = getCurrentEmployeeId();
 
     if (!currentEmployeeId) {
-      console.error("❌ No employee ID found - attendance notifications disabled");
       return;
     }
 

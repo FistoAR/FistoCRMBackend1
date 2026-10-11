@@ -248,7 +248,31 @@ const InternReports = () => {
         total: data.success ? (data.total || (data.reports?.length || 0)) : 0
       };
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) => {
+      const prevKey = previousQuery?.queryKey;
+      if (!prevKey || !previousData) return undefined;
+      const [
+        _name,
+        _empId,
+        prevReportType,
+        prevSelectedEmployee,
+        prevSearchTerm,
+        prevStartDate,
+        prevEndDate,
+      ] = prevKey;
+
+      // Only retain previous data if paging/batching within the exact same tab view and filter set
+      if (
+        prevReportType === reportType &&
+        prevSelectedEmployee === selectedEmployee &&
+        prevSearchTerm === searchTerm &&
+        prevStartDate === startDate &&
+        prevEndDate === endDate
+      ) {
+        return previousData;
+      }
+      return undefined;
+    },
     enabled: !!userInfo,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
@@ -264,15 +288,18 @@ const InternReports = () => {
     reportsQueryData?.total ?? serverTotalCount ?? (reportsQueryData?.reports?.length || 0);
 
   const activeReports = useMemo(() => {
+    if (!reportsQueryData?.reports) {
+      return [];
+    }
     if (currentBatch === 0) {
-      return reportsQueryData?.reports || [];
+      return reportsQueryData.reports;
     }
     return allFetchedReports.length > 0
       ? allFetchedReports
-      : reportsQueryData?.reports || [];
+      : reportsQueryData.reports;
   }, [currentBatch, reportsQueryData, allFetchedReports]);
 
-  const loading = reportsQueryLoading && activeReports.length === 0;
+  const loading = (reportsQueryLoading || reportsQueryFetching) && activeReports.length === 0;
   const fetchingMore = reportsQueryFetching && activeReports.length > 0;
 
   useEffect(() => {
@@ -302,6 +329,7 @@ const InternReports = () => {
     setCurrentBatch(0);
     setLoadedBatches(new Set([0]));
     setCurrentPage(1);
+    setServerTotalCount(0);
   }, [reportType, selectedEmployee, searchTerm, startDate, endDate]);
 
   // ✅ loadAllRecordsForFiltering is no longer needed as the backend handles filtering
@@ -696,6 +724,11 @@ const InternReports = () => {
                     onClick={() => {
                       if (reportType !== "intern") {
                         setSelectedEmployee("all");
+                        setAllFetchedReports([]);
+                        setCurrentBatch(0);
+                        setLoadedBatches(new Set([0]));
+                        setCurrentPage(1);
+                        setServerTotalCount(0);
                         setReportType("intern");
                       }
                     }}
@@ -711,6 +744,11 @@ const InternReports = () => {
                     onClick={() => {
                       if (reportType !== "management") {
                         setSelectedEmployee("all");
+                        setAllFetchedReports([]);
+                        setCurrentBatch(0);
+                        setLoadedBatches(new Set([0]));
+                        setCurrentPage(1);
+                        setServerTotalCount(0);
                         setReportType("management");
                       }
                     }}
@@ -725,7 +763,7 @@ const InternReports = () => {
                 </div>
               )}
                  <span className="text-[0.85vw] text-gray-500">
-                ({totalReportsCount} total records)
+                {loading ? "(Loading...)" : `(${totalReportsCount} total records)`}
               </span>
             </div>
             <div className="flex items-center gap-[0.7vw]">

@@ -750,6 +750,7 @@ const TodayTasksCard = ({
   unscheduledTask = [],
   dayTask = [],
   employees = [],
+  allEmployees = [],
   approvedLeaves = [],
 }) => {
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
@@ -760,17 +761,27 @@ const TodayTasksCard = ({
   const [tooltipItem, setTooltipItem] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
+  const allEmpMap = useMemo(() => {
+    const map = new Map();
+    const source = allEmployees.length > 0 ? allEmployees : employees;
+    (source || []).forEach((e) => {
+      const id = e.employee_id?.toString() || e._id?.toString();
+      if (id) map.set(id, e);
+    });
+    return map;
+  }, [allEmployees, employees]);
+
   const fetchEmployeeData = async (employeeId) => {
-    if (employeeCache[employeeId]) return employeeCache[employeeId];
-    const local = employees.find(
-      (e) => e.employee_id?.toString() === employeeId?.toString(),
-    );
+    if (!employeeId) return null;
+    const strId = employeeId.toString();
+    if (employeeCache[strId]) return employeeCache[strId];
+    const local = allEmpMap.get(strId);
     if (local) {
       const norm = {
         employeeName: local.employee_name,
         profile: local.profile_url || null,
       };
-      setEmployeeCache((p) => ({ ...p, [employeeId]: norm }));
+      setEmployeeCache((p) => ({ ...p, [strId]: norm }));
       return norm;
     }
     try {
@@ -778,7 +789,7 @@ const TodayTasksCard = ({
       if (!r.ok) return null;
       const d = await r.json();
       const emp = d?.data || d;
-      setEmployeeCache((p) => ({ ...p, [employeeId]: emp }));
+      setEmployeeCache((p) => ({ ...p, [strId]: emp }));
       return emp;
     } catch {
       return null;
@@ -2929,7 +2940,16 @@ const MeetingsCard = ({ apiBaseUrl }) => {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 const Personal = () => {
-  const [stats, setStats] = useState({
+  const cachedDashboard = useMemo(() => {
+    try {
+      const saved = sessionStorage.getItem("fisto_dashboard_cache");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [stats, setStats] = useState(() => cachedDashboard?.stats || {
     employees: 0,
     overall: 0,
     completed: 0,
@@ -2938,41 +2958,78 @@ const Personal = () => {
     overdue: 0,
     hold: 0,
   });
-  const [employees, setEmployees] = useState([]);
-  const [allTasks, setAllTasks] = useState([]);
-  const [unscheduledTask, setUnscheduledTask] = useState([]);
-  const [dayTask, setDayTask] = useState([]);
-  const [taskEmployees, setTaskEmployees] = useState([]);
-  const [approvedLeaves, setApprovedLeaves] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [allEmployees, setAllEmployees] = useState(() => cachedDashboard?.allEmployees || []);
+  const [unscheduledTask, setUnscheduledTask] = useState(() => cachedDashboard?.unscheduledTask || []);
+  const [dayTask, setDayTask] = useState(() => cachedDashboard?.dayTask || []);
+  const [taskEmployees, setTaskEmployees] = useState(() => cachedDashboard?.taskEmployees || []);
+  const [approvedLeaves, setApprovedLeaves] = useState(() => cachedDashboard?.approvedLeaves || []);
+  const [loadingTasks, setLoadingTasks] = useState(() => !cachedDashboard?.hasTasks);
+  const [loadingStats, setLoadingStats] = useState(() => !cachedDashboard?.hasStats);
   const [error, setError] = useState(null);
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
   const memoizedEmployees = useMemo(() => taskEmployees, [taskEmployees]);
 
+  const saveCache = (updater) => {
+    try {
+      const existing = JSON.parse(sessionStorage.getItem("fisto_dashboard_cache") || "{}");
+      const updated = updater(existing);
+      sessionStorage.setItem("fisto_dashboard_cache", JSON.stringify(updated));
+    } catch (_) {}
+  };
+
   useEffect(() => {
-    let isInitial = true;
-    const fetchAll = async () => {
-      if (isInitial) setLoading(true);
-      setError(null);
+    let active = true;
+
+    const fetchTasksData = async () => {
       try {
-        const [statsRes, empsRes, tasksRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/analytics/overview`),
-          fetch(`${API_BASE_URL}/employeeRegister`),
-          fetch(`${API_BASE_URL}/tasks/dashboard`),
-        ]);
-        if (!statsRes.ok || !empsRes.ok || !tasksRes.ok)
-          throw new Error("Data fetch failed");
-        const [statsData, empsData, tasksData] = await Promise.all([
-          statsRes.json(),
-          empsRes.json(),
-          tasksRes.json(),
-        ]);
-        const s = statsData.data.overallStats;
-        setStats({
-          employees:
-            empsData.employees?.filter((e) => e.working_status === "Active")
-              .length || 0,
+        const res = await fetch(`${API_BASE_URL}/tasks/dashboard`);
+        if (!res.ok) throw new Error("Tasks fetch failed");
+        const tasksData = await res.json();
+        if (!active) return;
+
+        setUnscheduledTask(tasksData.unscheduledTask || []);
+        setDayTask(tasksData.dayTask || []);
+        setTaskEmployees(tasksData.employees || []);
+        setAllEmployees(tasksData.allEmployees || tasksData.employees || []);
+        setApprovedLeaves(tasksData.approvedLeaves || []);
+
+        if (tasksData.activeEmployeeCount !== undefined) {
+          setStats((prev) => ({
+            ...prev,
+            employees: tasksData.activeEmployeeCount,
+          }));
+        }
+
+        saveCache((prev) => ({
+          ...prev,
+          hasTasks: true,
+          unscheduledTask: tasksData.unscheduledTask || [],
+          dayTask: tasksData.dayTask || [],
+          taskEmployees: tasksData.employees || [],
+          allEmployees: tasksData.allEmployees || tasksData.employees || [],
+          approvedLeaves: tasksData.approvedLeaves || [],
+          stats: {
+            ...(prev.stats || {}),
+            ...(tasksData.activeEmployeeCount !== undefined ? { employees: tasksData.activeEmployeeCount } : {}),
+          },
+        }));
+      } catch (err) {
+        if (active) setError(err.message);
+      } finally {
+        if (active) setLoadingTasks(false);
+      }
+    };
+
+    const fetchStatsData = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/analytics/overview`);
+        if (!res.ok) throw new Error("Stats fetch failed");
+        const statsData = await res.json();
+        if (!active) return;
+
+        const s = statsData.data?.overallStats || {};
+        const newStats = {
           overall:
             (s.completed || 0) +
             (s.ongoing || 0) +
@@ -2984,26 +3041,41 @@ const Personal = () => {
           delayed: s.delayed || 0,
           overdue: s.overdue || 0,
           hold: s.hold || 0,
-        });
-        setEmployees(empsData.employees || []);
-        setAllTasks(tasksData.tasks || []);
-        setUnscheduledTask(tasksData.unscheduledTask || []);
-        setDayTask(tasksData.dayTask || []);
-        setTaskEmployees(tasksData.employees || []);
-        setApprovedLeaves(tasksData.approvedLeaves || []);
+        };
+
+        setStats((prev) => ({
+          ...prev,
+          ...newStats,
+        }));
+
+        saveCache((prev) => ({
+          ...prev,
+          hasStats: true,
+          stats: {
+            ...(prev.stats || {}),
+            ...newStats,
+          },
+        }));
       } catch (err) {
-        setError(err.message);
+        if (active) console.error("Stats fetch error:", err);
       } finally {
-        if (isInitial) {
-          setLoading(false);
-          isInitial = false;
-        }
+        if (active) setLoadingStats(false);
       }
     };
-    fetchAll();
 
-    const interval = setInterval(fetchAll, 5000);
-    return () => clearInterval(interval);
+    // Independent parallel fetching so each renders as soon as ready
+    fetchTasksData();
+    fetchStatsData();
+
+    const interval = setInterval(() => {
+      fetchTasksData();
+      fetchStatsData();
+    }, 30000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [API_BASE_URL]);
 
   return (
@@ -3013,7 +3085,8 @@ const Personal = () => {
           <StatCard
             key={s.type}
             value={
-              loading ? (
+              (loadingStats && s.type !== "employees") ||
+              (loadingTasks && s.type === "employees") ? (
                 <div className="h-5 w-8 bg-gray-200 rounded animate-pulse inline-block" />
               ) : (
                 stats[s.type]
@@ -3034,11 +3107,12 @@ const Personal = () => {
       <div className="grid grid-cols-3 gap-[1vw] flex-1 min-h-0">
         <div className="h-full min-h-0">
           <TodayTasksCard
-            loading={loading}
+            loading={loadingTasks}
             apiBaseUrl={API_BASE_URL}
             unscheduledTask={unscheduledTask}
             dayTask={dayTask}
             employees={memoizedEmployees}
+            allEmployees={allEmployees}
             approvedLeaves={approvedLeaves}
           />
         </div>

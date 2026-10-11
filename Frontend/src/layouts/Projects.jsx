@@ -77,9 +77,14 @@ const Projects = () => {
     ? loggedEmpDetails.id
     : selectedEmployee || "";
 
+  const isBaseRoute =
+    !location.pathname.toLowerCase().includes("newproject") &&
+    !location.pathname.toLowerCase().includes("projectoverview") &&
+    !location.pathname.toLowerCase().includes("daytask");
+
   // Level 1: Fast Base Projects Query (< 50ms instant render of company groups, names, dates, depts)
   const { data: baseProjectsData, isLoading: baseLoading } = useQuery({
-    queryKey: ["projectsBase", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+    queryKey: ["projectsBase", debouncedSearchTerm, empIDParam, loggedEmpDetails.role],
     queryFn: async () => {
       if (!loggedEmpDetails.id) return [];
       const response = await fetch(
@@ -91,13 +96,13 @@ const Projects = () => {
       }
       return data.data || [];
     },
-    enabled: !!loggedEmpDetails.id,
+    enabled: !!loggedEmpDetails.id && isBaseRoute,
     staleTime: 1000 * 30,
   });
 
   // Level 2: Concurrent Progressive Metrics Query (enriches percentage, task counts, underReview badges)
   const { data: metricsData, isLoading: metricsLoading } = useQuery({
-    queryKey: ["projectsMetrics", debouncedSearchTerm, empIDParam, loggedEmpDetails.role, location.pathname],
+    queryKey: ["projectsMetrics", debouncedSearchTerm, empIDParam, loggedEmpDetails.role],
     queryFn: async () => {
       if (!loggedEmpDetails.id) return {};
       const response = await fetch(
@@ -109,7 +114,7 @@ const Projects = () => {
       }
       return data.data || {};
     },
-    enabled: !!loggedEmpDetails.id,
+    enabled: !!loggedEmpDetails.id && isBaseRoute,
     staleTime: 1000 * 30,
   });
 
@@ -175,9 +180,8 @@ const Projects = () => {
     return () => window.removeEventListener("resize", calculateItemsPerPage);
   }, []);
 
-
-
   useEffect(() => {
+    if (!isBaseRoute) return;
     const fetchEmployees = async () => {
       if (["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)) {
         try {
@@ -192,9 +196,10 @@ const Projects = () => {
       }
     };
     fetchEmployees();
-  }, [loggedEmpDetails.role]);
+  }, [loggedEmpDetails.role, isBaseRoute]);
 
   useEffect(() => {
+    if (!isBaseRoute) return;
     const fetchRequestCount = async () => {
       if (!["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role))
         return;
@@ -214,9 +219,10 @@ const Projects = () => {
       }
     };
     if (loggedEmpDetails.role) fetchRequestCount();
-  }, [loggedEmpDetails.role, location.pathname]);
+  }, [loggedEmpDetails.role, isBaseRoute]);
 
   useEffect(() => {
+    if (!isBaseRoute) return;
     const fetchWorkingProjects = async () => {
       if (!loggedEmpDetails.id) return;
 
@@ -243,7 +249,7 @@ const Projects = () => {
       const interval = setInterval(fetchWorkingProjects, 30000);
       return () => clearInterval(interval);
     }
-  }, [loggedEmpDetails.id, loggedEmpDetails.role]);
+  }, [loggedEmpDetails.id, loggedEmpDetails.role, isBaseRoute]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -681,11 +687,6 @@ const Projects = () => {
     }
     return pages;
   };
-
-  const isBaseRoute =
-    !location.pathname.includes("newProject") &&
-    !location.pathname.includes("projectOverview") &&
-    !location.pathname.includes("dayTask");
 
   const ProgressBar = ({ proj }) => {
     const getColor = () => {

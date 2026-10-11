@@ -184,7 +184,6 @@ export default function useWorker() {
     const currentEmployeeId = getCurrentEmployeeId();
 
     if (!currentEmployeeId) {
-      console.warn("useWorker: No employee ID found, notifications disabled");
       return;
     }
 

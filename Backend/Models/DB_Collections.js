@@ -475,6 +475,10 @@ Project_request.index({ status: 1 });
 
 task.index({ projectId: 1 });
 task.index({ employeeID: 1 });
+task.index({ employee: 1 });
+task.index({ supportingPersons: 1 });
+task.index({ "activities.employee": 1 });
+task.index({ "activities.supportingPersons": 1 });
 task.index({ status: 1 });
 
 taskReport.index({ projectId: 1, createdAt: -1 });
@@ -482,6 +486,7 @@ taskReport.index({ taskId: 1 });
 taskReport.index({ employeeID: 1 });
 
 taskReportReview.index({ taskId: 1, status: 1 });
+taskReportReview.index({ activityId: 1 });
 taskReportReview.index({ projectId: 1 });
 
 dayReport.index({ createdAt: -1, employeeID: 1 });

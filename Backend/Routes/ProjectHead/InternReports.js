@@ -37,21 +37,21 @@ router.get("/team-by-designation/:designation", async (req, res) => {
 // ✅ Shared helper: process a single attendance record into a full report
 function getISTDateString(date) {
   if (!date) return "";
+  if (typeof date === "string" && date.length === 10 && date[4] === "-" && date[7] === "-") {
+    return date;
+  }
   const d = new Date(date);
   if (isNaN(d.getTime())) return "";
-// en-CA gives YYYY-MM-DD format
-  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const istDate = new Date(d.getTime() + 330 * 60 * 1000);
+  return istDate.toISOString().slice(0, 10);
 }
 
 function isSundayDate(date) {
   if (!date) return false;
   const d = new Date(date);
   if (isNaN(d.getTime())) return false;
-  const weekday = d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    timeZone: 'Asia/Kolkata',
-  });
-  return weekday === 'Sun';
+  const istDate = new Date(d.getTime() + 330 * 60 * 1000);
+  return istDate.getUTCDay() === 0;
 }
 
 function hasWorkTasksOrReports(record) {
@@ -103,11 +103,17 @@ async function batchProcessAttendanceRecords(records) {
     DayReport.find({
       employeeID: { $in: employeeIds },
       createdAt: { $gte: minStart, $lte: maxEnd },
-    }).lean(),
+    })
+      .select("projectId taskId activityId employeeID createdAt")
+      .lean(),
     UnscheduledTask.find({
       employeeID: { $in: employeeIds },
       createdAt: { $gte: minStart, $lte: maxEnd },
-    }).lean(),
+    })
+      .select(
+        "_id projectName company_name taskName status outcomes admin_remarks reportingPerson startTime endTime reports adminApprovedAt employeeID createdAt"
+      )
+      .lean(),
   ]);
 
   // Index dayReports by `${employeeID}_${ISTDate}`
@@ -142,17 +148,33 @@ async function batchProcessAttendanceRecords(records) {
   const [projectsList, tasksList, taskReportsList, reviewsList] =
     await Promise.all([
       projectIds.length > 0
-        ? Project_Details.find({ _id: { $in: projectIds } }).lean()
+        ? Project_Details.find({ _id: { $in: projectIds } })
+            .select("_id projectName clientId company_name")
+            .lean()
         : [],
-      taskIds.length > 0 ? Tasks.find({ _id: { $in: taskIds } }).lean() : [],
+      taskIds.length > 0
+        ? Tasks.find({ _id: { $in: taskIds } })
+            .select(
+              "_id taskName description startDate endDate employee department percentage startTime endTime"
+            )
+            .lean()
+        : [],
       TaskReports.find({
         employeeID: { $in: employeeIds },
         createdAt: { $gte: minStart, $lte: extendedMaxEnd },
-      }).lean(),
+      })
+        .select(
+          "projectId taskId activityId employeeID percentage outcome adminRemarks createdAt"
+        )
+        .lean(),
       TaskReportsReview.find({
         employeeID: { $in: employeeIds },
         createdAt: { $gte: minStart, $lte: extendedMaxEnd },
-      }).lean(),
+      })
+        .select(
+          "projectId taskId activityId employeeID percentage status outcome adminRemarks createdAt"
+        )
+        .lean(),
     ]);
 
   const projectMap = new Map(
@@ -317,8 +339,6 @@ function expandLeaveToDays(leave, startDate, endDate) {
   const leaveEndStr = getISTDateString(leave.to_date || leave.from_date);
 
   if (!leaveStartStr) return days;
-
-  console.log(`Expanding Leave ID ${leave.id}: ${leaveStartStr} to ${leaveEndStr}`);
 
   // Parse to UTC-based dates to avoid local DST/Timezone issues
   let current = new Date(leaveStartStr);
@@ -486,13 +506,7 @@ router.get("/all-reports", async (req, res) => {
 
     leaveQuery += leaveFilterClause;
 
-    // Run Attendance and Leave queries in parallel
-    const [attendanceRecords, leaveRequests] = await Promise.all([
-      queryWithRetry(attendanceQuery, params),
-      queryWithRetry(leaveQuery, leaveParams),
-    ]);
-
-    // 3. Fetch MongoDB Task Days (DayReport & UnscheduledTask) to include records where tasks exist without punch in/out
+    // 3. Setup MongoDB Task Days filter
     const mongoTaskMatch = {
       employeeID: { $exists: true, $ne: "" },
       createdAt: { $exists: true, $ne: null },
@@ -515,51 +529,27 @@ router.get("/all-reports", async (req, res) => {
         mongoTaskMatch.createdAt.$lte = e;
       }
     } else {
-      // Default to last 90 days when no date filter specified so MongoDB does not scan entire database history
       const defaultLookback = new Date();
-      defaultLookback.setDate(defaultLookback.getDate() - 90);
+      defaultLookback.setDate(defaultLookback.getDate() - 30);
       mongoTaskMatch.createdAt = { $gte: defaultLookback };
     }
 
-    const [dayReportDates, unscheduledDates, allEmployeesList] = await Promise.all([
-      DayReport.aggregate([
-        { $match: mongoTaskMatch },
-        {
-          $group: {
-            _id: {
-              employee_id: "$employeeID",
-              report_date: {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$createdAt",
-                  timezone: "+05:30",
-                },
-              },
-            },
-          },
-        },
-      ]),
-      UnscheduledTask.aggregate([
-        { $match: mongoTaskMatch },
-        {
-          $group: {
-            _id: {
-              employee_id: "$employeeID",
-              report_date: {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$createdAt",
-                  timezone: "+05:30",
-                },
-              },
-            },
-          },
-        },
-      ]),
+    // Run ALL 5 queries concurrently in 1 single Promise.all
+    const [
+      attendanceRecords,
+      leaveRequests,
+      allEmployeesList,
+      rawDayReports,
+      rawUnscheduledTasks,
+    ] = await Promise.all([
+      queryWithRetry(attendanceQuery, params),
+      queryWithRetry(leaveQuery, leaveParams),
       queryWithRetry(`
         SELECT employee_id, employee_name, designation
         FROM employees_details
       `),
+      DayReport.find(mongoTaskMatch).select("employeeID createdAt").lean(),
+      UnscheduledTask.find(mongoTaskMatch).select("employeeID createdAt").lean(),
     ]);
 
     const employeeMap = new Map();
@@ -569,14 +559,6 @@ router.get("/all-reports", async (req, res) => {
 
     // 4. Expand leaves and combine
     const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
-    console.log("Expanded Leave Days:", leaveDays.length, "total days generated");
-    if (leaveDays.length > 0) {
-      console.log("Sample Leave Day:", {
-        name: leaveDays[0].employee_name,
-        date: leaveDays[0].report_date,
-        tasks_count: leaveDays[0].tasks.length
-      });
-    }
 
     // Combine records, prioritizing attendance if both exist for same day/employee
     const attendanceMap = new Map();
@@ -586,19 +568,35 @@ router.get("/all-reports", async (req, res) => {
     };
 
     attendanceRecords.forEach(att => {
-      const key = `${att.employee_id}_${normalizeKey(att.report_date)}`;
+      att._dateStr = normalizeKey(att.report_date);
+      const key = `${att.employee_id}_${att._dateStr}`;
       attendanceMap.set(key, att);
     });
 
     const combinedReports = [...attendanceRecords];
 
     // Merge task days where employee has tasks but punch in/out was not present (no attendance record)
-    const allTaskDays = [...(dayReportDates || []), ...(unscheduledDates || [])];
-    allTaskDays.forEach((item) => {
-      const empId = item._id?.employee_id;
-      const rDate = item._id?.report_date;
-      if (!empId || !rDate) return;
+    const allTaskDaysMap = new Map();
+    (rawDayReports || []).forEach((dr) => {
+      const rDate = getISTDateString(dr.createdAt);
+      if (dr.employeeID && rDate) {
+        allTaskDaysMap.set(`${dr.employeeID}_${rDate}`, {
+          employee_id: dr.employeeID,
+          report_date: rDate,
+        });
+      }
+    });
+    (rawUnscheduledTasks || []).forEach((ut) => {
+      const rDate = getISTDateString(ut.createdAt);
+      if (ut.employeeID && rDate) {
+        allTaskDaysMap.set(`${ut.employeeID}_${rDate}`, {
+          employee_id: ut.employeeID,
+          report_date: rDate,
+        });
+      }
+    });
 
+    allTaskDaysMap.forEach(({ employee_id: empId, report_date: rDate }) => {
       const key = `${empId}_${rDate}`;
       if (!attendanceMap.has(key)) {
         const emp = employeeMap.get(empId);
@@ -632,6 +630,7 @@ router.get("/all-reports", async (req, res) => {
           employee_name: emp.employee_name,
           designation: desig,
           report_date: rDate,
+          _dateStr: rDate,
           total_hours: "-",
           morning_in: null,
           morning_out: null,
@@ -646,9 +645,9 @@ router.get("/all-reports", async (req, res) => {
     });
 
     leaveDays.forEach(leaveDay => {
-      const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
+      leaveDay._dateStr = normalizeKey(leaveDay.report_date);
+      const key = `${leaveDay.employee_id}_${leaveDay._dateStr}`;
       if (!attendanceMap.has(key)) {
-        console.log(`Adding Standalone Leave for ${leaveDay.employee_name} on ${leaveDay.report_date}`);
         combinedReports.push(leaveDay);
       } else {
         const att = attendanceMap.get(key);
@@ -660,16 +659,13 @@ router.get("/all-reports", async (req, res) => {
     });
 
     // 4. Final Filtering (Hide future records)
-    const now = new Date();
-    const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
-    const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
-    
-    const finalReports = combinedReports.filter(r => normalizeKey(r.report_date) <= todayStr);
+    const todayStr = getISTDateString(new Date());
+    const finalReports = combinedReports.filter(r => (r._dateStr || normalizeKey(r.report_date)) <= todayStr);
 
-    // 5. Sort by date DESC
+    // 5. Sort by date DESC using precomputed string keys
     finalReports.sort((a, b) => {
-      const dateA = normalizeKey(a.report_date);
-      const dateB = normalizeKey(b.report_date);
+      const dateA = a._dateStr || normalizeKey(a.report_date);
+      const dateB = b._dateStr || normalizeKey(b.report_date);
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       // If same day, put leave at bottom
       return (a.is_leave ? 1 : 0) - (b.is_leave ? 1 : 0);
@@ -683,14 +679,8 @@ router.get("/all-reports", async (req, res) => {
       paginatedReports = finalReports.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
     }
 
-    // 6. Process Records (Mongo batch fetch for attendance)
+    // 7. Process Records (Mongo batch fetch for attendance)
     const processedReports = await batchProcessAttendanceRecords(paginatedReports);
-
-    console.log(`Sending All-Reports: Total ${totalCount}, Paginated ${processedReports.length}`);
-    if (processedReports.length > 0) {
-      console.log("First record date:", processedReports[0].report_date);
-      console.log("Last record date:", processedReports[processedReports.length - 1].report_date);
-    }
 
     // Sunday exception: if Sunday, only include if employee put a report
     const filteredProcessedReports = processedReports.filter((record) => {
@@ -831,13 +821,57 @@ router.get("/management-reports", async (req, res) => {
       leaveParams.push(end_date);
     }
 
-    // Run all 4 queries in parallel for high performance
-    const [attendanceRecords, workdoneRecords, marketingRecords, leaveRequests] = await Promise.all([
+    // Also fetch Unscheduled Tasks for Management roles
+    const mgmtMongoMatch = {
+      createdAt: { $exists: true, $ne: null }
+    };
+    if (employee_id && employee_id !== "all") {
+      mgmtMongoMatch.employeeID = employee_id;
+    }
+    if (start_date || end_date) {
+      mgmtMongoMatch.createdAt = {};
+      if (start_date) {
+        const s = new Date(start_date + "T00:00:00.000Z");
+        s.setMinutes(s.getMinutes() - 330);
+        mgmtMongoMatch.createdAt.$gte = s;
+      }
+      if (end_date) {
+        const e = new Date(end_date + "T23:59:59.999Z");
+        e.setMinutes(e.getMinutes() - 330);
+        mgmtMongoMatch.createdAt.$lte = e;
+      }
+    } else {
+      const defaultLookback = new Date();
+      defaultLookback.setDate(defaultLookback.getDate() - 30);
+      mgmtMongoMatch.createdAt = { $gte: defaultLookback };
+    }
+
+    // Run all 6 queries in parallel for high performance
+    const [
+      attendanceRecords,
+      workdoneRecords,
+      marketingRecords,
+      leaveRequests,
+      mgmtUnscheduledList,
+      mgmtEmpList,
+    ] = await Promise.all([
       queryWithRetry(attendanceQuery, params),
       queryWithRetry(workdoneQuery, workdoneParams),
       queryWithRetry(marketingQuery, marketingParams),
       queryWithRetry(leaveQuery, leaveParams),
+      UnscheduledTask.find(mgmtMongoMatch)
+        .select("employeeID createdAt projectName taskName outcomes reports status")
+        .lean(),
+      queryWithRetry(`
+        SELECT employee_id, employee_name, designation
+        FROM employees_details
+        WHERE designation LIKE '%Project Head%' 
+           OR designation LIKE '%SBU%' 
+           OR designation LIKE '%HR%' 
+           OR designation LIKE '%Marketing%'
+      `),
     ]);
+
     const leaveDays = leaveRequests.flatMap(leave => expandLeaveToDays(leave, start_date, end_date));
 
     // Combine reports
@@ -848,20 +882,24 @@ router.get("/management-reports", async (req, res) => {
     };
 
     attendanceRecords.forEach(att => {
-      const key = `${att.employee_id}_${normalizeKey(att.report_date)}`;
+      const dStr = normalizeKey(att.report_date);
+      const key = `${att.employee_id}_${dStr}`;
       reportMap.set(key, {
         ...att,
+        _dateStr: dStr,
         tasks: []
       });
     });
 
     workdoneRecords.forEach(wd => {
-      const key = `${wd.employee_id}_${normalizeKey(wd.report_date)}`;
+      const dStr = normalizeKey(wd.report_date);
+      const key = `${wd.employee_id}_${dStr}`;
       if (!reportMap.has(key)) {
         reportMap.set(key, {
           employee_id: wd.employee_id,
           employee_name: wd.employee_name || "",
           report_date: wd.report_date,
+          _dateStr: dStr,
           morning_in: null,
           morning_out: null,
           afternoon_in: null,
@@ -884,12 +922,14 @@ router.get("/management-reports", async (req, res) => {
     });
 
     marketingRecords.forEach(mt => {
-      const key = `${mt.employee_id}_${normalizeKey(mt.report_date)}`;
+      const dStr = normalizeKey(mt.report_date);
+      const key = `${mt.employee_id}_${dStr}`;
       if (!reportMap.has(key)) {
         reportMap.set(key, {
           employee_id: mt.employee_id,
           employee_name: mt.employee_name || "",
           report_date: mt.report_date,
+          _dateStr: dStr,
           morning_in: null,
           morning_out: null,
           afternoon_in: null,
@@ -911,39 +951,6 @@ router.get("/management-reports", async (req, res) => {
       });
     });
 
-    // Also fetch Unscheduled Tasks for Management roles
-    const mgmtMongoMatch = {
-      createdAt: { $exists: true, $ne: null }
-    };
-    if (employee_id && employee_id !== "all") {
-      mgmtMongoMatch.employeeID = employee_id;
-    }
-    if (start_date || end_date) {
-      mgmtMongoMatch.createdAt = {};
-      if (start_date) {
-        const s = new Date(start_date + "T00:00:00.000Z");
-        s.setMinutes(s.getMinutes() - 330);
-        mgmtMongoMatch.createdAt.$gte = s;
-      }
-      if (end_date) {
-        const e = new Date(end_date + "T23:59:59.999Z");
-        e.setMinutes(e.getMinutes() - 330);
-        mgmtMongoMatch.createdAt.$lte = e;
-      }
-    }
-
-    const [mgmtUnscheduledList, mgmtEmpList] = await Promise.all([
-      UnscheduledTask.find(mgmtMongoMatch).lean(),
-      queryWithRetry(`
-        SELECT employee_id, employee_name, designation
-        FROM employees_details
-        WHERE designation LIKE '%Project Head%' 
-           OR designation LIKE '%SBU%' 
-           OR designation LIKE '%HR%' 
-           OR designation LIKE '%Marketing%'
-      `),
-    ]);
-
     const mgmtEmpMap = new Map();
     (mgmtEmpList || []).forEach(emp => {
       mgmtEmpMap.set(emp.employee_id, emp);
@@ -961,6 +968,7 @@ router.get("/management-reports", async (req, res) => {
           employee_id: ut.employeeID,
           employee_name: emp.employee_name || ut.employeeID,
           report_date: rDate,
+          _dateStr: rDate,
           morning_in: null,
           morning_out: null,
           afternoon_in: null,
@@ -983,11 +991,13 @@ router.get("/management-reports", async (req, res) => {
 
     // Merge Leave Days
     leaveDays.forEach(leaveDay => {
-      const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
+      const dStr = normalizeKey(leaveDay.report_date);
+      const key = `${leaveDay.employee_id}_${dStr}`;
       
       if (!reportMap.has(key)) {
         reportMap.set(key, {
           ...leaveDay,
+          _dateStr: dStr,
           designation: leaveDay.designation || ""
         });
       } else {
@@ -1000,11 +1010,9 @@ router.get("/management-reports", async (req, res) => {
     });
 
     // Final Filtering (Hide future records and apply Sunday exception)
-    const now = new Date();
-    const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
-    const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
+    const todayStr = getISTDateString(new Date());
     const combinedReports = Array.from(reportMap.values())
-      .filter(r => normalizeKey(r.report_date) <= todayStr)
+      .filter(r => (r._dateStr || normalizeKey(r.report_date)) <= todayStr)
       .filter(r => {
         // Sunday exception: if Sunday, only include if employee put a report
         if (isSundayDate(r.report_date)) {
@@ -1013,10 +1021,10 @@ router.get("/management-reports", async (req, res) => {
         return true;
       });
 
-    // Sort by date DESC
+    // Sort by date DESC using precomputed string keys
     combinedReports.sort((a, b) => {
-      const dateA = normalizeKey(a.report_date);
-      const dateB = normalizeKey(b.report_date);
+      const dateA = a._dateStr || normalizeKey(a.report_date);
+      const dateB = b._dateStr || normalizeKey(b.report_date);
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return (a.is_leave ? 1 : 0) - (b.is_leave ? 1 : 0);
     });
@@ -1078,8 +1086,6 @@ router.get("/reports/:employee_id", async (req, res) => {
       params.push(end_date);
     }
 
-    const attendanceRecords = await queryWithRetry(attendanceQuery, params);
-
     // 2. Fetch Leaves
     let leaveQuery = `
       SELECT lr.*, ed.employee_name, ed.designation 
@@ -1098,9 +1104,7 @@ router.get("/reports/:employee_id", async (req, res) => {
       leaveParams.push(end_date);
     }
 
-    const leaveRequests = await queryWithRetry(leaveQuery, leaveParams);
-    
-    // 3. Fetch MongoDB Task Days for this employee
+    // 3. Setup MongoDB Task Days for this employee
     const empMongoMatch = {
       employeeID: employee_id,
       createdAt: { $exists: true, $ne: null },
@@ -1120,49 +1124,26 @@ router.get("/reports/:employee_id", async (req, res) => {
       }
     } else {
       const defaultLookback = new Date();
-      defaultLookback.setDate(defaultLookback.getDate() - 90);
+      defaultLookback.setDate(defaultLookback.getDate() - 30);
       empMongoMatch.createdAt = { $gte: defaultLookback };
     }
 
-    const [empDayDates, empUnscheduledDates, empDetails] = await Promise.all([
-      DayReport.aggregate([
-        { $match: empMongoMatch },
-        {
-          $group: {
-            _id: {
-              employee_id: "$employeeID",
-              report_date: {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$createdAt",
-                  timezone: "+05:30",
-                },
-              },
-            },
-          },
-        },
-      ]),
-      UnscheduledTask.aggregate([
-        { $match: empMongoMatch },
-        {
-          $group: {
-            _id: {
-              employee_id: "$employeeID",
-              report_date: {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$createdAt",
-                  timezone: "+05:30",
-                },
-              },
-            },
-          },
-        },
-      ]),
+    // Run ALL 5 queries concurrently in 1 single Promise.all
+    const [
+      attendanceRecords,
+      leaveRequests,
+      empDetails,
+      rawEmpDayReports,
+      rawEmpUnscheduledTasks,
+    ] = await Promise.all([
+      queryWithRetry(attendanceQuery, params),
+      queryWithRetry(leaveQuery, leaveParams),
       queryWithRetry(
         `SELECT employee_id, employee_name, designation FROM employees_details WHERE employee_id = ?`,
         [employee_id]
       ),
+      DayReport.find(empMongoMatch).select("employeeID createdAt").lean(),
+      UnscheduledTask.find(empMongoMatch).select("employeeID createdAt").lean(),
     ]);
 
     const targetEmp = empDetails?.[0] || {
@@ -1181,17 +1162,35 @@ router.get("/reports/:employee_id", async (req, res) => {
     };
 
     attendanceRecords.forEach(att => {
-      const key = `${att.employee_id}_${normalizeKey(att.report_date)}`;
+      att._dateStr = normalizeKey(att.report_date);
+      const key = `${att.employee_id}_${att._dateStr}`;
       attendanceMap.set(key, att);
     });
 
     const combinedReports = [...attendanceRecords];
 
     // Merge task days where employee has tasks but punch in/out was not present
-    const allEmpTaskDays = [...(empDayDates || []), ...(empUnscheduledDates || [])];
-    allEmpTaskDays.forEach((item) => {
-      const rDate = item._id?.report_date;
-      if (!rDate) return;
+    const allEmpTaskDaysMap = new Map();
+    (rawEmpDayReports || []).forEach((dr) => {
+      const rDate = getISTDateString(dr.createdAt);
+      if (rDate) {
+        allEmpTaskDaysMap.set(rDate, {
+          employee_id,
+          report_date: rDate,
+        });
+      }
+    });
+    (rawEmpUnscheduledTasks || []).forEach((ut) => {
+      const rDate = getISTDateString(ut.createdAt);
+      if (rDate) {
+        allEmpTaskDaysMap.set(rDate, {
+          employee_id,
+          report_date: rDate,
+        });
+      }
+    });
+
+    allEmpTaskDaysMap.forEach(({ report_date: rDate }) => {
       const key = `${employee_id}_${rDate}`;
       if (!attendanceMap.has(key)) {
         const standaloneTaskRecord = {
@@ -1199,6 +1198,7 @@ router.get("/reports/:employee_id", async (req, res) => {
           employee_name: targetEmp.employee_name,
           designation: targetEmp.designation || "",
           report_date: rDate,
+          _dateStr: rDate,
           total_hours: "-",
           morning_in: null,
           morning_out: null,
@@ -1212,7 +1212,8 @@ router.get("/reports/:employee_id", async (req, res) => {
     });
 
     leaveDays.forEach(leaveDay => {
-      const key = `${leaveDay.employee_id}_${normalizeKey(leaveDay.report_date)}`;
+      leaveDay._dateStr = normalizeKey(leaveDay.report_date);
+      const key = `${leaveDay.employee_id}_${leaveDay._dateStr}`;
       if (!attendanceMap.has(key)) {
         combinedReports.push(leaveDay);
       } else {
@@ -1225,15 +1226,13 @@ router.get("/reports/:employee_id", async (req, res) => {
     });
 
     // 5. Final Filtering (Hide future records)
-    const now = new Date();
-    const todayIST = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
-    const todayStr = `${todayIST.getFullYear()}-${String(todayIST.getMonth() + 1).padStart(2, '0')}-${String(todayIST.getDate()).padStart(2, '0')}`;
-    const finalReports = combinedReports.filter(r => normalizeKey(r.report_date) <= todayStr);
+    const todayStr = getISTDateString(new Date());
+    const finalReports = combinedReports.filter(r => (r._dateStr || normalizeKey(r.report_date)) <= todayStr);
 
-    // Sort by date DESC
+    // Sort by date DESC using precomputed string keys
     finalReports.sort((a, b) => {
-      const dateA = normalizeKey(a.report_date);
-      const dateB = normalizeKey(b.report_date);
+      const dateA = a._dateStr || normalizeKey(a.report_date);
+      const dateB = b._dateStr || normalizeKey(b.report_date);
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return (a.is_leave ? 1 : 0) - (b.is_leave ? 1 : 0);
     });

@@ -689,6 +689,7 @@ const UnscheduledTask = () => {
     setShowReportsModal(true);
   };
 
+
   // Client-side search for instant filtering
   const filteredReports = useMemo(() => {
     if (!searchTerm.trim()) return reports;
@@ -1721,20 +1722,10 @@ const UnscheduledTask = () => {
               {/* Reports & Outcomes Grid */}
               <div className="grid grid-cols-2 gap-[1vw]">
                 <div className="border border-gray-200 rounded-xl p-[0.8vw] bg-gray-50/60">
-                  <div className="flex items-center justify-between mb-[0.4vw]">
+                  <div className="mb-[0.4vw]">
                     <span className="text-[0.78vw] font-semibold text-gray-800">
                       Reports / Description
                     </span>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(selectedTaskForModal.reports || "");
-                        notify({ title: "Copied", message: "Report copied to clipboard" });
-                      }}
-                      className="text-gray-400 hover:text-gray-700 p-[0.2vw] cursor-pointer"
-                      title="Copy report"
-                    >
-                      <Copy className="w-[0.8vw] h-[0.8vw]" />
-                    </button>
                   </div>
                   <p className="text-[0.78vw] text-gray-700 whitespace-pre-wrap max-h-[12vw] overflow-y-auto">
                     {selectedTaskForModal.reports || "No report description provided."}
@@ -1742,20 +1733,10 @@ const UnscheduledTask = () => {
                 </div>
 
                 <div className="border border-gray-200 rounded-xl p-[0.8vw] bg-gray-50/60">
-                  <div className="flex items-center justify-between mb-[0.4vw]">
+                  <div className="mb-[0.4vw]">
                     <span className="text-[0.78vw] font-semibold text-gray-800">
                       Outcomes
                     </span>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(selectedTaskForModal.outcomes || "");
-                        notify({ title: "Copied", message: "Outcome copied to clipboard" });
-                      }}
-                      className="text-gray-400 hover:text-gray-700 p-[0.2vw] cursor-pointer"
-                      title="Copy outcomes"
-                    >
-                      <Copy className="w-[0.8vw] h-[0.8vw]" />
-                    </button>
                   </div>
                   <p className="text-[0.78vw] text-gray-700 whitespace-pre-wrap max-h-[12vw] overflow-y-auto">
                     {selectedTaskForModal.outcomes || "No outcomes submitted yet."}
@@ -1769,24 +1750,7 @@ const UnscheduledTask = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex justify-between items-center px-[1.2vw] py-[0.6vw] border-t border-gray-200">
-              <div>
-                {(isPrivilegedUser ||
-                  selectedTaskForModal.employeeID === employeeID) && (
-                  <button
-                    onClick={() => {
-                      const taskToDelete = selectedTaskForModal;
-                      setShowReportsModal(false);
-                      setSelectedTaskForModal(null);
-                      handleDeleteTask(taskToDelete);
-                    }}
-                    className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-[1vw] py-[0.35vw] rounded-full text-[0.75vw] cursor-pointer font-medium transition-colors flex items-center gap-[0.3vw]"
-                  >
-                    <Trash2 size="0.8vw" />
-                    Delete Task
-                  </button>
-                )}
-              </div>
+            <div className="flex justify-end items-center px-[1.2vw] py-[0.6vw] border-t border-gray-200">
               <button
                 onClick={() => {
                   setShowReportsModal(false);

@@ -117,9 +117,20 @@ const getEmployeesFromMySQL = () => {
   });
 };
 
+let overviewCache = {
+  data: null,
+  timestamp: 0,
+};
+const OVERVIEW_CACHE_TTL = 25 * 1000; // 25 seconds
+
 router.get("/overview", async (req, res) => {
   try {
-    const [projectsFromDb, allTasks, allReports] =
+    const now = Date.now();
+    if (overviewCache.data && now - overviewCache.timestamp < OVERVIEW_CACHE_TTL) {
+      return res.json(overviewCache.data);
+    }
+
+    const [projectsFromDb, allTasks, latestReportsAgg] =
       await Promise.all([
         Project_Details.find(
           {},
@@ -147,7 +158,10 @@ router.get("/overview", async (req, res) => {
         )
           .sort({ createdAt: -1 })
           .lean(),
-        TaskReports.find({}, { taskId: 1, createdAt: 1 }).lean(),
+        TaskReports.aggregate([
+          { $match: { taskId: { $exists: true, $ne: null } } },
+          { $group: { _id: "$taskId", maxCreatedAt: { $max: "$createdAt" } } },
+        ]),
       ]);
 
     const currentDate = new Date();
@@ -160,16 +174,11 @@ router.get("/overview", async (req, res) => {
       return acc;
     }, {});
 
-    // Build O(1) lookup Map for latest report createdAt per taskId
+    // Build O(1) lookup Map for latest report createdAt per taskId from aggregate
     const latestReportByTaskId = new Map();
-    (allReports || []).forEach((r) => {
-      if (!r.taskId) return;
-      const tId = r.taskId.toString();
-      const rDate = new Date(r.createdAt);
-      const existing = latestReportByTaskId.get(tId);
-      if (!existing || rDate > existing) {
-        latestReportByTaskId.set(tId, rDate);
-      }
+    (latestReportsAgg || []).forEach((r) => {
+      if (!r._id) return;
+      latestReportByTaskId.set(r._id.toString(), new Date(r.maxCreatedAt));
     });
 
     const overallStats = {
@@ -257,7 +266,7 @@ router.get("/overview", async (req, res) => {
       };
     });
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: {
         projects: projectsWithStatus,
@@ -270,7 +279,14 @@ router.get("/overview", async (req, res) => {
           canceled: overallStats.canceled,
         },
       },
-    });
+    };
+
+    overviewCache = {
+      data: responsePayload,
+      timestamp: Date.now(),
+    };
+
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching analytics:", error);
     res.status(500).json({
