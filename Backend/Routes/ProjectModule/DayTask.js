@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const {
   Tasks,
@@ -187,38 +188,75 @@ router.get("/employee/:employeeID", async (req, res) => {
         $gte: startOfToday,
         $lte: endOfToday,
       },
-    });
+    }).lean();
+
+    if (!dayReports || dayReports.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Day reports fetched successfully",
+        data: [],
+      });
+    }
+
+    const taskIds = [
+      ...new Set(
+        dayReports
+          .map((r) => r.taskId)
+          .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
+    const activityIds = [
+      ...new Set(
+        dayReports
+          .map((r) => r.activityId)
+          .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
+
+    const reviewFilters = [];
+    if (taskIds.length > 0) reviewFilters.push({ taskId: { $in: taskIds } });
+    if (activityIds.length > 0) reviewFilters.push({ activityId: { $in: activityIds } });
+
+    const [tasksList, reviewList] = await Promise.all([
+      Tasks.find({ _id: { $in: taskIds } }).lean(),
+      reviewFilters.length > 0
+        ? TaskReportsReview.find({
+            $or: reviewFilters,
+            percentage: 100,
+          })
+            .sort({ createdAt: -1 })
+            .lean()
+        : [],
+    ]);
+
+    const taskMap = new Map(tasksList.map((t) => [t._id.toString(), t]));
+    const reviewTaskSet = new Set(
+      reviewList
+        .filter((r) => !r.activityId || r.activityId === "null" || r.activityId === "")
+        .map((r) => r.taskId?.toString())
+    );
+    const reviewActivitySet = new Set(
+      reviewList
+        .filter((r) => r.activityId && r.activityId !== "null" && r.activityId !== "")
+        .map((r) => r.activityId?.toString())
+    );
 
     const filteredReports = [];
-
     for (const report of dayReports) {
-      const task = await Tasks.findById(report.taskId);
-
+      const task = taskMap.get(report.taskId?.toString());
       if (!task) continue;
 
       if (report.activityId) {
         const activity = task.activities?.find(
-          (act) => act._id.toString() === report.activityId.toString(),
+          (act) => act._id.toString() === report.activityId.toString()
         );
-
-        const activityReportReview = await TaskReportsReview.findOne({
-          activityId: report.activityId,
-          percentage: 100,
-        })
-          .sort({ createdAt: -1 })
-          .lean();
-
-        if (activity && activity.percentage < 100 && !activityReportReview) {
+        const has100Review = reviewActivitySet.has(report.activityId.toString());
+        if (activity && activity.percentage < 100 && !has100Review) {
           filteredReports.push(report);
         }
       } else {
-        const TaskReportReview = await TaskReportsReview.findOne({
-          taskId: report.taskId,
-          percentage: 100,
-        })
-          .sort({ createdAt: -1 })
-          .lean();
-        if (task.percentage < 100 && !TaskReportReview) {
+        const has100Review = reviewTaskSet.has(report.taskId.toString());
+        if (task.percentage < 100 && !has100Review) {
           filteredReports.push(report);
         }
       }

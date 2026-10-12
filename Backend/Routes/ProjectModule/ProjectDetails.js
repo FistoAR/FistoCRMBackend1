@@ -590,6 +590,9 @@ router.get("/requests", async (req, res) => {
   }
 });
 
+const empTasksCache = new Map();
+const EMP_TASKS_CACHE_TTL = 15 * 1000; // 15 seconds
+
 router.get("/employee-tasks/:employeeId", async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -601,16 +604,12 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
       });
     }
 
-    const concurrentProjects = await Project_Details.find({
-      status: { $nin: ["Hold", "Canceled"] },
-    })
-      .select("_id")
-      .lean();
+    const cached = empTasksCache.get(employeeId);
+    if (cached && Date.now() - cached.timestamp < EMP_TASKS_CACHE_TTL) {
+      return res.status(200).json(cached.data);
+    }
 
-    const projectIds = concurrentProjects.map((p) => p._id);
-
-    const tasks = await Tasks.find({
-      projectId: { $in: projectIds },
+    const rawTasks = await Tasks.find({
       $or: [
         { employee: employeeId },
         { supportingPersons: employeeId },
@@ -621,118 +620,208 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    if (tasks.length === 0) {
-      return res.status(200).json({
+    if (rawTasks.length === 0) {
+      const emptyPayload = {
         success: true,
         count: 0,
         data: [],
         message: "No tasks found for this employee",
-      });
+      };
+      empTasksCache.set(employeeId, { data: emptyPayload, timestamp: Date.now() });
+      return res.status(200).json(emptyPayload);
     }
 
-    const processedTasks = await Promise.all(
-      tasks.map(async (task) => {
-        const project = await Project_Details.findById(task.projectId)
-          .select("clientId colorCode priority projectName")
-          .lean();
+    // Only fetch details for projects actually referenced by this employee's tasks
+    const uniqueProjectIds = [
+      ...new Set(
+        rawTasks
+          .map((t) => t.projectId)
+          .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
 
-        let projectDetails = { ...project };
+    const projectDetailsList = await Project_Details.find({
+      _id: { $in: uniqueProjectIds },
+      status: { $nin: ["Hold", "Canceled"] },
+    })
+      .select("clientId colorCode priority projectName status")
+      .lean();
 
-        const isTaskAssigned = task.employee === employeeId;
-        const isTaskSupporting = task.supportingPersons?.includes(employeeId);
-        const taskPercentage = task.percentage || 0;
+    const projectMap = new Map(
+      projectDetailsList.map((p) => [p._id.toString(), p])
+    );
 
-        let taskIsUnderReview = false;
-        if (isTaskAssigned || isTaskSupporting) {
-          const latestTaskReview = await TaskReportsReview.findOne({
-            taskId: task._id,
-            $or: [{ activityId: null }, { activityId: "" }],
-          })
-            .sort({ createdAt: -1 })
-            .lean();
+    // Filter to only tasks belonging to active projects
+    const tasks = rawTasks.filter((t) => projectMap.has(t.projectId?.toString()));
 
+    if (tasks.length === 0) {
+      const emptyPayload = {
+        success: true,
+        count: 0,
+        data: [],
+        message: "No tasks found for this employee",
+      };
+      empTasksCache.set(employeeId, { data: emptyPayload, timestamp: Date.now() });
+      return res.status(200).json(emptyPayload);
+    }
+
+    // Batch fetch all relevant TaskReportsReview in 1 single query instead of N+1 queries
+    const relevantTaskIds = [];
+    const relevantActivityIds = [];
+
+    for (const task of tasks) {
+      const isTaskAssigned = task.employee === employeeId;
+      const isTaskSupporting = task.supportingPersons?.includes(employeeId);
+      if ((isTaskAssigned || isTaskSupporting) && task._id) {
+        relevantTaskIds.push(task._id);
+        relevantTaskIds.push(task._id.toString());
+      }
+      if (task.activities?.length > 0) {
+        for (const activity of task.activities) {
           if (
-            latestTaskReview &&
-            latestTaskReview.percentage >= 100 &&
-            latestTaskReview.status === "underReview"
+            (activity.employee === employeeId || activity.supportingPersons?.includes(employeeId)) &&
+            activity._id
           ) {
-            taskIsUnderReview = true;
+            relevantActivityIds.push(activity._id);
+            relevantActivityIds.push(activity._id.toString());
           }
         }
+      }
+    }
 
-        let assignedActivities = [];
-        if (task.activities?.length > 0) {
-          assignedActivities = await Promise.all(
-            task.activities
-              .filter((activity) => activity.employee === employeeId || activity.supportingPersons?.includes(employeeId))
-              .map(async (activity) => {
-                const latestActivityReview = await TaskReportsReview.findOne({
-                  activityId: activity._id,
-                })
-                  .sort({ createdAt: -1 })
-                  .lean();
+    const reviewFilters = [];
+    if (relevantTaskIds.length > 0) {
+      reviewFilters.push({ taskId: { $in: relevantTaskIds } });
+    }
+    if (relevantActivityIds.length > 0) {
+      reviewFilters.push({ activityId: { $in: relevantActivityIds } });
+    }
 
-                const isUnderReview =
-                  latestActivityReview &&
-                  latestActivityReview.percentage >= 100 &&
-                  latestActivityReview.status === "underReview";
+    let allReviews = [];
+    if (reviewFilters.length > 0) {
+      allReviews = await TaskReportsReview.find({
+        $or: reviewFilters,
+      })
+        .sort({ createdAt: -1 })
+        .select("taskId activityId status percentage")
+        .lean();
+    }
 
-                const isActivitySupporting = activity.supportingPersons?.includes(employeeId);
+    // Index reviews by taskId (for tasks) and activityId (for activities)
+    const latestTaskReviewMap = new Map();
+    const latestActivityReviewMap = new Map();
 
-                return {
-                  ...activity,
-                  isComplete: activity.percentage >= 100,
-                  isUnderReview: isUnderReview,
-                  isSupporting: isActivitySupporting
-                };
-              }),
-          );
-
-          assignedActivities = assignedActivities.filter(
-            (activity) => !activity.isComplete && !activity.isUnderReview,
-          );
+    for (const r of allReviews) {
+      const isActivity = r.activityId && r.activityId !== "null" && r.activityId !== "undefined" && r.activityId !== "";
+      if (r.taskId && !isActivity) {
+        const tKey = r.taskId.toString();
+        if (!latestTaskReviewMap.has(tKey)) {
+          latestTaskReviewMap.set(tKey, r);
         }
-
-        const isUserAssignedToTask = isTaskAssigned || isTaskSupporting;
-
-        const shouldIncludeTask =
-          (isUserAssignedToTask && taskPercentage < 100 && !taskIsUnderReview) ||
-          assignedActivities.length > 0;
-
-        if (!shouldIncludeTask) {
-          return null;
+      }
+      if (isActivity) {
+        const aKey = r.activityId.toString();
+        if (!latestActivityReviewMap.has(aKey)) {
+          latestActivityReviewMap.set(aKey, r);
         }
+      }
+    }
 
-        return {
-          taskId: task._id,
-          taskName: task.taskName,
-          taskDescription: task.description,
-          taskPercentage: taskPercentage,
-          taskStatus: task.status,
-          taskBudget: task.budget,
-          startDate: task.startDate,
-          endDate: task.endDate,
-          isTask: isUserAssignedToTask && taskPercentage < 100 && !taskIsUnderReview,
-          isSupporting: isTaskSupporting,
-          project: {
-            projectId: projectDetails._id,
-            projectName: projectDetails.projectName,
-            colorCode: projectDetails.colorCode,
-            priority: projectDetails.priority,
-          },
-          activities: assignedActivities,
-          activityCount: assignedActivities.length,
-        };
-      }),
-    );
+    const processedTasks = tasks.map((task) => {
+      const project = projectMap.get(task.projectId?.toString()) || null;
+      let projectDetails = { ...project };
+
+      const isTaskAssigned = task.employee === employeeId;
+      const isTaskSupporting = task.supportingPersons?.includes(employeeId);
+      const taskPercentage = task.percentage || 0;
+
+      let taskIsUnderReview = false;
+      if (isTaskAssigned || isTaskSupporting) {
+        const latestTaskReview = latestTaskReviewMap.get(task._id?.toString());
+        if (
+          latestTaskReview &&
+          latestTaskReview.percentage >= 100 &&
+          latestTaskReview.status === "underReview"
+        ) {
+          taskIsUnderReview = true;
+        }
+      }
+
+      let assignedActivities = [];
+      if (task.activities?.length > 0) {
+        assignedActivities = task.activities
+          .filter(
+            (activity) =>
+              activity.employee === employeeId ||
+              activity.supportingPersons?.includes(employeeId)
+          )
+          .map((activity) => {
+            const latestActivityReview = latestActivityReviewMap.get(activity._id?.toString());
+            const isUnderReview =
+              latestActivityReview &&
+              latestActivityReview.percentage >= 100 &&
+              latestActivityReview.status === "underReview";
+
+            const isActivitySupporting = activity.supportingPersons?.includes(employeeId);
+
+            return {
+              ...activity,
+              isComplete: activity.percentage >= 100,
+              isUnderReview: isUnderReview,
+              isSupporting: isActivitySupporting,
+            };
+          })
+          .filter(
+            (activity) => !activity.isComplete && !activity.isUnderReview
+          );
+      }
+
+      const isUserAssignedToTask = isTaskAssigned || isTaskSupporting;
+
+      const shouldIncludeTask =
+        (isUserAssignedToTask && taskPercentage < 100 && !taskIsUnderReview) ||
+        assignedActivities.length > 0;
+
+      if (!shouldIncludeTask) {
+        return null;
+      }
+
+      return {
+        taskId: task._id,
+        taskName: task.taskName,
+        taskDescription: task.description,
+        taskPercentage: taskPercentage,
+        taskStatus: task.status,
+        taskBudget: task.budget,
+        startDate: task.startDate,
+        endDate: task.endDate,
+        isTask: isUserAssignedToTask && taskPercentage < 100 && !taskIsUnderReview,
+        isSupporting: isTaskSupporting,
+        project: {
+          projectId: projectDetails._id,
+          projectName: projectDetails.projectName,
+          colorCode: projectDetails.colorCode,
+          priority: projectDetails.priority,
+        },
+        activities: assignedActivities,
+        activityCount: assignedActivities.length,
+      };
+    });
 
     const filteredTasks = processedTasks.filter((task) => task !== null);
 
-    res.status(200).json({
+    const responsePayload = {
       success: true,
       count: filteredTasks.length,
       data: filteredTasks,
+    };
+
+    empTasksCache.set(employeeId, {
+      data: responsePayload,
+      timestamp: Date.now(),
     });
+
+    res.status(200).json(responsePayload);
   } catch (err) {
     console.error("Error fetching employee tasks:", err);
 

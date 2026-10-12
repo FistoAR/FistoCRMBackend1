@@ -32,6 +32,7 @@ const DayTask = () => {
       return data.data || [];
     },
     enabled: !!employeeId,
+    staleTime: 1000 * 30,
   });
 
   const { data: dayReportsData, isLoading: dayReportsLoading, refetch: refetchDayReports } = useQuery({
@@ -48,6 +49,7 @@ const DayTask = () => {
       return data.data || [];
     },
     enabled: !!employeeId,
+    staleTime: 1000 * 30,
   });
 
   const tasks = tasksData || [];
@@ -504,13 +506,15 @@ const DayTask = () => {
               </div>
             </div>
             <div className="flex items-center gap-[0.5vw]">
-              <button
-                className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
-                onClick={() => handleOpenTaskReport(task, activity)}
-                title="Open Project & Add Report"
-              >
-                Add Report
-              </button>
+              {isAddedToday("activity", activity._id) && (
+                <button
+                  className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
+                  onClick={() => handleOpenTaskReport(task, activity)}
+                  title="Open Project & Add Report"
+                >
+                  Add Report
+                </button>
+              )}
               <button
                 className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
                   isAddedToday("activity", activity._id)
@@ -591,13 +595,15 @@ const DayTask = () => {
               </div>
             </div>
             <div className="flex items-center gap-[0.5vw]">
-              <button
-                className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
-                onClick={() => handleOpenTaskReport(task)}
-                title="Open Project & Add Report"
-              >
-                Add Report
-              </button>
+              {isAddedToday("task", task.taskId) && (
+                <button
+                  className="text-[0.8vw] px-[0.9vw] py-[0.2vw] rounded-full transition-colors bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-700 cursor-pointer font-medium"
+                  onClick={() => handleOpenTaskReport(task)}
+                  title="Open Project & Add Report"
+                >
+                  Add Report
+                </button>
+              )}
               <button
                 className={`text-[0.8vw] px-[1vw] py-[0.2vw] rounded-full transition-colors flex items-center gap-[0.4vw] ${
                   isAddedToday("task", task.taskId)

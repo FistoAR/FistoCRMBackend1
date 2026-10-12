@@ -117,23 +117,69 @@ const getEmployeesFromMySQL = () => {
   });
 };
 
+let overviewCache = {
+  data: null,
+  timestamp: 0,
+};
+const OVERVIEW_CACHE_TTL = 25 * 1000; // 25 seconds
+
 router.get("/overview", async (req, res) => {
   try {
-    const [projectsFromDb, allTasks, allReports] =
+    const now = Date.now();
+    if (overviewCache.data && now - overviewCache.timestamp < OVERVIEW_CACHE_TTL) {
+      return res.json(overviewCache.data);
+    }
+
+    const [projectsFromDb, allTasks, latestReportsAgg] =
       await Promise.all([
-        Project_Details.find().sort({ createdAt: -1 }).lean(),
-        Tasks.find().sort({ createdAt: -1 }).lean(),
-        TaskReports.find().sort({ createdAt: -1 }).lean(),
+        Project_Details.find(
+          {},
+          {
+            _id: 1,
+            projectName: 1,
+            status: 1,
+            endDate: 1,
+            correctionDate: 1,
+            percentage: 1,
+          }
+        )
+          .sort({ createdAt: -1 })
+          .lean(),
+        Tasks.find(
+          {},
+          {
+            _id: 1,
+            projectId: 1,
+            status: 1,
+            percentage: 1,
+            "activities.status": 1,
+            "activities.percentage": 1,
+          }
+        )
+          .sort({ createdAt: -1 })
+          .lean(),
+        TaskReports.aggregate([
+          { $match: { taskId: { $exists: true, $ne: null } } },
+          { $group: { _id: "$taskId", maxCreatedAt: { $max: "$createdAt" } } },
+        ]),
       ]);
 
     const currentDate = new Date();
 
-    const tasksByProject = allTasks.reduce((acc, task) => {
+    const tasksByProject = (allTasks || []).reduce((acc, task) => {
+      if (!task.projectId) return acc;
       const projectId = task.projectId.toString();
       if (!acc[projectId]) acc[projectId] = [];
       acc[projectId].push(task);
       return acc;
     }, {});
+
+    // Build O(1) lookup Map for latest report createdAt per taskId from aggregate
+    const latestReportByTaskId = new Map();
+    (latestReportsAgg || []).forEach((r) => {
+      if (!r._id) return;
+      latestReportByTaskId.set(r._id.toString(), new Date(r.maxCreatedAt));
+    });
 
     const overallStats = {
       completed: 0,
@@ -171,23 +217,13 @@ router.get("/overview", async (req, res) => {
       const projectDeadline = getEffectiveDeadline(project);
 
       if (projectPercentage === 100) {
-        const projectTaskIds = projectTasks.map((t) => t._id.toString());
-        const reportsForProject = allReports.filter((r) =>
-          projectTaskIds.includes(r.taskId)
-        );
-
-        const lastReport =
-          reportsForProject.length > 0
-            ? reportsForProject.reduce((latest, current) =>
-                new Date(current.createdAt) > new Date(latest.createdAt)
-                  ? current
-                  : latest
-              )
-            : null;
-
-        const actualCompletionDate = lastReport
-          ? new Date(lastReport.createdAt)
-          : null;
+        let actualCompletionDate = null;
+        for (const t of projectTasks) {
+          const compDate = latestReportByTaskId.get(t._id.toString());
+          if (compDate && (!actualCompletionDate || compDate > actualCompletionDate)) {
+            actualCompletionDate = compDate;
+          }
+        }
 
         if (
           projectDeadline &&
@@ -230,7 +266,7 @@ router.get("/overview", async (req, res) => {
       };
     });
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: {
         projects: projectsWithStatus,
@@ -243,7 +279,14 @@ router.get("/overview", async (req, res) => {
           canceled: overallStats.canceled,
         },
       },
-    });
+    };
+
+    overviewCache = {
+      data: responsePayload,
+      timestamp: Date.now(),
+    };
+
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching analytics:", error);
     res.status(500).json({
@@ -631,9 +674,10 @@ router.get("/project/:projectId", async (req, res) => {
 
 router.get("/timeline", async (req, res) => {
   try {
-    const projects = await Project_Details.find({
-      status: { $nin: ["Hold", "Canceled"] },
-    }).lean();
+    const projects = await Project_Details.find(
+      { status: { $nin: ["Hold", "Canceled"] } },
+      { _id: 1, createdAt: 1, endDate: 1, correctionDate: 1, percentage: 1 }
+    ).lean();
 
     if (projects.length === 0) {
       return res.json({
@@ -643,8 +687,18 @@ router.get("/timeline", async (req, res) => {
     }
 
     const [allReports, allTasks] = await Promise.all([
-      TaskReports.find().lean(),
-      Tasks.find().lean(),
+      TaskReports.find({}, { projectId: 1, createdAt: 1 }).lean(),
+      Tasks.find(
+        {},
+        {
+          _id: 1,
+          projectId: 1,
+          status: 1,
+          percentage: 1,
+          "activities.status": 1,
+          "activities.percentage": 1,
+        }
+      ).lean(),
     ]);
 
     const tasksByProject = (allTasks || []).reduce((acc, task) => {
@@ -655,8 +709,6 @@ router.get("/timeline", async (req, res) => {
       }
       return acc;
     }, {});
-
-    // const outcomeMap = new Map(allOutcomes.map((o) => [o.clientId, o]));
 
     const earliestProject = projects.reduce((earliest, project) => {
       const projectDate = new Date(project.createdAt);
@@ -671,23 +723,16 @@ router.get("/timeline", async (req, res) => {
 
     const timelineData = [];
 
+    // O(1) lookup Map for latest report date per projectId
     const latestProjectReportsMap = new Map();
-    const reportsByProject = new Map();
-
-    allReports.forEach((report) => {
-      if (!reportsByProject.has(report.projectId)) {
-        reportsByProject.set(report.projectId, []);
+    (allReports || []).forEach((report) => {
+      if (!report.projectId) return;
+      const pId = report.projectId.toString();
+      const rDate = new Date(report.createdAt);
+      const existing = latestProjectReportsMap.get(pId);
+      if (!existing || rDate > existing) {
+        latestProjectReportsMap.set(pId, rDate);
       }
-      reportsByProject.get(report.projectId).push(report);
-    });
-
-    reportsByProject.forEach((reports, projectId) => {
-      const latestReport = reports.reduce((latest, current) =>
-        new Date(current.createdAt) > new Date(latest.createdAt)
-          ? current
-          : latest
-      );
-      latestProjectReportsMap.set(projectId, latestReport);
     });
 
     for (let i = 0; i < monthsDiff; i++) {
@@ -730,12 +775,9 @@ router.get("/timeline", async (req, res) => {
           return;
         }
 
-        const latestReport = latestProjectReportsMap.get(
+        const completionDate = latestProjectReportsMap.get(
           project._id.toString()
-        );
-        const completionDate = latestReport
-          ? new Date(latestReport.createdAt)
-          : null;
+        ) || null;
 
         if (
           completionDate &&
@@ -784,10 +826,70 @@ router.get("/team-members", async (req, res) => {
       allTasks,
       allReports,
     ] = await Promise.all([
-      Project_Details.find().sort({ createdAt: -1 }).lean(),
-      Tasks.find().lean(),
-      TaskReports.find().lean(),
+      Project_Details.find(
+        {},
+        {
+          _id: 1,
+          projectName: 1,
+          department: 1,
+          status: 1,
+          startDate: 1,
+          endDate: 1,
+          correctionDate: 1,
+          percentage: 1,
+          statusHistory: 1,
+          employees: 1,
+        }
+      )
+        .sort({ createdAt: -1 })
+        .lean(),
+      Tasks.find(
+        {},
+        {
+          _id: 1,
+          projectId: 1,
+          department: 1,
+          status: 1,
+          startDate: 1,
+          endDate: 1,
+          percentage: 1,
+          statusHistory: 1,
+          employee: 1,
+          activities: 1,
+        }
+      ).lean(),
+      TaskReports.find(
+        {},
+        { _id: 1, taskId: 1, activityId: 1, createdAt: 1, percentage: 1 }
+      ).lean(),
     ]);
+
+    // Fast O(1) project lookup by ID
+    const projectMapById = new Map();
+    (projectsFromDb || []).forEach((p) => {
+      projectMapById.set(p._id.toString(), p);
+    });
+
+    // Build O(1) lookup Maps for latest report per activityId and per taskId
+    const latestReportByActivity = new Map();
+    const latestReportByTask = new Map();
+
+    (allReports || []).forEach((r) => {
+      const rDate = new Date(r.createdAt);
+      if (r.activityId) {
+        const actId = r.activityId.toString();
+        const existing = latestReportByActivity.get(actId);
+        if (!existing || rDate > existing.date) {
+          latestReportByActivity.set(actId, { ...r, date: rDate });
+        }
+      } else if (r.taskId) {
+        const tId = r.taskId.toString();
+        const existing = latestReportByTask.get(tId);
+        if (!existing || rDate > existing.date) {
+          latestReportByTask.set(tId, { ...r, date: rDate });
+        }
+      }
+    });
 
     // Get team heads for three departments
     const teamHeadsQuery = `SELECT 
@@ -806,7 +908,8 @@ router.get("/team-members", async (req, res) => {
     // Get all employees for task assignment mapping
     const employeeMap = await getEmployeesFromMySQL();
 
-    const tasksByProject = allTasks.reduce((acc, task) => {
+    const tasksByProject = (allTasks || []).reduce((acc, task) => {
+      if (!task.projectId) return acc;
       const projectId = task.projectId.toString();
       if (!acc[projectId]) acc[projectId] = [];
       acc[projectId].push(task);
@@ -867,12 +970,10 @@ router.get("/team-members", async (req, res) => {
             const holdMs = calculateHoldDuration(activity.statusHistory);
             activityEndDate.setTime(activityEndDate.getTime() + holdMs);
 
-            const latestReport = allReports
-              .filter((r) => r.activityId === activity._id.toString())
-              .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+            const latestReport = latestReportByActivity.get(activity._id.toString());
 
             if (latestReport) {
-              const reportDate = new Date(latestReport.createdAt);
+              const reportDate = latestReport.date;
               activity.lastReportDate = reportDate;
 
               if (
@@ -890,7 +991,7 @@ router.get("/team-members", async (req, res) => {
 
               if (
                 latestReport &&
-                new Date(latestReport.createdAt) > activityEndDate
+                latestReport.date > activityEndDate
               ) {
                 delayedCount++;
               }
@@ -919,12 +1020,10 @@ router.get("/team-members", async (req, res) => {
           const holdMs = calculateHoldDuration(task.statusHistory);
           taskEndDate.setTime(taskEndDate.getTime() + holdMs);
 
-          const latestReport = allReports
-            .filter((r) => r.taskId === task._id.toString() && !r.activityId)
-            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+          const latestReport = latestReportByTask.get(task._id.toString());
 
           if (latestReport) {
-            const reportDate = new Date(latestReport.createdAt);
+            const reportDate = latestReport.date;
             task.lastReportDate = reportDate;
 
             if (!projectLastReportDate || reportDate > projectLastReportDate) {
@@ -939,7 +1038,7 @@ router.get("/team-members", async (req, res) => {
 
             if (
               latestReport &&
-              new Date(latestReport.createdAt) > taskEndDate
+              latestReport.date > taskEndDate
             ) {
               delayedCount++;
             }
@@ -972,23 +1071,13 @@ router.get("/team-members", async (req, res) => {
       const projectDeadline = getEffectiveDeadline(project);
 
       if (projectPercentage === 100) {
-        const projectTaskIds = projectTasks.map((t) => t._id.toString());
-        const reportsForProject = allReports.filter((r) =>
-          projectTaskIds.includes(r.taskId)
-        );
-
-        const lastReport =
-          reportsForProject.length > 0
-            ? reportsForProject.reduce((latest, current) =>
-                new Date(current.createdAt) > new Date(latest.createdAt)
-                  ? current
-                  : latest
-              )
-            : null;
-
-        const actualCompletionDate = lastReport
-          ? new Date(lastReport.createdAt)
-          : null;
+        let actualCompletionDate = null;
+        for (const t of projectTasks) {
+          const rep = latestReportByTask.get(t._id.toString());
+          if (rep && (!actualCompletionDate || rep.date > actualCompletionDate)) {
+            actualCompletionDate = rep.date;
+          }
+        }
 
         if (
           projectDeadline &&
@@ -1061,7 +1150,7 @@ router.get("/team-members", async (req, res) => {
       departmentNames.forEach((dept) => {
         // Recalculate stats for this specific department
         const deptStats = calculateProjectStats(
-          projectsFromDb.find(p => p._id.toString() === project.id.toString()),
+          projectMapById.get(project.id.toString()),
           project.projectTasks,
           dept
         );
@@ -1152,11 +1241,16 @@ router.get("/team-members", async (req, res) => {
       delayedProjects: activeProjects.filter((p) => p.status === "Delayed").length,
     };
 
+    const sanitizedProjects = activeProjects.map((p) => {
+      const { projectTasks, ...rest } = p;
+      return rest;
+    });
+
     res.json({
       success: true,
       data: {
         departments: departmentData,
-        projects: activeProjects,
+        projects: sanitizedProjects,
         summary: overallSummary,
       },
     });

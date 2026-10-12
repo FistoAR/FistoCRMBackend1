@@ -12,6 +12,11 @@ function formatDate(date) {
   });
 }
 
+// ─── CACHE FOR CELEBRATIONS & ANNOUNCEMENTS ─────────────────────────────────
+const celebrationsCache = new Map();
+const announcementsCache = new Map();
+const CELEBRATION_CACHE_TTL = 60 * 1000; // 60 seconds
+
 // ─── GET /today ───────────────────────────────────────────────────────────────
 // Returns ALL quotes (celebrations + announcements) for the given date.
 // Frontend sends ?date=YYYY-MM-DD — if omitted, falls back to server today.
@@ -21,6 +26,11 @@ router.get("/today", (req, res) => {
   const dateStr = req.query.date
     ? req.query.date                          // already YYYY-MM-DD
     : new Date().toISOString().split("T")[0]; // fallback
+
+  const cached = celebrationsCache.get(dateStr);
+  if (cached && Date.now() - cached.timestamp < CELEBRATION_CACHE_TTL) {
+    return res.json(cached.data);
+  }
 
   const query = `
     SELECT
@@ -55,11 +65,18 @@ router.get("/today", (req, res) => {
       description: q.quote,
     }));
 
-    res.json({
+    const responsePayload = {
       status: true,
       celebrations,
       count: celebrations.length,
+    };
+
+    celebrationsCache.set(dateStr, {
+      data: responsePayload,
+      timestamp: Date.now(),
     });
+
+    res.json(responsePayload);
   });
 });
 
@@ -70,6 +87,11 @@ router.get("/announcements", (req, res) => {
   const dateStr = req.query.date
     ? req.query.date
     : new Date().toISOString().split("T")[0];
+
+  const cached = announcementsCache.get(dateStr);
+  if (cached && Date.now() - cached.timestamp < CELEBRATION_CACHE_TTL) {
+    return res.json(cached.data);
+  }
 
   const query = `
     SELECT
@@ -109,14 +131,20 @@ router.get("/announcements", (req, res) => {
       quote: q.quote,
       occasion: q.occasion,
       imageUrl: q.imageUrl,
-      agenda: q.quote,
     }));
 
-    res.json({
+    const responsePayload = {
       status: true,
       announcements,
       count: announcements.length,
+    };
+
+    announcementsCache.set(dateStr, {
+      data: responsePayload,
+      timestamp: Date.now(),
     });
+
+    res.json(responsePayload);
   });
 });
 

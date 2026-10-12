@@ -367,11 +367,21 @@ router.get("/range", async (req, res) => {
   }
 });
 
+const calendarDateCache = new Map();
+const CALENDAR_DATE_CACHE_TTL = 30 * 1000; // 30 seconds
+
 // ✅ GET - Events by specific date
 router.get("/date/:date", async (req, res) => {
   try {
     const { date } = req.params;
-    const viewerId = req.get('x-employee-id');
+    const viewerId = req.get('x-employee-id') || '';
+    const cacheKey = `${date}_${viewerId}`;
+
+    const cached = calendarDateCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CALENDAR_DATE_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
     const filter = await getViewerFilter(viewerId);
     const query = `
       SELECT 
@@ -385,7 +395,89 @@ router.get("/date/:date", async (req, res) => {
 
     const params = [date, date, date, ...filter.params];
     const events = await queryWithRetry(query, params);
-    const formattedEvents = await Promise.all(events.map(getEventAttendeesDetails));
+
+    // Batch lookup all attendees across all events in 1 single SQL query
+    const allRawIds = new Set();
+    (events || []).forEach((ev) => {
+      let rawItems = [];
+      if (ev.attendees) {
+        if (Array.isArray(ev.attendees)) rawItems = ev.attendees;
+        else if (typeof ev.attendees === "string") {
+          try {
+            const parsed = JSON.parse(ev.attendees);
+            if (Array.isArray(parsed)) rawItems = parsed;
+          } catch (e) {
+            rawItems = ev.attendees.split(",").map((s) => s.trim()).filter(Boolean);
+          }
+        }
+      }
+      rawItems.forEach((item) => {
+        const id = typeof item === "object"
+          ? item.employee_id || item.intern_id || item.employeeID || item.id || item._id
+          : item;
+        if (id) allRawIds.add(String(id).trim());
+      });
+    });
+
+    const nameMap = new Map();
+    if (allRawIds.size > 0) {
+      const idArr = Array.from(allRawIds);
+      const placeholders = idArr.map(() => "?").join(",");
+      const attendeeQuery = `
+        SELECT employee_id, intern_id, employee_name 
+        FROM employees_details 
+        WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})
+      `;
+      try {
+        const attendeeDetails = await queryWithRetry(attendeeQuery, [...idArr, ...idArr]);
+        attendeeDetails.forEach((emp) => {
+          if (emp.employee_id) nameMap.set(String(emp.employee_id).trim(), emp.employee_name);
+          if (emp.intern_id) nameMap.set(String(emp.intern_id).trim(), emp.employee_name);
+        });
+      } catch (e) {}
+    }
+
+    const formattedEvents = (events || []).map((event) => {
+      let rawItems = [];
+      if (event.attendees) {
+        if (Array.isArray(event.attendees)) rawItems = event.attendees;
+        else if (typeof event.attendees === "string") {
+          try {
+            const parsed = JSON.parse(event.attendees);
+            if (Array.isArray(parsed)) rawItems = parsed;
+          } catch (e) {
+            rawItems = event.attendees.split(",").map((s) => s.trim()).filter(Boolean);
+          }
+        }
+      }
+
+      const enrichedAttendees = rawItems.map((item) => {
+        if (typeof item === "object") {
+          const idKey = String(item.employee_id || item.intern_id || item.employeeID || item.id || item._id || "").trim();
+          const name = item.employee_name || item.name || nameMap.get(idKey) || idKey;
+          return {
+            employee_id: idKey || name,
+            employee_name: name,
+          };
+        }
+        const strVal = String(item).trim();
+        const resolvedName = nameMap.get(strVal) || strVal;
+        return {
+          employee_id: strVal,
+          employee_name: resolvedName,
+        };
+      });
+
+      return formatEventResponse({
+        ...event,
+        attendees: enrichedAttendees,
+      });
+    });
+
+    calendarDateCache.set(cacheKey, {
+      data: formattedEvents,
+      timestamp: Date.now(),
+    });
 
     res.json(formattedEvents);
   } catch (error) {

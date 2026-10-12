@@ -16,6 +16,20 @@ import Notification from "../ToastProp";
 const RECORDS_PER_PAGE = 15;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+const getTodayIST = () => {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(
+    new Date()
+  );
+};
+
+const getMinDateIST = () => {
+  const now = new Date();
+  const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(
+    past
+  );
+};
+
 const checkIfAdmin = (userData) => {
   if (!userData) return false;
   const role = (userData.role || userData.userRole || "").toLowerCase();
@@ -60,7 +74,10 @@ const Workdone = () => {
   const [formData, setFormData] = useState({
     projectName: "",
     description: "",
+    date: getTodayIST(),
   });
+  const [submittedDates, setSubmittedDates] = useState([]);
+  const [dateError, setDateError] = useState("");
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -88,10 +105,11 @@ const Workdone = () => {
     };
   }, []);
 
-  // Fetch employees and reports on mount
+  // Fetch employees, reports, and submitted dates on mount
   useEffect(() => {
     fetchEmployees();
     fetchReports();
+    fetchSubmittedDates();
   }, []);
 
   // Reset pagination when filters change
@@ -105,6 +123,59 @@ const Workdone = () => {
       fetchReports();
     }
   }, [mainTab]);
+
+  const fetchSubmittedDates = async () => {
+    try {
+      const userData = JSON.parse(
+        sessionStorage.getItem("user") || localStorage.getItem("user") || "{}"
+      );
+      if (!userData.employee_id && !userData.userName && !userData._id) return;
+
+      const response = await fetch(`${API_BASE_URL}/workdone/submitted-dates`, {
+        headers: {
+          "x-user-data": JSON.stringify(userData),
+        },
+      });
+      const data = await response.json();
+      if (data.success) {
+        setSubmittedDates(data.dates || []);
+      }
+    } catch (error) {
+      console.error("Error fetching submitted dates:", error);
+    }
+  };
+
+  const validateSelectedDate = (chosenDate, datesList = submittedDates) => {
+    if (!chosenDate) {
+      setDateError("Please select a date");
+      return false;
+    }
+    const today = getTodayIST();
+    const minDate = getMinDateIST();
+
+    if (chosenDate > today) {
+      setDateError("Report date cannot be in the future");
+      return false;
+    }
+    if (chosenDate < minDate) {
+      setDateError("Report date cannot be older than past 7 days");
+      return false;
+    }
+    if (datesList.includes(chosenDate)) {
+      const parts = chosenDate.split("-");
+      const formatted = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : chosenDate;
+      setDateError(`A report has already been submitted for ${formatted}`);
+      return false;
+    }
+    setDateError("");
+    return true;
+  };
+
+  useEffect(() => {
+    if (formData.date) {
+      validateSelectedDate(formData.date, submittedDates);
+    }
+  }, [submittedDates]);
 
   const fetchEmployees = async () => {
     try {
@@ -159,13 +230,19 @@ const Workdone = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === "date") {
+      validateSelectedDate(value);
+    }
   };
 
   const clearForm = () => {
+    const today = getTodayIST();
     setFormData({
       projectName: "",
       description: "",
+      date: today,
     });
+    validateSelectedDate(today);
   };
 
   const handleSubmit = async () => {
@@ -179,8 +256,21 @@ const Workdone = () => {
       return;
     }
 
-    if (!formData.projectName.trim() || !formData.description.trim()) {
+    let submitDate = formData.date ? formData.date.trim() : "";
+    if (!submitDate) {
+      const today = getTodayIST();
+      if (!submittedDates.includes(today)) {
+        submitDate = today;
+      }
+    }
+
+    if (!formData.projectName.trim() || !formData.description.trim() || !submitDate) {
       showToast("Error", "Please fill all required fields");
+      return;
+    }
+
+    if (!validateSelectedDate(submitDate)) {
+      showToast("Error", dateError || "Please select a valid date");
       return;
     }
 
@@ -195,12 +285,14 @@ const Workdone = () => {
         body: JSON.stringify({
           project_name: formData.projectName.trim(),
           description: formData.description.trim(),
+          date: submitDate,
         }),
       });
 
       // Check if HTTP response is successful
       if (!response.ok) {
-        showToast("Error", `Server error: ${response.status} ${response.statusText}`);
+        const errorData = await response.json().catch(() => null);
+        showToast("Error", errorData?.error || `Server error: ${response.status} ${response.statusText}`);
         return;
       }
 
@@ -222,6 +314,7 @@ const Workdone = () => {
       if (result.success) {
         showToast("Success", "Work report submitted successfully!");
         clearForm();
+        fetchSubmittedDates();
         // Refresh reports if on view tab
         if (mainTab === "viewReport") {
           fetchReports();
@@ -366,18 +459,48 @@ const Workdone = () => {
   const renderReportsForm = () => {
     return (
       <div className="space-y-[1vw] p-[1.2vw]">
-        <div className="flex flex-col">
-          <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
-            Project Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            name="projectName"
-            value={formData.projectName}
-            onChange={handleInputChange}
-            className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500"
-            placeholder="Enter project name..."
-          />
+        <div className="grid grid-cols-2 gap-[1vw]">
+          <div className="flex flex-col">
+            <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+              Report Date <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              name="date"
+              value={formData.date}
+              min={getMinDateIST()}
+              max={getTodayIST()}
+              onChange={handleInputChange}
+              className={`px-[0.7vw] py-[0.5vw] text-[0.85vw] border rounded-lg outline-none cursor-pointer ${
+                dateError
+                  ? "border-red-500 focus:border-red-500 bg-red-50 text-red-900"
+                  : "border-gray-300 focus:border-blue-500 text-gray-800"
+              }`}
+            />
+            {dateError ? (
+              <p className="text-red-500 text-[0.72vw] mt-[0.2vw] font-medium flex items-center gap-1">
+                <span>⚠️</span> {dateError}
+              </p>
+            ) : (
+              <p className="text-gray-400 text-[0.7vw] mt-[0.2vw]">
+                Max: Today | Past 7 days allowed (1 report per day)
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col">
+            <label className="text-[0.8vw] font-semibold text-gray-700 mb-[0.3vw]">
+              Project Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              name="projectName"
+              value={formData.projectName}
+              onChange={handleInputChange}
+              className="px-[0.7vw] py-[0.5vw] text-[0.85vw] border border-gray-300 rounded-lg outline-none focus:border-blue-500"
+              placeholder="Enter project name..."
+            />
+          </div>
         </div>
 
         <div className="flex flex-col">
@@ -772,9 +895,9 @@ const Workdone = () => {
                 <div className="flex gap-[0.8vw]">
                   <button
                     onClick={handleSubmit}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || Boolean(dateError)}
                     className={`px-[1.2vw] py-[0.6vw] text-[0.85vw] font-medium rounded-full transition-all flex items-center gap-[0.4vw] ${
-                      isSubmitting
+                      isSubmitting || Boolean(dateError)
                         ? "bg-gray-400 text-white cursor-not-allowed"
                         : "bg-black text-white hover:bg-gray-800 cursor-pointer"
                     }`}

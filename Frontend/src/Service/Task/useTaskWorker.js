@@ -19,7 +19,6 @@ export default function useTaskWorker() {
         sessionStorage.getItem("user") || localStorage.getItem("user");
 
       if (!storedUser) {
-        console.error("useTaskWorker: No user found in storage");
         return null;
       }
 

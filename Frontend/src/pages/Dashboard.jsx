@@ -55,6 +55,7 @@ const Dashboard = () => {
       return res.data;
     },
     enabled: !!designation,
+    staleTime: 5 * 60 * 1000,
   });
 
   if (checkingRole) {

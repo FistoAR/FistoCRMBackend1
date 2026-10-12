@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 const {
   Tasks,
   Project_Details,
@@ -453,43 +454,119 @@ router.post("/create", async (req, res) => {
   }
 });
 
+let dashboardCache = {
+  data: null,
+  timestamp: 0,
+};
+const DASHBOARD_CACHE_TTL = 15 * 1000; // 15 seconds
+
 router.get("/dashboard", async (req, res) => {
   try {
+    const now = Date.now();
+    if (dashboardCache.data && now - dashboardCache.timestamp < DASHBOARD_CACHE_TTL) {
+      return res.json(dashboardCache.data);
+    }
+
     const { start: todayStart, end: todayEnd } = getTodayRangeIST();
 
-    const [allTasks, unscheduledTask, dayTask] = await Promise.all([
-      Tasks.find().lean(),
-      UnscheduledTask.find({
-        createdAt: { $gte: todayStart, $lte: todayEnd }
-      }).lean(),
-      DayReport.find({
-        createdAt: { $gte: todayStart, $lte: todayEnd }
-      }).lean(),
-    ]);
-
-    const adminQuery = `
-      SELECT *
-      FROM employees_details
-      WHERE designation NOT IN ('Admin', 'SBU', 'Project Head', 'Maid', 'Digital Marketing & HR', 'Digital Marketing','HR')
-      AND working_status = 'Active'
+    // 1. Fetch only today's unscheduled tasks, day reports, and active employees concurrently
+    const todayDateStr = new Date().toLocaleDateString("en-CA");
+    const leaveQuery = `
+      SELECT employee_id, leave_type, from_date, to_date, reason, status, management_status, team_head_status
+      FROM leave_requests
+      WHERE (status = 'approved' OR management_status = 'approved' OR team_head_status = 'approved')
+        AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))
     `;
-    const employees = await queryWithRetry(adminQuery);
 
-    // Enrich today's day reports with task/activity/project details
-    const enrichedDayTaskPromises = dayTask.map(async (day) => {
-      let taskDetails = null;
-      let activityDetails = null;
-      let projectName = "";
-      let startDate = "";
-      let endDate = "";
-      let startTime = "";
-      let endTime = "";
+    const employeeQuery = `
+      SELECT employee_id, employee_name, profile_url, designation, working_status
+      FROM employees_details
+      WHERE working_status = 'Active'
+    `;
 
-      if (day.taskId) {
-        const task = await Tasks.findById(day.taskId).lean();
-        if (!task) return null; // Skip if task was deleted!
+    const [unscheduledTask, dayTask, allActiveEmployees, approvedLeaves] =
+      await Promise.all([
+        UnscheduledTask.find({
+          createdAt: { $gte: todayStart, $lte: todayEnd },
+        }).lean(),
+        DayReport.find({
+          createdAt: { $gte: todayStart, $lte: todayEnd },
+        }).lean(),
+        queryWithRetry(employeeQuery).catch(() => []),
+        queryWithRetry(leaveQuery, [todayDateStr]).catch((lErr) => {
+          console.error("Error fetching approved leaves for dashboard:", lErr);
+          return [];
+        }),
+      ]);
 
-        taskDetails = {
+    // 2. Batch fetch ONLY tasks referenced in today's day reports (avoid N+1 and full collection dump)
+    const taskIds = [
+      ...new Set(
+        dayTask
+          .map((d) => d.taskId)
+          .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
+
+    const tasksMap = new Map();
+    const projectsMap = new Map();
+
+    if (taskIds.length > 0) {
+      const referencedTasks = await Tasks.find(
+        { _id: { $in: taskIds } },
+        {
+          taskName: 1,
+          description: 1,
+          startDate: 1,
+          endDate: 1,
+          startTime: 1,
+          endTime: 1,
+          activities: 1,
+          projectId: 1,
+        }
+      ).lean();
+
+      referencedTasks.forEach((t) => tasksMap.set(t._id.toString(), t));
+
+      const projectIds = [
+        ...new Set(
+          referencedTasks
+            .map((t) => t.projectId)
+            .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+        ),
+      ];
+
+      if (projectIds.length > 0) {
+        const referencedProjects = await Project_Details.find(
+          { _id: { $in: projectIds } },
+          { projectName: 1 }
+        ).lean();
+        referencedProjects.forEach((p) =>
+          projectsMap.set(p._id.toString(), p.projectName)
+        );
+      }
+    }
+
+    // 3. Fast O(1) enrichment of today's day reports
+    const enrichedDayTask = dayTask
+      .map((day) => {
+        if (!day.taskId) {
+          return {
+            ...day,
+            taskDetails: null,
+            activityDetails: null,
+            projectName: "",
+            startDate: "",
+            endDate: "",
+            startTime: "",
+            endTime: "",
+          };
+        }
+
+        const task = tasksMap.get(day.taskId.toString());
+        if (!task) return null; // Skip if task was deleted
+
+        let taskDetails = {
           taskName: task.taskName,
           description: task.description,
           startDate: task.startDate,
@@ -498,17 +575,17 @@ router.get("/dashboard", async (req, res) => {
           endTime: task.endTime,
         };
 
-        startDate = task.startDate;
-        endDate = task.endDate;
-        startTime = task.startTime;
-        endTime = task.endTime;
+        let startDate = task.startDate;
+        let endDate = task.endDate;
+        let startTime = task.startTime;
+        let endTime = task.endTime;
+        let activityDetails = null;
 
-        // If activityId exists → it's an activity report
         if (day.activityId) {
           const activity = task.activities?.find(
             (act) => act._id.toString() === day.activityId.toString()
           );
-          if (!activity) return null; // Skip if activity was deleted!
+          if (!activity) return null; // Skip if activity was deleted
 
           activityDetails = {
             activityName: activity.activityName,
@@ -524,54 +601,54 @@ router.get("/dashboard", async (req, res) => {
           endTime = activity.endTime;
         }
 
+        let projectName = "";
         if (task.projectId) {
-          const project = await Project_Details.findById(task.projectId)
-            .select("projectName")
-            .lean();
-          if (project) {
-            projectName = project.projectName;
-          }
+          projectName = projectsMap.get(task.projectId.toString()) || "";
         }
-      }
 
-      return {
-        ...day,
-        taskDetails,
-        activityDetails,
-        projectName,
-        startDate,
-        endDate,
-        startTime,
-        endTime,
-      };
-    });
+        return {
+          ...day,
+          taskDetails,
+          activityDetails,
+          projectName,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+        };
+      })
+      .filter(Boolean);
 
-    const enrichedDayTaskResults = await Promise.all(enrichedDayTaskPromises);
-    const enrichedDayTask = enrichedDayTaskResults.filter(Boolean);
+    const excludedDesignations = new Set([
+      "Admin",
+      "SBU",
+      "Project Head",
+      "Maid",
+      "Digital Marketing & HR",
+      "Digital Marketing",
+      "HR",
+    ]);
+    const filteredEmployees = (allActiveEmployees || []).filter(
+      (e) => !excludedDesignations.has(e.designation)
+    );
 
-    // Fetch approved leave requests for today
-    const todayDateStr = new Date().toLocaleDateString('en-CA');
-    const leaveQuery = `
-      SELECT employee_id, leave_type, from_date, to_date, reason, status, management_status, team_head_status
-      FROM leave_requests
-      WHERE (status = 'approved' OR management_status = 'approved' OR team_head_status = 'approved')
-        AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))
-    `;
-    let approvedLeaves = [];
-    try {
-      approvedLeaves = await queryWithRetry(leaveQuery, [todayDateStr]);
-    } catch (lErr) {
-      console.error("Error fetching approved leaves for dashboard:", lErr);
-    }
-
-    res.json({
+    const responsePayload = {
       success: true,
-      tasks: allTasks,
+      tasks: [],
       unscheduledTask,
       dayTask: enrichedDayTask,
-      employees,
-      approvedLeaves,
-    });
+      employees: filteredEmployees,
+      allEmployees: allActiveEmployees,
+      approvedLeaves: approvedLeaves || [],
+      activeEmployeeCount: (allActiveEmployees || []).length,
+    };
+
+    dashboardCache = {
+      data: responsePayload,
+      timestamp: Date.now(),
+    };
+
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching dashboard:", error);
     res.status(500).json({

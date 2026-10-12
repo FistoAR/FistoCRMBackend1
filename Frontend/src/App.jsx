@@ -88,7 +88,11 @@ function NavBarWithTitle({ socketData }) {
 
 // ============ MAIN LAYOUT WRAPPER ============
 
-function MainLayout({ children, socketData }) {
+function MainLayout({ children }) {
+  Worker();
+  useAttendanceWorker();
+  const socketData = useSocketNotifications();
+
   return (
     <div className="flex w-screen h-screen overflow-hidden">
       <Sidebar />
@@ -103,11 +107,6 @@ function MainLayout({ children, socketData }) {
 // ============ APP CONTENT ============
 
 function AppContent() {
-  Worker();
-  useAttendanceWorker();
-
-  const socketData = useSocketNotifications();
-
   return (
         <Router basename="/fisto_crm/">
       <ErrorBoundary>
@@ -119,7 +118,7 @@ function AppContent() {
           <Route
             path="/*"
             element={
-              <MainLayout socketData={socketData}>
+              <MainLayout>
                 <ErrorBoundary>
                   <Suspense
                     fallback={
