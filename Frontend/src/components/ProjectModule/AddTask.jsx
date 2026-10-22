@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Check, X, Loader2, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { Check, X, Loader2, Trash2, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { useNotification } from "../NotificationContext";
 import { useConfirm } from "../ConfirmContext";
 import closeIcon from "../../assets/ProjectPages/overview/close.webp"
@@ -241,6 +241,44 @@ export default function AddTask({
       points: [],
     },
   ]);
+
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const filteredTasksWithIndex = useMemo(() => {
+    const trimmed = searchTerm.trim().toLowerCase();
+    const mapped = tasks.map((task, taskIndex) => ({ task, taskIndex }));
+    if (!trimmed) return mapped;
+
+    return mapped.filter(({ task, taskIndex }) => {
+      const taskNo = `task ${taskIndex + 1}`.toLowerCase();
+      const taskName = (task.taskName || "").toLowerCase();
+      const taskDesc = (task.description || "").toLowerCase();
+      const taskDept = (task.department || "").toLowerCase();
+      const assignedEmp = getEmployeeById(task.employees)?.name?.toLowerCase() || "";
+
+      const taskMatches =
+        taskNo.includes(trimmed) ||
+        taskName.includes(trimmed) ||
+        taskDesc.includes(trimmed) ||
+        taskDept.includes(trimmed) ||
+        assignedEmp.includes(trimmed);
+
+      if (taskMatches) return true;
+
+      return (task.activities || []).some((act) => {
+        const actName = (act.activityName || "").toLowerCase();
+        const actDesc = (act.description || "").toLowerCase();
+        const actDept = (act.department || "").toLowerCase();
+        const actEmp = getEmployeeById(act.employee)?.name?.toLowerCase() || "";
+        return (
+          actName.includes(trimmed) ||
+          actDesc.includes(trimmed) ||
+          actDept.includes(trimmed) ||
+          actEmp.includes(trimmed)
+        );
+      });
+    });
+  }, [tasks, searchTerm, currentEmployees]);
 
   const canEditEndDate = (
     taskEndDate,
@@ -1516,7 +1554,27 @@ export default function AddTask({
           {hasExistingTasks ? "Manage Tasks" : "Create Tasks"}
         </h2>
 
-        <div className="flex items-center gap-[1vw]">
+        <div className="flex items-center gap-[0.8vw]">
+          <div className="relative flex items-center">
+            <Search className="w-[0.9vw] h-[0.9vw] absolute left-[0.7vw] text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search tasks or activities..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-[2vw] pr-[1.8vw] py-[0.25vw] rounded-full text-[0.75vw] bg-gray-100 border border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-[14vw] transition-all"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-[0.6vw] text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X className="w-[0.8vw] h-[0.8vw]" />
+              </button>
+            )}
+          </div>
+
           <span
             className="mr-[0.5vw] mt-[0.1vw]"
             onClick={async () => {
@@ -1700,10 +1758,25 @@ export default function AddTask({
               </div>
             )}
 
-            {[...tasks]
-              .map((task, taskIndex) => ({ task, taskIndex }))
-              .reverse()
-              .map(({ task, taskIndex }) => (
+            {searchTerm.trim() && filteredTasksWithIndex.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-[4vw] text-gray-500">
+                <Search className="w-[2vw] h-[2vw] text-gray-400 mb-[0.6vw]" />
+                <p className="text-[0.85vw] font-medium text-gray-700">No tasks found</p>
+                <p className="text-[0.72vw] text-gray-400 mt-[0.2vw]">
+                  No tasks or activities match "{searchTerm}"
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="mt-[0.8vw] text-[0.72vw] text-blue-600 hover:underline cursor-pointer"
+                >
+                  Clear search
+                </button>
+              </div>
+            ) : (
+              [...filteredTasksWithIndex]
+                .reverse()
+                .map(({ task, taskIndex }) => (
                 <div
                   key={task.id || taskIndex}
                   className="flex flex-col rounded-b-lg bg-white"
@@ -2934,10 +3007,11 @@ export default function AddTask({
                   </div>
                 </div>
               </div>
-            ))}
-          </>
-        )}
-      </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
 
       <div className="flex justify-end items-center gap-[0.7vw] pt-[0.6vw] pb-[0.2vw] px-[0.3vw] bg-white z-[30] shrink-0">
         <button
