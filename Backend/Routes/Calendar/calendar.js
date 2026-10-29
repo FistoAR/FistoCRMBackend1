@@ -296,7 +296,7 @@ router.get("/", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE 1=1 ${filter.clause}
       ORDER BY ce.date ASC, ce.start_time ASC
     `;
@@ -334,7 +334,7 @@ router.get("/range", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE (
         (ce.date BETWEEN ? AND ?) OR
         (ce.end_date BETWEEN ? AND ?) OR
@@ -388,7 +388,7 @@ router.get("/date/:date", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE (ce.date = ? OR (ce.date <= ? AND ce.end_date >= ?)) ${filter.clause}
       ORDER BY ce.start_time ASC
     `;
@@ -500,7 +500,7 @@ router.get("/employee/:employeeId", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE 1=1 ${filter.clause}
       ORDER BY ce.date ASC, ce.start_time ASC
     `;
@@ -530,7 +530,7 @@ router.get("/type/:eventtype", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE ce.event_type = ? ${filter.clause}
       ORDER BY ce.date ASC, ce.start_time ASC
     `;
@@ -686,7 +686,7 @@ router.post("/", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE ce.id = ?
     `;
 
@@ -853,7 +853,7 @@ router.put("/:id", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE ce.id = ?
     `;
 
@@ -918,7 +918,7 @@ router.delete("/:id", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE ce.id = ?
     `;
 
@@ -1058,7 +1058,7 @@ router.get("/:id", async (req, res) => {
         ce.*,
         creator.employee_name as creator_name
       FROM calendar_events ce
-      LEFT JOIN employees_details creator ON ce.employee_id = creator.employee_id
+      LEFT JOIN employees_details creator ON (ce.employee_id = creator.employee_id OR (creator.intern_id IS NOT NULL AND ce.employee_id = creator.intern_id))
       WHERE ce.id = ?
     `;
 

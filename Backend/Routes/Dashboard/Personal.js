@@ -382,13 +382,17 @@ router.get("/today-tasks", async (req, res) => {
       const placeholders = employeeIds.map(() => "?").join(",");
       const employees = await new Promise((resolve, reject) => {
         db.pool.query(
-          `SELECT employee_id AS id, employee_name AS name, profile_url AS profile
-           FROM employees_details WHERE employee_id IN (${placeholders})`,
-          employeeIds,
+          `SELECT employee_id, intern_id, employee_name AS name, profile_url AS profile
+           FROM employees_details 
+           WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})`,
+          [...employeeIds, ...employeeIds],
           (err, results) => (err ? reject(err) : resolve(results || []))
         );
       });
-      employees.forEach((emp) => { employeeMap[emp.id] = emp; });
+      employees.forEach((emp) => { 
+        if (emp.employee_id) employeeMap[emp.employee_id] = emp; 
+        if (emp.intern_id) employeeMap[emp.intern_id] = emp; 
+      });
     }
 
     const taskIds    = [...new Set(dayReports.map((r) => r.taskId).filter(Boolean))];

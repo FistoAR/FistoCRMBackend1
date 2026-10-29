@@ -98,6 +98,7 @@ const getEmployeesFromMySQL = () => {
   return new Promise(async (resolve, reject) => {
     const query = `SELECT 
       employee_id as id,
+      intern_id,
       employee_name as name,
       profile_url as profile,
       designation as role
@@ -106,9 +107,11 @@ const getEmployeesFromMySQL = () => {
     
     try {
       const results = await queryWithRetry(query);
-      const employeeMap = new Map(
-        results.map((emp) => [emp.id.toString(), emp])
-      );
+      const employeeMap = new Map();
+      results.forEach((emp) => {
+        if (emp.id) employeeMap.set(emp.id.toString(), emp);
+        if (emp.intern_id) employeeMap.set(emp.intern_id.toString(), emp);
+      });
       resolve(employeeMap);
     } catch (error) {
       console.error("Error fetching employees from MySQL:", error);
@@ -1337,6 +1340,27 @@ router.get("/employee-tasks", async (req, res) => {
       DayReport.find().sort({ createdAt: 1 }).lean(),
     ]);
 
+    let targetAliases = [];
+    if (employeeId && employeeId !== "all") {
+      try {
+        const cleanId = String(employeeId).trim();
+        const [empRows] = await queryWithRetry(
+          `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+          [cleanId, cleanId]
+        );
+        if (empRows) {
+          const row = Array.isArray(empRows) ? empRows[0] : empRows;
+          if (row) {
+            if (row.employee_id) targetAliases.push(String(row.employee_id).trim());
+            if (row.intern_id) targetAliases.push(String(row.intern_id).trim());
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching aliases for employee-tasks:", err);
+      }
+      if (targetAliases.length === 0) targetAliases = [String(employeeId).trim()];
+    }
+
     const employeeMap = await getEmployeesFromMySQL();
     const projectMap = new Map(allProjects.map((p) => [p._id.toString(), p]));
 
@@ -1393,7 +1417,7 @@ router.get("/employee-tasks", async (req, res) => {
               continue;
             }
 
-            if (employeeId && activity.employee?.toString() !== employeeId) {
+            if (targetAliases.length > 0 && !targetAliases.includes(activity.employee?.toString())) {
               continue;
             }
 
@@ -1478,7 +1502,7 @@ router.get("/employee-tasks", async (req, res) => {
             continue;
           }
 
-          if (employeeId && task.employee?.toString() !== employeeId) {
+          if (targetAliases.length > 0 && !targetAliases.includes(task.employee?.toString())) {
             continue;
           }
 
@@ -1751,16 +1775,18 @@ router.get("/project-access/:projectId", async (req, res) => {
     const placeholders = employeeIds.map(() => "?").join(",");
     const query = `SELECT 
       employee_id as id,
+      intern_id,
       employee_name as name,
       profile_url as profile,
       designation as role
     FROM employees_details 
-    WHERE employee_id IN (${placeholders})`;
+    WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})`;
 
-    const employees = await queryWithRetry(query, employeeIds);
+    const employees = await queryWithRetry(query, [...employeeIds, ...employeeIds]);
 
     const formattedEmployees = employees.map((emp) => ({
       id: emp.id,
+      intern_id: emp.intern_id,
       name: emp.name,
       profile: emp.profile,
       role: emp.role,
@@ -1809,8 +1835,31 @@ router.get("/employee-task-stats", async (req, res) => {
       };
     }
 
+    let statAliases = [employeeId];
+    try {
+      const cleanId = String(employeeId).trim();
+      const [empRows] = await queryWithRetry(
+        `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+        [cleanId, cleanId]
+      );
+      if (empRows) {
+        const row = Array.isArray(empRows) ? empRows[0] : empRows;
+        if (row) {
+          const s = new Set();
+          if (row.employee_id) s.add(String(row.employee_id).trim());
+          if (row.intern_id) s.add(String(row.intern_id).trim());
+          statAliases = [...s];
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching aliases for employee-task-stats:", err);
+    }
+
     const scheduledTasksQuery = {
-      $or: [{ employee: employeeId }, { "activities.employee": employeeId }],
+      $or: [
+        { employee: { $in: statAliases } },
+        { "activities.employee": { $in: statAliases } }
+      ],
       ...dateFilter,
     };
 
@@ -1821,17 +1870,15 @@ router.get("/employee-task-stats", async (req, res) => {
       const hasActivities = task.activities && task.activities.length > 0;
       if (hasActivities) {
         scheduledCount += task.activities.filter(
-          (act) => act.employee?.toString() === employeeId
+          (act) => statAliases.includes(act.employee?.toString())
         ).length;
-      } else if (task.employee?.toString() === employeeId) {
+      } else if (statAliases.includes(task.employee?.toString())) {
         scheduledCount++;
       }
     });
 
-    console.log(scheduledCount);
-
     const unscheduledQuery = {
-      employeeID: employeeId,
+      employeeID: { $in: statAliases },
       ...dateFilter,
     };
 

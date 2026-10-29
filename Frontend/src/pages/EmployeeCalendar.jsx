@@ -122,7 +122,7 @@ const EmployeeCalendar = () => {
         setTeamHead(user.teamHead || false);
 
         if (
-          !["Admin", "SBU", "Project Head"].includes(userRole) &&
+          !["Admin", "SBU", "Project Head"].includes(role) &&
           !user.teamHead &&
           id
         ) {
@@ -470,8 +470,11 @@ const EmployeeCalendar = () => {
           className="bg-white cursor-pointer flex items-center justify-between w-fit px-[1vw] py-[0.5vw]"
         >
           <span className="text-gray-800 text-[0.9vw] truncate">
-            {employees.find((e) => e.employee_id === selectedEmployee)
-              ?.employee_name || "Select Employee"}
+            {employees.find(
+              (e) =>
+                e.employee_id === selectedEmployee ||
+                (e.intern_id && e.intern_id === selectedEmployee)
+            )?.employee_name || "Select Employee"}
           </span>
 
           <ChevronDown

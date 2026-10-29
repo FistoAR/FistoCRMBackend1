@@ -17,7 +17,8 @@ import communicateIcon from "../../assets/ProjectPages/overview/communicate.webp
 import filterIcon from "../../assets/ProjectPages/filter.webp";
 import searchIcon from "../../assets/ProjectPages/search.webp";
 import clearFiterIcon from "../../assets/ProjectPages/overview/clear-filter.webp";
-import HistoryIcon from "../../assets/ProjectPages/overview/history.webp"
+import HistoryIcon from "../../assets/ProjectPages/overview/history.webp";
+import PrevIcon from "../../assets/ProjectPages/overview/back.webp";
 const calculateHoldDuration = (statusHistory) => {
   if (!statusHistory || !Array.isArray(statusHistory)) return 0;
   let totalHoldMs = 0;
@@ -927,17 +928,28 @@ export default function EmployeeTaskTable({
   };
 
   const fetchHistoryReports = async (task) => {
+    if (!task) return;
     setLoadingHistory(true);
     try {
-      const isActivityReport = task.isActivityReport || false;
+      const isActivityReport = Boolean(task.isActivityReport);
+      const resolvedProjectId =
+        task.projectId || task.project?.projectId || task.project?._id || tasks?.[0]?.projectId || "";
+      const resolvedTaskId = isActivityReport
+        ? task.taskId || task._id
+        : task._id || task.taskId;
+
+      if (!resolvedProjectId || !resolvedTaskId) {
+        setHistoryReports([]);
+        return;
+      }
 
       const params = new URLSearchParams({
-        projectId: task.projectId,
-        taskId: isActivityReport ? task.taskId : task._id,
+        projectId: String(resolvedProjectId),
+        taskId: String(resolvedTaskId),
       });
 
       if (task.activityId) {
-        params.append("activityId", task.activityId);
+        params.append("activityId", String(task.activityId));
       }
 
       const response = await fetch(
@@ -953,18 +965,19 @@ export default function EmployeeTaskTable({
       const data = await response.json();
 
       if (response.ok) {
-        setHistoryReports(data.reports);
+        setHistoryReports(Array.isArray(data.reports) ? data.reports : []);
       } else {
         notify({
           title: "Error",
-          message: data.message,
+          message: data.message || "Failed to load reports",
         });
         setHistoryReports([]);
       }
     } catch (error) {
+      console.error("fetchHistoryReports error:", error);
       notify({
         title: "Error",
-        message: error,
+        message: error?.message || "Failed to fetch history reports",
       });
       setHistoryReports([]);
     } finally {
@@ -1128,7 +1141,14 @@ export default function EmployeeTaskTable({
 
   const getEmployeeDetails = (employeeId) => {
     if (!employeeId) return null;
-    return currentEmployees?.find((emp) => emp.id === employeeId) || null;
+    const cleanId = String(employeeId).trim();
+    return (
+      currentEmployees?.find(
+        (emp) =>
+          String(emp.id || "").trim() === cleanId ||
+          (emp.intern_id && String(emp.intern_id).trim() === cleanId)
+      ) || null
+    );
   };
 
 

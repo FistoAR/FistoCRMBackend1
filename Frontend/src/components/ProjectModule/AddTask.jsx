@@ -103,13 +103,19 @@ export default function AddTask({
 
   const isTaskAfterCorrection = (taskCreatedAt, correctionDates) => {
     if (!correctionDates || correctionDates.length === 0) return false;
-    if (!taskCreatedAt) return false;
+    // New tasks currently being created (or tasks without createdAt yet) should automatically inherit the active correction
+    if (!taskCreatedAt) return true;
 
     const latestCorrectionDate = correctionDates[correctionDates.length - 1];
-    const correctionCreatedAt = new Date(latestCorrectionDate.createdAt);
+    // If the correction object doesn't have createdAt, or task was created recently, check against timestamps or start date
+    const correctionCreatedAt = latestCorrectionDate.createdAt
+      ? new Date(latestCorrectionDate.createdAt)
+      : latestCorrectionDate.startDate
+      ? new Date(latestCorrectionDate.startDate)
+      : new Date(0);
     const taskCreated = new Date(taskCreatedAt);
 
-    return taskCreated > correctionCreatedAt;
+    return taskCreated >= correctionCreatedAt;
   };
 
   const getEffectiveDates = (
@@ -123,7 +129,9 @@ export default function AddTask({
       correctionDates,
     );
 
-    if (isAfterCorrection && correctionDates && correctionDates.length > 0) {
+    // If today is within or extended by an active correction date, or task is created during/after correction
+    if (correctionDates && correctionDates.length > 0) {
+      const todayStr = getTodayDate();
       const latestCorrection = correctionDates[correctionDates.length - 1];
       let endDateValue = latestCorrection.date;
       try {
@@ -136,11 +144,20 @@ export default function AddTask({
         }
       }
 
-      return {
-        startDate: getTodayDate(),
-        endDate: endDateValue,
-        useCorrection: true,
-      };
+      // Check if project is currently operating in correction period
+      const isProjectInCorrection = correctionDates.some((correction) => {
+        const startStr = correction.startDate ? correction.startDate.split("T")[0] : "";
+        const endStr = correction.date ? new Date(correction.date).toISOString().split("T")[0] : "";
+        return todayStr >= startStr && (!endStr || todayStr <= endStr);
+      });
+
+      if (isAfterCorrection || isProjectInCorrection) {
+        return {
+          startDate: getTodayDate(),
+          endDate: endDateValue,
+          useCorrection: true,
+        };
+      }
     }
 
     return {

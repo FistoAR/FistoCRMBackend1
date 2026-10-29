@@ -163,13 +163,14 @@ router.get("/all-reports", async (req, res) => {
 
     // Fetch employee details in one query for O(1) Map lookup
     const employees = await queryWithRetry(`
-      SELECT employee_id, employee_name 
+      SELECT employee_id, intern_id, employee_name 
       FROM employees_details
     `);
 
     const employeeMap = new Map();
     (employees || []).forEach((emp) => {
-      employeeMap.set(emp.employee_id, emp.employee_name);
+      if (emp.employee_id) employeeMap.set(String(emp.employee_id).trim(), emp.employee_name);
+      if (emp.intern_id) employeeMap.set(String(emp.intern_id).trim(), emp.employee_name);
     });
 
     const enrichedReports = reports.map((task) => ({

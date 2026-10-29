@@ -15,7 +15,7 @@ router.get("/team-by-designation/:designation", async (req, res) => {
   try {
     const { designation } = req.params;
     const query = `
-      SELECT employee_id, employee_name, designation, working_status
+      SELECT employee_id, intern_id, employee_name, designation, working_status
       FROM employees_details
       WHERE designation = ?
       ORDER BY employee_name
@@ -34,7 +34,27 @@ router.get("/team-by-designation/:designation", async (req, res) => {
   }
 });
 
-// ✅ Shared helper: process a single attendance record into a full report
+// Helper to get all alias IDs for an employee (e.g. employee_id and intern_id)
+async function getEmployeeIdAliases(employeeId) {
+  if (!employeeId || employeeId === "all") return [];
+  const cleanId = String(employeeId).trim();
+  try {
+    const rows = await queryWithRetry(
+      `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+      [cleanId, cleanId]
+    );
+    if (rows && rows.length > 0) {
+      const ids = new Set();
+      if (rows[0].employee_id) ids.add(String(rows[0].employee_id).trim());
+      if (rows[0].intern_id) ids.add(String(rows[0].intern_id).trim());
+      ids.add(cleanId);
+      return Array.from(ids);
+    }
+  } catch (err) {
+    console.error("Error resolving employee ID aliases:", err);
+  }
+  return [cleanId];
+}
 function getISTDateString(date) {
   if (!date) return "";
   if (typeof date === "string" && date.length === 10 && date[4] === "-" && date[7] === "-") {
@@ -98,16 +118,41 @@ async function batchProcessAttendanceRecords(records) {
     return records;
   }
 
+  // Resolve all alias IDs (e.g. employee_id and intern_id) via employees_details join lookup
+  let allQueryEmployeeIds = [...employeeIds];
+  const empIdToCanonicalMap = new Map();
+  try {
+    const placeholders = employeeIds.map(() => "?").join(",");
+    const empDetails = await queryWithRetry(
+      `SELECT employee_id, intern_id FROM employees_details WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})`,
+      [...employeeIds, ...employeeIds]
+    );
+    (empDetails || []).forEach((row) => {
+      const canonicalId = row.employee_id;
+      if (row.employee_id) {
+        empIdToCanonicalMap.set(String(row.employee_id).trim(), canonicalId);
+        allQueryEmployeeIds.push(String(row.employee_id).trim());
+      }
+      if (row.intern_id) {
+        empIdToCanonicalMap.set(String(row.intern_id).trim(), canonicalId);
+        allQueryEmployeeIds.push(String(row.intern_id).trim());
+      }
+    });
+    allQueryEmployeeIds = [...new Set(allQueryEmployeeIds.filter(Boolean))];
+  } catch (err) {
+    console.error("Error fetching employee ID aliases in batchProcessAttendanceRecords:", err);
+  }
+
   // 2. Parallel batch fetch DayReports and UnscheduledTasks
   const [allDayReports, allUnscheduledTasks] = await Promise.all([
     DayReport.find({
-      employeeID: { $in: employeeIds },
+      employeeID: { $in: allQueryEmployeeIds },
       createdAt: { $gte: minStart, $lte: maxEnd },
     })
       .select("projectId taskId activityId employeeID createdAt")
       .lean(),
     UnscheduledTask.find({
-      employeeID: { $in: employeeIds },
+      employeeID: { $in: allQueryEmployeeIds },
       createdAt: { $gte: minStart, $lte: maxEnd },
     })
       .select(
@@ -116,22 +161,40 @@ async function batchProcessAttendanceRecords(records) {
       .lean(),
   ]);
 
-  // Index dayReports by `${employeeID}_${ISTDate}`
+  // Index dayReports by `${canonicalEmployeeID}_${ISTDate}` and `${rawEmployeeID}_${ISTDate}`
   const dayReportsByEmpDate = new Map();
   allDayReports.forEach((dr) => {
     const dStr = getISTDateString(dr.createdAt);
-    const key = `${dr.employeeID}_${dStr}`;
-    if (!dayReportsByEmpDate.has(key)) dayReportsByEmpDate.set(key, []);
-    dayReportsByEmpDate.get(key).push(dr);
+    const rawId = String(dr.employeeID || "").trim();
+    const canonicalId = empIdToCanonicalMap.get(rawId) || rawId;
+
+    const rawKey = `${rawId}_${dStr}`;
+    if (!dayReportsByEmpDate.has(rawKey)) dayReportsByEmpDate.set(rawKey, []);
+    dayReportsByEmpDate.get(rawKey).push(dr);
+
+    if (canonicalId !== rawId) {
+      const canonicalKey = `${canonicalId}_${dStr}`;
+      if (!dayReportsByEmpDate.has(canonicalKey)) dayReportsByEmpDate.set(canonicalKey, []);
+      dayReportsByEmpDate.get(canonicalKey).push(dr);
+    }
   });
 
-  // Index unscheduledTasks by `${employeeID}_${ISTDate}`
+  // Index unscheduledTasks by `${canonicalEmployeeID}_${ISTDate}` and `${rawEmployeeID}_${ISTDate}`
   const unscheduledByEmpDate = new Map();
   allUnscheduledTasks.forEach((ut) => {
     const dStr = getISTDateString(ut.createdAt);
-    const key = `${ut.employeeID}_${dStr}`;
-    if (!unscheduledByEmpDate.has(key)) unscheduledByEmpDate.set(key, []);
-    unscheduledByEmpDate.get(key).push(ut);
+    const rawId = String(ut.employeeID || "").trim();
+    const canonicalId = empIdToCanonicalMap.get(rawId) || rawId;
+
+    const rawKey = `${rawId}_${dStr}`;
+    if (!unscheduledByEmpDate.has(rawKey)) unscheduledByEmpDate.set(rawKey, []);
+    unscheduledByEmpDate.get(rawKey).push(ut);
+
+    if (canonicalId !== rawId) {
+      const canonicalKey = `${canonicalId}_${dStr}`;
+      if (!unscheduledByEmpDate.has(canonicalKey)) unscheduledByEmpDate.set(canonicalKey, []);
+      unscheduledByEmpDate.get(canonicalKey).push(ut);
+    }
   });
 
   // 3. Collect unique projectIds and taskIds from dayReports
@@ -160,7 +223,7 @@ async function batchProcessAttendanceRecords(records) {
             .lean()
         : [],
       TaskReports.find({
-        employeeID: { $in: employeeIds },
+        employeeID: { $in: allQueryEmployeeIds },
         createdAt: { $gte: minStart, $lte: extendedMaxEnd },
       })
         .select(
@@ -168,7 +231,7 @@ async function batchProcessAttendanceRecords(records) {
         )
         .lean(),
       TaskReportsReview.find({
-        employeeID: { $in: employeeIds },
+        employeeID: { $in: allQueryEmployeeIds },
         createdAt: { $gte: minStart, $lte: extendedMaxEnd },
       })
         .select(
@@ -187,16 +250,26 @@ async function batchProcessAttendanceRecords(records) {
   taskReportsList.forEach((tr) => {
     const dStr = getISTDateString(tr.createdAt);
     const act = tr.activityId ? String(tr.activityId) : "";
-    const key = `${tr.projectId}_${tr.taskId}_${act}_${tr.employeeID}_${dStr}`;
-    taskReportMap.set(key, tr);
+    const rawId = String(tr.employeeID || "").trim();
+    const canonicalId = empIdToCanonicalMap.get(rawId) || rawId;
+
+    taskReportMap.set(`${tr.projectId}_${tr.taskId}_${act}_${rawId}_${dStr}`, tr);
+    if (canonicalId !== rawId) {
+      taskReportMap.set(`${tr.projectId}_${tr.taskId}_${act}_${canonicalId}_${dStr}`, tr);
+    }
   });
 
   const reviewReportMap = new Map();
   reviewsList.forEach((rr) => {
     const dStr = getISTDateString(rr.createdAt);
     const act = rr.activityId ? String(rr.activityId) : "";
-    const key = `${rr.projectId}_${rr.taskId}_${act}_${rr.employeeID}_${dStr}`;
-    reviewReportMap.set(key, rr);
+    const rawId = String(rr.employeeID || "").trim();
+    const canonicalId = empIdToCanonicalMap.get(rawId) || rawId;
+
+    reviewReportMap.set(`${rr.projectId}_${rr.taskId}_${act}_${rawId}_${dStr}`, rr);
+    if (canonicalId !== rawId) {
+      reviewReportMap.set(`${rr.projectId}_${rr.taskId}_${act}_${canonicalId}_${dStr}`, rr);
+    }
   });
 
   // 4. Transform records into final output synchronously (O(1) lookups)
@@ -418,22 +491,27 @@ router.get("/all-reports", async (req, res) => {
       "SBU",
     ];
 
-    // 1. Fetch Attendance Records
+    const targetAliases = (employee_id && employee_id !== "all")
+      ? await getEmployeeIdAliases(employee_id)
+      : [];
+
+    // 1. Fetch Attendance Records - Join on employee_id OR intern_id
     let attendanceQuery = `
-      SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
+      SELECT ed.employee_id, ed.employee_name, att.login_date AS report_date,
              att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out,
              ed.designation
       FROM attendance att 
-      JOIN employees_details ed ON att.employee_id = ed.employee_id
+      JOIN employees_details ed ON (att.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND att.employee_id = ed.intern_id))
       WHERE 1=1
     `;
 
     const params = [];
     let filterClause = "";
 
-    if (employee_id && employee_id !== "all") {
-      filterClause += ` AND att.employee_id = ?`;
-      params.push(employee_id);
+    if (targetAliases.length > 0) {
+      const phs = targetAliases.map(() => "?").join(",");
+      filterClause += ` AND (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR att.employee_id IN (${phs}))`;
+      params.push(...targetAliases, ...targetAliases, ...targetAliases);
     } else if (isTeamHead === "true" && designation) {
       filterClause += ` AND ed.designation = ?`;
       params.push(designation);
@@ -459,25 +537,26 @@ router.get("/all-reports", async (req, res) => {
       params.push(end_date);
     }
     if (search) {
-      filterClause += ` AND att.employee_name LIKE ?`;
-      params.push(`%${search}%`);
+      filterClause += ` AND (att.employee_name LIKE ? OR ed.employee_name LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
     }
 
     attendanceQuery += filterClause;
 
-    // 2. Fetch Leave Records
+    // 2. Fetch Leave Records - Join on employee_id OR intern_id
     let leaveQuery = `
       SELECT lr.*, ed.employee_name, ed.designation 
       FROM leave_requests lr
-      JOIN employees_details ed ON lr.employee_id = ed.employee_id
+      JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       WHERE 1=1
     `;
     const leaveParams = [];
     let leaveFilterClause = "";
 
-    if (employee_id && employee_id !== "all") {
-      leaveFilterClause += ` AND lr.employee_id = ?`;
-      leaveParams.push(employee_id);
+    if (targetAliases.length > 0) {
+      const phs = targetAliases.map(() => "?").join(",");
+      leaveFilterClause += ` AND (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR lr.employee_id IN (${phs}))`;
+      leaveParams.push(...targetAliases, ...targetAliases, ...targetAliases);
     } else if (isTeamHead === "true" && designation) {
       leaveFilterClause += ` AND ed.designation = ?`;
       leaveParams.push(designation);
@@ -512,8 +591,8 @@ router.get("/all-reports", async (req, res) => {
       createdAt: { $exists: true, $ne: null },
     };
 
-    if (employee_id && employee_id !== "all") {
-      mongoTaskMatch.employeeID = employee_id;
+    if (targetAliases.length > 0) {
+      mongoTaskMatch.employeeID = { $in: targetAliases };
     }
 
     if (start_date || end_date) {
@@ -545,7 +624,7 @@ router.get("/all-reports", async (req, res) => {
       queryWithRetry(attendanceQuery, params),
       queryWithRetry(leaveQuery, leaveParams),
       queryWithRetry(`
-        SELECT employee_id, employee_name, designation
+        SELECT employee_id, intern_id, employee_name, designation
         FROM employees_details
       `),
       DayReport.find(mongoTaskMatch).select("employeeID createdAt").lean(),
@@ -554,7 +633,8 @@ router.get("/all-reports", async (req, res) => {
 
     const employeeMap = new Map();
     (allEmployeesList || []).forEach((emp) => {
-      employeeMap.set(emp.employee_id, emp);
+      if (emp.employee_id) employeeMap.set(String(emp.employee_id).trim(), emp);
+      if (emp.intern_id) employeeMap.set(String(emp.intern_id).trim(), emp);
     });
 
     // 4. Expand leaves and combine
@@ -608,8 +688,8 @@ router.get("/all-reports", async (req, res) => {
         // Respect same designation/role filters as attendance query
         if (isTeamHead === "true" && designation) {
           if (desig !== designation) return;
-        } else if (employee_id && employee_id !== "all") {
-          if (empId !== employee_id) return;
+        } else if (targetAliases.length > 0) {
+          if (!targetAliases.includes(empId) && !targetAliases.includes(emp.employee_id) && !targetAliases.includes(emp.intern_id)) return;
         } else {
           const isMgmt = ADMIN_DESIGNATIONS.some((d) =>
             desig.toLowerCase().includes(d.toLowerCase())
@@ -625,8 +705,13 @@ router.get("/all-reports", async (req, res) => {
           return;
         }
 
+        const canonicalEmpId = emp.employee_id || empId;
+        const canonicalKey = `${canonicalEmpId}_${rDate}`;
+
+        if (attendanceMap.has(canonicalKey)) return;
+
         const standaloneTaskRecord = {
-          employee_id: empId,
+          employee_id: canonicalEmpId,
           employee_name: emp.employee_name,
           designation: desig,
           report_date: rDate,
@@ -640,6 +725,7 @@ router.get("/all-reports", async (req, res) => {
         };
 
         attendanceMap.set(key, standaloneTaskRecord);
+        attendanceMap.set(canonicalKey, standaloneTaskRecord);
         combinedReports.push(standaloneTaskRecord);
       }
     });
@@ -721,14 +807,17 @@ router.get("/management-reports", async (req, res) => {
     }
 
     const { start_date, end_date, employee_id } = req.query;
+    const mgmtAliases = (employee_id && employee_id !== "all")
+      ? await getEmployeeIdAliases(employee_id)
+      : [];
 
     // Fetch Attendance (Login Details) - Base for all reports
     let attendanceQuery = `
-      SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
+      SELECT ed.employee_id, ed.employee_name, att.login_date AS report_date,
              att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out,
              ed.designation
       FROM attendance att
-      JOIN employees_details ed ON att.employee_id = ed.employee_id
+      JOIN employees_details ed ON (att.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND att.employee_id = ed.intern_id))
       WHERE (ed.designation LIKE '%Project Head%' 
          OR ed.designation LIKE '%SBU%' 
          OR ed.designation LIKE '%HR%' 
@@ -736,9 +825,10 @@ router.get("/management-reports", async (req, res) => {
     `;
     const params = [];
 
-    if (employee_id && employee_id !== "all") {
-      attendanceQuery += ` AND att.employee_id = ?`;
-      params.push(employee_id);
+    if (mgmtAliases.length > 0) {
+      const phs = mgmtAliases.map(() => "?").join(",");
+      attendanceQuery += ` AND (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR att.employee_id IN (${phs}))`;
+      params.push(...mgmtAliases, ...mgmtAliases, ...mgmtAliases);
     }
     if (start_date) {
       attendanceQuery += ` AND att.login_date >= ?`;
@@ -757,13 +847,14 @@ router.get("/management-reports", async (req, res) => {
              DATE(CONVERT_TZ(wd.created_at, '+00:00', '+05:30')) as report_date,
              ed.employee_name, ed.designation
       FROM workdone_reports wd
-      LEFT JOIN employees_details ed ON wd.employee_id = ed.employee_id
+      LEFT JOIN employees_details ed ON (wd.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND wd.employee_id = ed.intern_id))
       WHERE 1=1
     `;
     const workdoneParams = [];
-    if (employee_id && employee_id !== "all") {
-      workdoneQuery += ` AND wd.employee_id = ?`;
-      workdoneParams.push(employee_id);
+    if (mgmtAliases.length > 0) {
+      const phs = mgmtAliases.map(() => "?").join(",");
+      workdoneQuery += ` AND (wd.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR ed.employee_id IN (${phs}))`;
+      workdoneParams.push(...mgmtAliases, ...mgmtAliases, ...mgmtAliases);
     }
     if (start_date) {
       workdoneQuery += ` AND DATE(CONVERT_TZ(wd.created_at, '+00:00', '+05:30')) >= ?`;
@@ -779,12 +870,14 @@ router.get("/management-reports", async (req, res) => {
       SELECT mta.employee_id, mta.remarks, mt.task_name, mta.assigned_date as report_date
       FROM marketing_task_assignments mta
       JOIN marketing_tasks mt ON mta.task_id = mt.task_id
+      LEFT JOIN employees_details ed ON (mta.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND mta.employee_id = ed.intern_id))
       WHERE 1=1
     `;
     const marketingParams = [];
-    if (employee_id && employee_id !== "all") {
-      marketingQuery += ` AND mta.employee_id = ?`;
-      marketingParams.push(employee_id);
+    if (mgmtAliases.length > 0) {
+      const phs = mgmtAliases.map(() => "?").join(",");
+      marketingQuery += ` AND (mta.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR ed.employee_id IN (${phs}))`;
+      marketingParams.push(...mgmtAliases, ...mgmtAliases, ...mgmtAliases);
     }
     if (start_date) {
       marketingQuery += ` AND mta.assigned_date >= ?`;
@@ -799,7 +892,7 @@ router.get("/management-reports", async (req, res) => {
     let leaveQuery = `
       SELECT lr.*, ed.employee_name, ed.designation 
       FROM leave_requests lr
-      JOIN employees_details ed ON lr.employee_id = ed.employee_id
+      JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       WHERE 1=1
       AND (ed.designation LIKE '%Project Head%' 
           OR ed.designation LIKE '%SBU%' 
@@ -808,9 +901,10 @@ router.get("/management-reports", async (req, res) => {
     `;
     const leaveParams = [];
 
-    if (employee_id && employee_id !== "all") {
-      leaveQuery += ` AND lr.employee_id = ?`;
-      leaveParams.push(employee_id);
+    if (mgmtAliases.length > 0) {
+      const phs = mgmtAliases.map(() => "?").join(",");
+      leaveQuery += ` AND (lr.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR ed.employee_id IN (${phs}))`;
+      leaveParams.push(...mgmtAliases, ...mgmtAliases, ...mgmtAliases);
     }
     if (start_date) {
       leaveQuery += ` AND COALESCE(lr.to_date, lr.from_date) >= ?`;
@@ -825,8 +919,8 @@ router.get("/management-reports", async (req, res) => {
     const mgmtMongoMatch = {
       createdAt: { $exists: true, $ne: null }
     };
-    if (employee_id && employee_id !== "all") {
-      mgmtMongoMatch.employeeID = employee_id;
+    if (mgmtAliases.length > 0) {
+      mgmtMongoMatch.employeeID = { $in: mgmtAliases };
     }
     if (start_date || end_date) {
       mgmtMongoMatch.createdAt = {};
@@ -863,7 +957,7 @@ router.get("/management-reports", async (req, res) => {
         .select("employeeID createdAt projectName taskName outcomes reports status")
         .lean(),
       queryWithRetry(`
-        SELECT employee_id, employee_name, designation
+        SELECT employee_id, intern_id, employee_name, designation
         FROM employees_details
         WHERE designation LIKE '%Project Head%' 
            OR designation LIKE '%SBU%' 
@@ -1066,16 +1160,19 @@ router.get("/reports/:employee_id", async (req, res) => {
       fetchAll,
     } = req.query;
 
-    // 1. Fetch Attendance
+    const empAliases = await getEmployeeIdAliases(employee_id);
+    const phs = empAliases.map(() => "?").join(",");
+
+    // 1. Fetch Attendance - Join on employee_id OR intern_id
     let attendanceQuery = `
-      SELECT att.employee_id, att.employee_name, att.login_date AS report_date,
+      SELECT ed.employee_id, ed.employee_name, att.login_date AS report_date,
              att.total_hours, att.morning_in, att.morning_out, att.afternoon_in, att.afternoon_out,
              ed.designation
       FROM attendance att
-      JOIN employees_details ed ON att.employee_id = ed.employee_id
-      WHERE att.employee_id = ?
+      JOIN employees_details ed ON (att.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND att.employee_id = ed.intern_id))
+      WHERE (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR att.employee_id IN (${phs}))
     `;
-    const params = [employee_id];
+    const params = [...empAliases, ...empAliases, ...empAliases];
 
     if (start_date) {
       attendanceQuery += ` AND att.login_date >= ?`;
@@ -1086,14 +1183,14 @@ router.get("/reports/:employee_id", async (req, res) => {
       params.push(end_date);
     }
 
-    // 2. Fetch Leaves
+    // 2. Fetch Leaves - Join on employee_id OR intern_id
     let leaveQuery = `
       SELECT lr.*, ed.employee_name, ed.designation 
       FROM leave_requests lr
-      JOIN employees_details ed ON lr.employee_id = ed.employee_id
-      WHERE lr.employee_id = ?
+      JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
+      WHERE (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR lr.employee_id IN (${phs}))
     `;
-    const leaveParams = [employee_id];
+    const leaveParams = [...empAliases, ...empAliases, ...empAliases];
 
     if (start_date) {
       leaveQuery += ` AND COALESCE(lr.to_date, lr.from_date) >= ?`;
@@ -1104,9 +1201,9 @@ router.get("/reports/:employee_id", async (req, res) => {
       leaveParams.push(end_date);
     }
 
-    // 3. Setup MongoDB Task Days for this employee
+    // 3. Setup MongoDB Task Days for this employee and any intern aliases
     const empMongoMatch = {
-      employeeID: employee_id,
+      employeeID: { $in: empAliases },
       createdAt: { $exists: true, $ne: null },
     };
 
@@ -1139,8 +1236,8 @@ router.get("/reports/:employee_id", async (req, res) => {
       queryWithRetry(attendanceQuery, params),
       queryWithRetry(leaveQuery, leaveParams),
       queryWithRetry(
-        `SELECT employee_id, employee_name, designation FROM employees_details WHERE employee_id = ?`,
-        [employee_id]
+        `SELECT employee_id, intern_id, employee_name, designation FROM employees_details WHERE employee_id IN (${phs}) OR intern_id IN (${phs}) LIMIT 1`,
+        [...empAliases, ...empAliases]
       ),
       DayReport.find(empMongoMatch).select("employeeID createdAt").lean(),
       UnscheduledTask.find(empMongoMatch).select("employeeID createdAt").lean(),
@@ -1358,15 +1455,20 @@ router.put("/update-unscheduled-task/:taskId", async (req, res) => {
 router.get("/statistics", async (req, res) => {
   try {
     const { employee_id, month, year } = req.query;
+    const statAliases = (employee_id && employee_id !== "all")
+      ? await getEmployeeIdAliases(employee_id)
+      : [];
+
     let query = `
       SELECT COUNT(DISTINCT att.login_date) as total_days, SUM(att.total_hours) as total_hours,
              COUNT(DISTINCT att.employee_id) as total_employees, AVG(att.total_hours) as avg_hours_per_day
       FROM attendance att WHERE 1=1
     `;
     const params = [];
-    if (employee_id && employee_id !== "all") {
-      query += ` AND att.employee_id = ?`;
-      params.push(employee_id);
+    if (statAliases.length > 0) {
+      const phs = statAliases.map(() => "?").join(",");
+      query += ` AND att.employee_id IN (${phs})`;
+      params.push(...statAliases);
     }
     if (month && year) {
       query += ` AND MONTH(att.login_date) = ? AND YEAR(att.login_date) = ?`;
@@ -1375,8 +1477,9 @@ router.get("/statistics", async (req, res) => {
 
     const mysqlStats = await queryWithRetry(query, params);
     let mongoQuery = {};
-    if (employee_id && employee_id !== "all")
-      mongoQuery.employeeID = employee_id;
+    if (statAliases.length > 0) {
+      mongoQuery.employeeID = { $in: statAliases };
+    }
     if (month && year) {
       mongoQuery.createdAt = {
         $gte: new Date(year, month - 1, 1),
@@ -1386,7 +1489,7 @@ router.get("/statistics", async (req, res) => {
 
     const totalProjects = await Project_Details.countDocuments({
       employees:
-        employee_id && employee_id !== "all" ? employee_id : { $exists: true },
+        statAliases.length > 0 ? { $in: statAliases } : { $exists: true },
     });
     const totalScheduledTasks = await DayReport.countDocuments(mongoQuery);
     const totalUnscheduledTasks =

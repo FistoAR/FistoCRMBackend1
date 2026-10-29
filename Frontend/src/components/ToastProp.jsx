@@ -76,7 +76,11 @@ const Notification = ({
 
         <div className="flex-1">
           <p className="font-semibold text-black text-[0.9vw]">{title}</p>
-          <p className="text-[0.8vw] opacity-90 text-gray-600 whitespace-pre-line">{message}</p>
+          <p className="text-[0.8vw] opacity-90 text-gray-600 whitespace-pre-line">
+            {typeof message === "object" && message !== null
+              ? message.message || JSON.stringify(message)
+              : String(message ?? "")}
+          </p>
         </div>
 
         <button className="text-[0.95vw] font-bold px-[0.4vw] text-gray-600 cursor-pointer" onClick={onClose}>

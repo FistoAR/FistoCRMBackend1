@@ -1369,7 +1369,7 @@ const TodayTasksCard = ({
       </div>
       <div
         style={{ borderRadius: "0 0 0.42vw 0.42vw" }}
-        className="overflow-y-auto min-h-0 max-h-[90%] bg-white text-gray-700"
+        className="overflow-y-auto custom-scroll min-h-0 max-h-[90%] bg-white text-gray-700"
       >
         {renderList()}
       </div>
@@ -1408,6 +1408,20 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
         setCelebrations(filtered);
         setCurrentIndex(0);
         setImgError(false);
+
+        // Preload all celebration images so they switch instantly without delay
+        filtered.forEach((c) => {
+          if (c.imageUrl) {
+            const raw = c.imageUrl;
+            const fullUrl = raw.startsWith("http") || raw.startsWith("data:")
+              ? raw
+              : raw.startsWith("/api/")
+                ? `${(apiBaseUrl || "").replace(/\/api\/?$/, "")}${raw}`
+                : `${API_URL1}${raw}`;
+            const preloader = new Image();
+            preloader.src = fullUrl;
+          }
+        });
       } catch {
         setCelebrations([]);
       } finally {
@@ -1420,7 +1434,7 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
   // Auto-rotate — pauses on hover
   useEffect(() => {
     if (celebrations.length <= 1 || isHovered) return;
-    intervalRef.current = setInterval(() => goNext(), 2000);
+    intervalRef.current = setInterval(() => goNext(), 3500);
     return () => clearInterval(intervalRef.current);
   }, [celebrations.length, isHovered]);
 
@@ -1578,6 +1592,7 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                         }}
                       >
                         <img
+                          key={imgUrl}
                           src={imgUrl}
                           alt={item.occasion}
                           style={{
@@ -1665,7 +1680,14 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                           {celebrations.map((_, i) => (
                             <div
                               key={i}
-                              onClick={() => setCurrentIndex(i)}
+                              onClick={() => {
+                                if (i !== currentIndex) {
+                                  triggerSlide(
+                                    i > currentIndex ? "left" : "right",
+                                    () => setCurrentIndex(i),
+                                  );
+                                }
+                              }}
                               style={{
                                 cursor: "pointer",
                                 width: i === currentIndex ? "1vw" : "0.35vw",
@@ -1764,9 +1786,22 @@ const AnnouncementCard = ({ apiBaseUrl }) => {
           `${apiBaseUrl}/celebrations/announcements?date=${dateStr}`,
         );
         const data = await res.json();
-        setAnnouncements(data.status ? data.announcements : []);
+        const list = data.status ? data.announcements : [];
+        setAnnouncements(list);
         setCurrentIndex(0);
         setImgErrors({});
+
+        // Preload announcement images
+        list.forEach((item) => {
+          if (item.imageUrl) {
+            const raw = item.imageUrl;
+            const fullUrl = raw.startsWith("http")
+              ? raw
+              : `${API_URL1}${raw}`;
+            const preloader = new Image();
+            preloader.src = fullUrl;
+          }
+        });
       } catch {
         setAnnouncements([]);
       } finally {
@@ -1876,6 +1911,7 @@ const AnnouncementCard = ({ apiBaseUrl }) => {
             onMouseLeave={() => setIsHovered(false)}
           >
             <div
+              className="custom-scroll"
               style={{
                 flex: 1,
                 minHeight: 0,
@@ -2025,8 +2061,6 @@ const AnnouncementItem = ({ item, apiUrl1, imgError, onImgError }) => {
               lineHeight: "1.55",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
-              maxHeight: showImg ? "8vw" : "14vw",
-              overflowY: "auto",
               margin: 0,
             }}
           >
@@ -2037,6 +2071,7 @@ const AnnouncementItem = ({ item, apiUrl1, imgError, onImgError }) => {
       {showImg && (
         <div style={{ borderRadius: "0.45vw", overflow: "hidden" }}>
           <img
+            key={imgUrl}
             src={imgUrl}
             alt="announcement"
             style={{ width: "100%", objectFit: "cover", display: "block" }}
@@ -2519,6 +2554,7 @@ const MeetingsCard = ({ apiBaseUrl }) => {
       {/* ── Meeting list ── */}
       <div
         ref={containerRef}
+        className="custom-scroll"
         style={{
           flex: 1,
           minHeight: 0,

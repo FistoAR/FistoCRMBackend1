@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import CreateTask from "./AddTask";
 import Timeline from "./Timeline";
@@ -125,6 +125,7 @@ export default function Overview() {
     openActivityId,
   } = location.state || {};
 
+  const queryClient = useQueryClient();
   const [tableShow, setTableShow] = useState(autoOpenReport ? "list" : "timeline");
   const [buttonLoading, setbuttonLoading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
@@ -585,6 +586,9 @@ export default function Overview() {
           title: "Success",
           message: "Updated correction date successfully!",
         });
+        await queryClient.invalidateQueries({ queryKey: ["projectBasic", projectId] });
+        await queryClient.invalidateQueries({ queryKey: ["projectTasks", projectId] });
+        refetch();
         setRefreshTrigger((prev) => prev + 1);
       } else {
         notify({ title: "Error", message: "Updating correction date failed" });
@@ -616,6 +620,9 @@ export default function Overview() {
           title: "Success",
           message: data.message,
         });
+        await queryClient.invalidateQueries({ queryKey: ["projectBasic", projectId] });
+        await queryClient.invalidateQueries({ queryKey: ["projectTasks", projectId] });
+        refetch();
         setRefreshTrigger((prev) => prev + 1);
       } else {
         notify({

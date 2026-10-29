@@ -15,15 +15,15 @@ router.post("/", (req, res) => {
 
   const query = `
     SELECT 
-      id, employee_id, employee_name, designation, team_head,
+      id, employee_id, intern_id, employee_name, designation, team_head,
       email_personal, email_official, password, profile_url,
       working_status, employment_type
     FROM employees_details 
-    WHERE (employee_id = ? OR email_personal = ? OR email_official = ?)
+    WHERE (employee_id = ? OR intern_id = ? OR email_personal = ? OR email_official = ?)
     LIMIT 1
   `;
 
-  db.pool.query(query, [emailOrUsername, emailOrUsername, emailOrUsername], (err, results) => {  // ← CHANGED
+  db.pool.query(query, [emailOrUsername, emailOrUsername, emailOrUsername, emailOrUsername], (err, results) => {
     if (err) {
       console.error("Login query error:", err);
       return res.status(500).json({

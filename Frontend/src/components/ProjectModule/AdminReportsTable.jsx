@@ -244,7 +244,14 @@ export default function AdminReportsTable({
 
   const getEmployeeDetails = (employeeId) => {
     if (!employeeId) return null;
-    return currentEmployees?.find((emp) => emp.id === employeeId) || null;
+    const cleanId = String(employeeId).trim();
+    return (
+      currentEmployees?.find(
+        (emp) =>
+          String(emp.id || "").trim() === cleanId ||
+          (emp.intern_id && String(emp.intern_id).trim() === cleanId)
+      ) || null
+    );
   };
 
   const departmentOptions = useMemo(() => {

@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import API_BASE_URL from "../config/api";
@@ -84,6 +84,7 @@ function SidebarLink({
   subIndex,
   isCollapsed,
   onHover,
+  onClick,
 }) {
   const { pathname } = useLocation();
   const isActive = pathname === to || pathname.startsWith(to + "/");
@@ -95,6 +96,7 @@ function SidebarLink({
       return (
         <Link
           to={to}
+          onClick={onClick}
           className="flex items-center justify-between px-[0.7vw] py-[0.6vh] bg-white shadow-sm rounded-xl text-black font-semibold text-[0.88vw] min-h-[4vh] w-full transition-all duration-150 outline-none focus:outline-none"
         >
           <div className="flex items-center gap-[0.6vw] min-w-0 flex-1">
@@ -124,6 +126,7 @@ function SidebarLink({
       return (
         <Link
           to={to}
+          onClick={onClick}
           className="flex items-center px-[0.7vw] py-[0.6vh] text-gray-700 font-medium hover:bg-white hover:text-black rounded-xl text-[0.88vw] min-h-[4vh] w-full gap-[0.6vw] transition-all duration-150 outline-none focus:outline-none"
         >
           <span className="flex items-center justify-center w-[1.8vw] h-[1.8vw] min-w-[24px] min-h-[24px] rounded-lg bg-slate-200/80 text-gray-700 text-[0.75vw] font-semibold shrink-0">
@@ -153,6 +156,7 @@ function SidebarLink({
   return (
     <Link
       to={to}
+      onClick={onClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       className={`group relative flex items-center rounded-xl transition-all duration-150 w-full px-4 
@@ -340,6 +344,7 @@ const getMenuConfig = () => ({
 
 export default function Sidebar() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [designation, setDesignation] = useState("");
   const [employeementType, setEmployeementType] = useState("");
   const [isTeamHead, setIsTeamHead] = useState(false);
@@ -358,13 +363,42 @@ export default function Sidebar() {
   });
 
   const toggleGroup = (group) => {
-    // If collapsed, expand the sidebar first before toggling group
+    const isOpening = isCollapsed || !openGroups[group];
+    const groupItems = sortedAndGroupedMenu[group] || [];
+
+    // If opening, navigate to the first tab if available
+    if (isOpening && groupItems.length > 0) {
+      const firstTabPath = groupItems[0]?.path;
+      if (firstTabPath && pathname !== firstTabPath) {
+        navigate(firstTabPath);
+      }
+    }
+
     if (isCollapsed) {
       setIsCollapsed(false);
-      setOpenGroups((prev) => ({ ...prev, [group]: true }));
+      setOpenGroups({
+        marketing: group === "marketing",
+        projects: group === "projects",
+        hr: group === "hr",
+        management: group === "management",
+      });
     } else {
-      setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }));
+      setOpenGroups({
+        marketing: group === "marketing" ? !openGroups.marketing : false,
+        projects: group === "projects" ? !openGroups.projects : false,
+        hr: group === "hr" ? !openGroups.hr : false,
+        management: group === "management" ? !openGroups.management : false,
+      });
     }
+  };
+
+  const closeAllGroups = () => {
+    setOpenGroups({
+      marketing: false,
+      projects: false,
+      hr: false,
+      management: false,
+    });
   };
 
   const handleLinkHover = (label, y, show) => {
@@ -665,6 +699,21 @@ export default function Sidebar() {
     );
   }, [pathname, sortedAndGroupedMenu.management]);
 
+  // Keep only the active group expanded if current page is within that category
+  useEffect(() => {
+    if (isMarketingActive) {
+      setOpenGroups({ marketing: true, projects: false, hr: false, management: false });
+    } else if (isProjectsActive) {
+      setOpenGroups({ marketing: false, projects: true, hr: false, management: false });
+    } else if (isHRActive) {
+      setOpenGroups({ marketing: false, projects: false, hr: true, management: false });
+    } else if (isManagementActive) {
+      setOpenGroups({ marketing: false, projects: false, hr: false, management: true });
+    } else {
+      setOpenGroups({ marketing: false, projects: false, hr: false, management: false });
+    }
+  }, [isMarketingActive, isProjectsActive, isHRActive, isManagementActive]);
+
   return (
     <aside
       className="relative flex flex-col bg-white border-r border-gray-100 text-[1vw] select-none h-screen flex-shrink-0 transition-all duration-300 ease-in-out font-sans"
@@ -720,6 +769,7 @@ export default function Sidebar() {
             label={sortedAndGroupedMenu.dashboard.label}
             isCollapsed={isCollapsed}
             onHover={handleLinkHover}
+            onClick={closeAllGroups}
           />
         )}
 
@@ -895,6 +945,7 @@ export default function Sidebar() {
                   label={getDisplayLabel(item.label)}
                   isCollapsed={isCollapsed}
                   onHover={handleLinkHover}
+                  onClick={closeAllGroups}
                 />
               );
             })}

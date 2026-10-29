@@ -189,9 +189,10 @@ router.post("/request", async (req, res) => {
         employee_name as name,
         designation as department
       FROM employees_details
-      WHERE employee_id = ?
+      WHERE employee_id = ? OR (intern_id IS NOT NULL AND intern_id = ?)
+      LIMIT 1
     `;
-    const employeeResult = await queryWithRetry(employeeQuery, [employeeID]);
+    const employeeResult = await queryWithRetry(employeeQuery, [employeeID, employeeID]);
     const employeeName =
       employeeResult.length > 0 ? employeeResult[0].name : "Unknown";
 
@@ -564,10 +565,11 @@ router.get("/requests", async (req, res) => {
           designation as department,
           profile_url as profile
         FROM employees_details
-        WHERE employee_id = ?
+        WHERE employee_id = ? OR (intern_id IS NOT NULL AND intern_id = ?)
+        LIMIT 1
       `;
 
-          const empName = await queryWithRetry(query, [request.employeeID]);
+          const empName = await queryWithRetry(query, [request.employeeID, request.employeeID]);
 
           request.employeeName =
             empName.length > 0 ? empName[0].name : "Unknown";
@@ -609,12 +611,30 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
       return res.status(200).json(cached.data);
     }
 
+    let taskAliases = [employeeId];
+    try {
+      const cleanId = String(employeeId).trim();
+      const empRows = await queryWithRetry(
+        `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+        [cleanId, cleanId]
+      );
+      if (empRows && empRows.length > 0) {
+        const row = empRows[0];
+        const s = new Set();
+        if (row.employee_id) s.add(String(row.employee_id).trim());
+        if (row.intern_id) s.add(String(row.intern_id).trim());
+        taskAliases = [...s];
+      }
+    } catch (err) {
+      console.error("Error fetching aliases for employee-tasks:", err);
+    }
+
     const rawTasks = await Tasks.find({
       $or: [
-        { employee: employeeId },
-        { supportingPersons: employeeId },
-        { "activities.employee": employeeId },
-        { "activities.supportingPersons": employeeId }
+        { employee: { $in: taskAliases } },
+        { supportingPersons: { $in: taskAliases } },
+        { "activities.employee": { $in: taskAliases } },
+        { "activities.supportingPersons": { $in: taskAliases } }
       ],
     })
       .sort({ createdAt: -1 })
@@ -731,8 +751,8 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
       const project = projectMap.get(task.projectId?.toString()) || null;
       let projectDetails = { ...project };
 
-      const isTaskAssigned = task.employee === employeeId;
-      const isTaskSupporting = task.supportingPersons?.includes(employeeId);
+      const isTaskAssigned = taskAliases.includes(task.employee);
+      const isTaskSupporting = task.supportingPersons?.some(p => taskAliases.includes(p));
       const taskPercentage = task.percentage || 0;
 
       let taskIsUnderReview = false;
@@ -752,8 +772,8 @@ router.get("/employee-tasks/:employeeId", async (req, res) => {
         assignedActivities = task.activities
           .filter(
             (activity) =>
-              activity.employee === employeeId ||
-              activity.supportingPersons?.includes(employeeId)
+              taskAliases.includes(activity.employee) ||
+              activity.supportingPersons?.some(p => taskAliases.includes(p))
           )
           .map((activity) => {
             const latestActivityReview = latestActivityReviewMap.get(activity._id?.toString());
@@ -899,6 +919,24 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
       });
     }
 
+    let calendarAliases = [employeeId];
+    try {
+      const cleanId = String(employeeId).trim();
+      const empRows = await queryWithRetry(
+        `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+        [cleanId, cleanId]
+      );
+      if (empRows && empRows.length > 0) {
+        const row = empRows[0];
+        const s = new Set();
+        if (row.employee_id) s.add(String(row.employee_id).trim());
+        if (row.intern_id) s.add(String(row.intern_id).trim());
+        calendarAliases = [...s];
+      }
+    } catch (err) {
+      console.error("Error fetching aliases for employee-calendar-tasks:", err);
+    }
+
     const concurrentProjects = await Project_Details.find()
       .select("_id")
       .lean();
@@ -907,7 +945,10 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
 
     let taskQuery = {
       projectId: { $in: projectIds },
-      $or: [{ employee: employeeId }, { "activities.employee": employeeId }],
+      $or: [
+        { employee: { $in: calendarAliases } },
+        { "activities.employee": { $in: calendarAliases } }
+      ],
     };
 
     if (startDate && endDate) {
@@ -946,7 +987,7 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
 
         let projectDetails = { ...project };
 
-        const isTaskAssigned = task.employee?.includes(employeeId);
+        const isTaskAssigned = calendarAliases.includes(task.employee);
         const taskPercentage = task.percentage || 0;
         let taskEndDate = new Date(task.endDate);
 
@@ -968,6 +1009,7 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
         const currentDate = new Date();
 
         let calculatedStatus = "Not Started";
+        let completionInfo = null;
 
         if (["Hold", "Cancelled"].includes(task.status)) {
           calculatedStatus = task.status;
@@ -1015,7 +1057,7 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
         if (task.activities?.length > 0) {
           assignedActivities = await Promise.all(
             task.activities
-              .filter((activity) => activity.employee === employeeId)
+              .filter((activity) => calendarAliases.includes(activity.employee))
               .map(async (activity) => {
                 let activityEndDate = new Date(activity.endDate);
 
@@ -1036,6 +1078,7 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
 
                 const activityPercentage = activity.percentage || 0;
                 let activityStatus = "Not Started";
+                let activityCompletionInfo = null;
 
                 if (["Hold", "Cancelled"].includes(activity.status)) {
                   activityStatus = activity.status;
@@ -1547,9 +1590,10 @@ router.get("/:projectId", async (req, res) => {
           profile_url as profile,
           designation as department
         FROM employees_details 
-        WHERE employee_id = ?
+        WHERE employee_id = ? OR (intern_id IS NOT NULL AND intern_id = ?)
+        LIMIT 1
       `;
-      const employees = await queryWithRetry(query, [project.employeeID]);
+      const employees = await queryWithRetry(query, [project.employeeID, project.employeeID]);
       return employees.length > 0 ? employees[0] : null;
     })();
 
@@ -1565,21 +1609,29 @@ router.get("/:projectId", async (req, res) => {
     })();
 
     const employeesByDeptPromise = (async () => {
-      if (!project.department || project.department.length === 0) return [];
-      const deptPlaceholders = project.department.map(() => "?").join(",");
-      const employeesByDeptQuery = `
+      const deptPlaceholders = (project.department && project.department.length > 0)
+        ? project.department.map(() => "?").join(",")
+        : null;
+
+      let employeesByDeptQuery = `
         SELECT 
           e.employee_id AS id,
+          e.intern_id,
           e.employee_name AS name,
           e.profile_url AS profile,
-          d.designation AS department
+          COALESCE(d.designation, e.designation) AS department
         FROM employees_details e
-        JOIN designations d 
+        LEFT JOIN designations d 
           ON e.designation = d.designation
-        WHERE d.id IN (${deptPlaceholders})
-        AND e.working_status = 'Active'
+        WHERE 1=1
       `;
-      return await queryWithRetry(employeesByDeptQuery, project.department);
+      const queryParams = [];
+
+      if (deptPlaceholders) {
+        employeesByDeptQuery += ` AND (d.id IN (${deptPlaceholders}) OR e.working_status = 'Active')`;
+        queryParams.push(...project.department);
+      }
+      return await queryWithRetry(employeesByDeptQuery, queryParams);
     })();
 
     const allProjectEmployeeIds = [];
@@ -1640,6 +1692,7 @@ router.get("/:projectId", async (req, res) => {
     if (allEmployees?.length > 0) {
       project.allEmployees = allEmployees.map((e) => ({
         id: e.id,
+        intern_id: e.intern_id || null,
         name: e.name,
         profile: e.profile,
         department: e.department,
@@ -1650,9 +1703,13 @@ router.get("/:projectId", async (req, res) => {
 
     if (originalEmployeeIds.length > 0 && project.allEmployees) {
       project.employees = originalEmployeeIds
-        .map((empId) =>
-          project.allEmployees.find((e) => e.id.toString() === empId.toString()),
-        )
+        .map((empId) => {
+          const clean = empId.toString().trim();
+          return project.allEmployees.find((e) => 
+            e.id?.toString().trim() === clean || 
+            (e.intern_id && e.intern_id.toString().trim() === clean)
+          );
+        })
         .filter(Boolean);
     }
 
@@ -1707,6 +1764,94 @@ router.get("/:projectId", async (req, res) => {
     project.tasks = tasks;
     if (tasks.length > 0) {
       project.percentage = percentage;
+    }
+
+    // Ensure all employees assigned to tasks or activities are included in project.employees
+    if (tasks.length > 0) {
+      const taskEmpIds = new Set();
+      tasks.forEach((t) => {
+        if (t.employee) taskEmpIds.add(String(t.employee).trim());
+        if (t.activities?.length > 0) {
+          t.activities.forEach((act) => {
+            if (act.employee) taskEmpIds.add(String(act.employee).trim());
+          });
+        }
+      });
+
+      const missingEmpIds = [];
+      taskEmpIds.forEach((id) => {
+        const found = project.allEmployees?.some(
+          (e) =>
+            String(e.id || "").trim() === id ||
+            (e.intern_id && String(e.intern_id).trim() === id)
+        );
+        if (!found) {
+          missingEmpIds.push(id);
+        }
+      });
+
+      if (missingEmpIds.length > 0) {
+        try {
+          const placeholders = missingEmpIds.map(() => "?").join(",");
+          const missingQuery = `
+            SELECT 
+              e.employee_id AS id,
+              e.intern_id,
+              e.employee_name AS name,
+              e.profile_url AS profile,
+              COALESCE(d.designation, e.designation) AS department
+            FROM employees_details e
+            LEFT JOIN designations d 
+              ON e.designation = d.designation
+            WHERE e.employee_id IN (${placeholders}) OR (e.intern_id IS NOT NULL AND e.intern_id IN (${placeholders}))
+          `;
+          const missingParams = [...missingEmpIds, ...missingEmpIds];
+          const missingRows = await queryWithRetry(missingQuery, missingParams);
+          if (missingRows && missingRows.length > 0) {
+            missingRows.forEach((row) => {
+              const formatted = {
+                id: row.id,
+                intern_id: row.intern_id || null,
+                name: row.name,
+                profile: row.profile,
+                department: row.department,
+              };
+              project.allEmployees.push(formatted);
+              if (!project.employees) project.employees = [];
+              const alreadyInEmp = project.employees.some(
+                (e) =>
+                  String(e.id || "").trim() === String(row.id || "").trim() ||
+                  (e.intern_id && row.intern_id && String(e.intern_id).trim() === String(row.intern_id).trim())
+              );
+              if (!alreadyInEmp) {
+                project.employees.push(formatted);
+              }
+            });
+          }
+        } catch (missingErr) {
+          console.error("Error fetching missing task employees:", missingErr);
+        }
+      }
+
+      // Also ensure any existing project.allEmployees that match taskEmpIds are present in project.employees
+      taskEmpIds.forEach((id) => {
+        const matched = project.allEmployees?.find(
+          (e) =>
+            String(e.id || "").trim() === id ||
+            (e.intern_id && String(e.intern_id).trim() === id)
+        );
+        if (matched) {
+          if (!project.employees) project.employees = [];
+          const already = project.employees.some(
+            (e) =>
+              String(e.id || "").trim() === String(matched.id || "").trim() ||
+              (e.intern_id && matched.intern_id && String(e.intern_id).trim() === String(matched.intern_id).trim())
+          );
+          if (!already) {
+            project.employees.push(matched);
+          }
+        }
+      });
     }
 
     res.status(200).json({
@@ -2141,9 +2286,11 @@ router.patch("/request/:requestId/approve", async (req, res) => {
         employee_name as name,
         designation as department
       FROM employees_details
-      WHERE employee_id = ?
+      WHERE employee_id = ? OR (intern_id IS NOT NULL AND intern_id = ?)
+      LIMIT 1
     `;
     const employeeResult = await queryWithRetry(employeeQuery, [
+      request.employeeID,
       request.employeeID,
     ]);
     const employeeName =
@@ -2217,9 +2364,11 @@ router.patch("/request/:requestId/reject", async (req, res) => {
         employee_name as name,
         designation as department
       FROM employees_details
-      WHERE employee_id = ?
+      WHERE employee_id = ? OR (intern_id IS NOT NULL AND intern_id = ?)
+      LIMIT 1
     `;
     const employeeResult = await queryWithRetry(employeeQuery, [
+      request.employeeID,
       request.employeeID,
     ]);
     const employeeName =

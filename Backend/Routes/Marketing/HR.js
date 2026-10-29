@@ -36,9 +36,11 @@ router.get("/leave-requests", async (req, res) => {
         lr.created_at,
         lr.updated_at,
         ed.employee_name,
-        ed.profile_url
+        ed.profile_url,
+        ed.employee_id as canonical_employee_id,
+        ed.intern_id
       FROM leave_requests lr
-      LEFT JOIN employees_details ed ON lr.employee_id = ed.employee_id
+      LEFT JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       ORDER BY 
         CASE 
           WHEN lr.management_status IS NULL AND lr.team_head_status IS NULL THEN 0
@@ -52,7 +54,9 @@ router.get("/leave-requests", async (req, res) => {
 
     const formattedResults = results.map((row) => ({
       id: row.id,
-      employee_id: row.employee_id,
+      employee_id: row.canonical_employee_id || row.employee_id,
+      raw_employee_id: row.employee_id,
+      intern_id: row.intern_id || null,
       employee_name: row.employee_name || row.employee_id,
       profile_url: row.profile_url || null,
       leave_type: row.leave_type,
@@ -283,9 +287,11 @@ router.get("/permission-requests", async (req, res) => {
         pr.created_at,
         pr.updated_at,
         ed.employee_name,
-        ed.profile_url
+        ed.profile_url,
+        ed.employee_id as canonical_employee_id,
+        ed.intern_id
       FROM permission_requests pr
-      LEFT JOIN employees_details ed ON pr.employee_id = ed.employee_id
+      LEFT JOIN employees_details ed ON (pr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND pr.employee_id = ed.intern_id))
       ORDER BY 
         CASE 
           WHEN pr.status = 'pending' THEN 0 
@@ -299,7 +305,9 @@ router.get("/permission-requests", async (req, res) => {
 
     const formattedResults = results.map((row) => ({
       id: row.id,
-      employee_id: row.employee_id,
+      employee_id: row.canonical_employee_id || row.employee_id,
+      raw_employee_id: row.employee_id,
+      intern_id: row.intern_id || null,
       employee_name: row.employee_name || row.employee_id,
       profile_url: row.profile_url || null,
       permission_date: formatDateLocal(row.permission_date),

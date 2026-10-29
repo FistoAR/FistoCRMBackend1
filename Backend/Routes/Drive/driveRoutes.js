@@ -394,6 +394,7 @@ router.get("/preview/:fileId", async (req, res) => {
     const file = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
     res.setHeader("Content-Type", fileMeta.data.mimeType);
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(fileMeta.data.name)}"`);
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
     file.data.pipe(res);
   } catch (error) {
     console.error("Preview error:", error.message);

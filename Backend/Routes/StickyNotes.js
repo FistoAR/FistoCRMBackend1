@@ -13,24 +13,25 @@ router.get("/:employeeId", async (req, res) => {
     
     const query = `
       SELECT 
-        id,
-        employee_id,
-        note_id,
-        content,
-        background_color,
-        is_pinned,
-        is_minimized,
-        position_x,
-        position_y,
-        created_at,
-        updated_at
-      FROM sticky_notes 
-      WHERE employee_id = ?
-      ORDER BY is_pinned DESC, created_at DESC
+        sn.id,
+        sn.employee_id,
+        sn.note_id,
+        sn.content,
+        sn.background_color,
+        sn.is_pinned,
+        sn.is_minimized,
+        sn.position_x,
+        sn.position_y,
+        sn.created_at,
+        sn.updated_at
+      FROM sticky_notes sn
+      LEFT JOIN employees_details ed ON (sn.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND sn.employee_id = ed.intern_id))
+      WHERE (sn.employee_id = ? OR ed.employee_id = ? OR (ed.intern_id IS NOT NULL AND ed.intern_id = ?))
+      ORDER BY sn.is_pinned DESC, sn.created_at DESC
     `;
     
     const results = await new Promise((resolve, reject) => {
-      connection.query(query, [employeeId], (err, results) => {
+      connection.query(query, [employeeId, employeeId, employeeId], (err, results) => {
         if (err) reject(err);
         else resolve(results);
       });
@@ -255,8 +256,10 @@ router.delete("/:employeeId/:noteId", async (req, res) => {
     
     await new Promise((resolve, reject) => {
       connection.query(
-        "DELETE FROM sticky_notes WHERE employee_id = ? AND note_id = ?",
-        [employeeId, noteId],
+        `DELETE sn FROM sticky_notes sn
+         LEFT JOIN employees_details ed ON (sn.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND sn.employee_id = ed.intern_id))
+         WHERE (sn.employee_id = ? OR ed.employee_id = ? OR (ed.intern_id IS NOT NULL AND ed.intern_id = ?)) AND sn.note_id = ?`,
+        [employeeId, employeeId, employeeId, noteId],
         (err) => {
           if (err) reject(err);
           else resolve();
@@ -291,8 +294,10 @@ router.get("/:employeeId/export", async (req, res) => {
     
     const results = await new Promise((resolve, reject) => {
       connection.query(
-        "SELECT * FROM sticky_notes WHERE employee_id = ?",
-        [employeeId],
+        `SELECT sn.* FROM sticky_notes sn
+         LEFT JOIN employees_details ed ON (sn.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND sn.employee_id = ed.intern_id))
+         WHERE (sn.employee_id = ? OR ed.employee_id = ? OR (ed.intern_id IS NOT NULL AND ed.intern_id = ?))`,
+        [employeeId, employeeId, employeeId],
         (err, results) => {
           if (err) reject(err);
           else resolve(results);
