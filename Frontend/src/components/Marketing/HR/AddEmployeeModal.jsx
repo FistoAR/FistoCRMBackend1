@@ -20,6 +20,7 @@ import {
   Download,
   Edit2,
   Lock,
+  ExternalLink,
 } from "lucide-react";
 import { useNotification } from "../../NotificationContext";
 import { useConfirm } from "../../ConfirmContext";
@@ -41,8 +42,11 @@ const AddEmployee = ({
   const [designations, setDesignations] = useState([]);
   const [loadingDesignations, setLoadingDesignations] = useState(false);
   const [viewFileModal, setViewFileModal] = useState(null);
+  const [isFileLoading, setIsFileLoading] = useState(false);
   const [canEditEmployeeId, setCanEditEmployeeId] = useState(false);
   const [canEditInternId, setCanEditInternId] = useState(false);
+  const [isDraggingProfile, setIsDraggingProfile] = useState(false);
+  const [isDraggingOther, setIsDraggingOther] = useState(false);
   const [passwordModal, setPasswordModal] = useState({
     isOpen: false,
     field: null, // "employeeId" | "internId"
@@ -464,31 +468,92 @@ const AddEmployee = ({
     }
   };
 
-  const handleProfileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setFormData((prev) => ({ ...prev, profile: file }));
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfilePreview(reader.result);
-      };
-      reader.readAsDataURL(file);
+  const MAX_FILE_SIZE_MB = 50;
+
+  const handleProcessSingleFile = (file, fieldName) => {
+    if (!file) return false;
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      notify({
+        title: "Error",
+        message: `File "${file.name}" exceeds the maximum allowed size of ${MAX_FILE_SIZE_MB}MB. Please choose a smaller file.`,
+      });
+      return false;
     }
+    setFormData((prev) => ({ ...prev, [fieldName]: file }));
+    return true;
+  };
+
+  const processProfileFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      notify({
+        title: "Error",
+        message: "Please select an image file for profile photo.",
+      });
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      notify({
+        title: "Error",
+        message: `Profile picture exceeds the maximum ${MAX_FILE_SIZE_MB}MB size limit.`,
+      });
+      return;
+    }
+    setFormData((prev) => ({ ...prev, profile: file }));
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setProfilePreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleProfileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processProfileFile(file);
+    }
+    e.target.value = "";
   };
 
   const handleFileChange = (e, fieldName) => {
     const file = e.target.files?.[0];
     if (file) {
-      setFormData((prev) => ({ ...prev, [fieldName]: file }));
+      handleProcessSingleFile(file, fieldName);
+      e.target.value = "";
+    }
+  };
+
+  const processMultipleFiles = (filesList) => {
+    const files = Array.from(filesList || []);
+    const validFiles = [];
+    let oversized = false;
+
+    for (const f of files) {
+      if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        oversized = true;
+      } else {
+        validFiles.push(f);
+      }
+    }
+
+    if (oversized) {
+      notify({
+        title: "Error",
+        message: `Some files exceeded the maximum ${MAX_FILE_SIZE_MB}MB limit and were skipped.`,
+      });
+    }
+
+    if (validFiles.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        otherDocs: [...prev.otherDocs, ...validFiles],
+      }));
     }
   };
 
   const handleMultipleFilesChange = (e) => {
-    const files = Array.from(e.target.files);
-    setFormData((prev) => ({
-      ...prev,
-      otherDocs: [...prev.otherDocs, ...files],
-    }));
+    processMultipleFiles(e.target.files);
+    e.target.value = "";
   };
 
   const handleRemoveNewFile = (indexToRemove) => {
@@ -607,18 +672,23 @@ const AddEmployee = ({
 
   const resolveFileUrl = (url) => {
     if (!url) return "";
-    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
       return url;
     }
-    if (url.startsWith("/api/")) {
-      const base = (API_URL1 || API_URL || "").replace(/\/api\/?$/, "");
-      return `${base}${url}`;
-    }
-    return `${API_URL1 || API_URL || ""}${url}`;
+    const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+    const base = (API_URL1 || API_URL || "").replace(/\/api\/?$/, "").replace(/\/$/, "");
+    return `${base}${cleanUrl}`;
   };
 
-  const handleViewFile = (fileUrl) => {
-    setViewFileModal(resolveFileUrl(fileUrl));
+  const handleViewFile = (fileUrl, title = "Document") => {
+    if (!fileUrl) return;
+    const resolved = resolveFileUrl(fileUrl);
+    setIsFileLoading(true);
+    setViewFileModal({
+      url: resolved,
+      title: title || "Document",
+      rawPath: fileUrl,
+    });
   };
 
   const validateForm = () => {
@@ -784,7 +854,17 @@ const AddEmployee = ({
         body: submitFormData,
       });
 
-      const data = await response.json();
+      let data;
+      const responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch (err) {
+        throw new Error(
+          response.ok
+            ? "Invalid server response"
+            : `Server error (${response.status}): ${response.statusText || "Please check file sizes and formats."}`
+        );
+      }
 
       if (data.status) {
         notify({
@@ -804,7 +884,7 @@ const AddEmployee = ({
       console.error("Error:", error);
       notify({
         title: "Error",
-        message: `An error occurred: ${error.message}`,
+        message: error.message || "An unexpected error occurred while saving employee data.",
       });
     } finally {
       setIsLoading(false);
@@ -864,64 +944,134 @@ const AddEmployee = ({
     }
   };
 
-  return (
-    <div>
-      <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-        {label}
-      </label>
+    const [isDragging, setIsDragging] = useState(false);
 
-      <div className="flex items-center gap-[0.5vw]">
-        {/* Upload Button */}
-        <label className="flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] bg-white border border-gray-700 rounded-full cursor-pointer hover:bg-gray-50 transition-all w-fit">
-          <Upload size={"1vw"} className="text-gray-600" />
-          <span className="text-[0.9vw] font-medium text-gray-700">
-            {formData[fieldName]
-              ? formData[fieldName].name
-              : existingPath
-                ? "Change file"
-                : "Choose file"}
-          </span>
-          <input
-            type="file"
-            accept={accept}
-            onChange={(e) => handleFileChange(e, fieldName)}
-            className="hidden"
-          />
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    };
+
+    const handleDragLeave = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+    };
+
+    const handleDrop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      const droppedFile = e.dataTransfer.files?.[0];
+      if (!droppedFile) return;
+
+      if (accept) {
+        const allowedExtensions = accept
+          .split(",")
+          .map((ext) => ext.trim().toLowerCase());
+        const fileExt = `.${(droppedFile.name.split(".").pop() || "").toLowerCase()}`;
+        const isMatch = allowedExtensions.some((allowed) => {
+          if (allowed.startsWith(".")) {
+            return allowed === fileExt;
+          }
+          if (allowed.endsWith("/*")) {
+            const prefix = allowed.replace("/*", "");
+            return droppedFile.type.startsWith(prefix);
+          }
+          return droppedFile.type === allowed;
+        });
+
+        if (!isMatch) {
+          notify({
+            title: "Error",
+            message: `Invalid file type. Allowed formats: ${accept}`,
+          });
+          return;
+        }
+      }
+
+      handleProcessSingleFile(droppedFile, fieldName);
+    };
+
+    return (
+      <div>
+        <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+          {label}
         </label>
 
-        {existingPath && !formData[fieldName] && (
-          <div className="flex items-center gap-[0.5vw]">
-            <button
-              type="button"
-              onClick={() => handleViewFile(existingPath)}
-              className="p-[0.5vw] bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors cursor-pointer"
-              title="View Document"
+        <div className="flex items-center gap-[0.5vw]">
+          {/* Upload Button & Drop Target */}
+          <label
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all w-fit border ${
+              isDragging
+                ? "bg-blue-50 border-blue-500 ring-2 ring-blue-300 scale-102"
+                : "bg-white border-gray-700 hover:bg-gray-50"
+            }`}
+            title="Click to choose or drag & drop file here"
+          >
+            <Upload
+              size={"1vw"}
+              className={isDragging ? "text-blue-600 animate-bounce" : "text-gray-600"}
+            />
+            <span
+              className={`text-[0.9vw] font-medium ${
+                isDragging ? "text-blue-700 font-semibold" : "text-gray-700"
+              }`}
             >
-              <Eye size={"1vw"} className="text-blue-600" />
-            </button>
+              {isDragging
+                ? "Drop file here"
+                : formData[fieldName]
+                ? formData[fieldName].name
+                : existingPath
+                ? "Change file"
+                : "Choose or Drop file"}
+            </span>
+            <input
+              type="file"
+              accept={accept}
+              onChange={(e) => handleFileChange(e, fieldName)}
+              className="hidden"
+            />
+          </label>
 
-            <button
-              type="button"
-              onClick={() => handleDownloadFile(existingPath, label)}
-              className="p-[0.5vw] bg-green-50 border border-green-200 rounded-full hover:bg-green-100 transition-colors cursor-pointer"
-              title="Download Document"
-            >
-              <Download size={"1vw"} className="text-green-600" />
-            </button>
+          {existingPath && !formData[fieldName] && (
+            <div className="flex items-center gap-[0.5vw]">
+              <button
+                type="button"
+                onClick={() => handleViewFile(existingPath, label)}
+                className="p-[0.5vw] bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors cursor-pointer"
+                title="View Document"
+              >
+                <Eye size={"1vw"} className="text-blue-600" />
+              </button>
 
-            <button
-              type="button"
-              onClick={() => handleDeleteFile(fieldName)}
-              className="p-[0.5vw] bg-red-50 border border-red-200 rounded-full hover:bg-red-100 transition-colors cursor-pointer"
-              title="Delete Document"
-            >
-              <Trash2 size={"0.9vw"} className="text-red-600" />
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => handleDownloadFile(existingPath, label)}
+                className="p-[0.5vw] bg-green-50 border border-green-200 rounded-full hover:bg-green-100 transition-colors cursor-pointer"
+                title="Download Document"
+              >
+                <Download size={"1vw"} className="text-green-600" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDeleteFile(fieldName)}
+                className="p-[0.5vw] bg-red-50 border border-red-200 rounded-full hover:bg-red-100 transition-colors cursor-pointer"
+                title="Delete Document"
+              >
+                <Trash2 size={"0.9vw"} className="text-red-600" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
 };
 
 
@@ -1887,10 +2037,48 @@ const AddEmployee = ({
                               <Camera className="text-gray-400 w-[2vw] h-[2vw]" />
                             </div>
                           )}
-                          <label className="flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] bg-white border border-gray-700 rounded-full cursor-pointer hover:bg-gray-50 transition-all">
-                            <Upload size={"1vw"} className="text-gray-600" />
-                            <span className="text-[0.9vw] font-medium text-gray-700">
-                              Choose Photo
+                          <label
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingProfile(true);
+                            }}
+                            onDragEnter={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingProfile(true);
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingProfile(false);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingProfile(false);
+                              const file = e.dataTransfer.files?.[0];
+                              if (file) {
+                                processProfileFile(file);
+                              }
+                            }}
+                            className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all border ${
+                              isDraggingProfile
+                                ? "bg-blue-50 border-blue-500 ring-2 ring-blue-300 scale-102"
+                                : "bg-white border-gray-700 hover:bg-gray-50"
+                            }`}
+                            title="Click to choose photo or drag & drop photo here"
+                          >
+                            <Upload
+                              size={"1vw"}
+                              className={isDraggingProfile ? "text-blue-600 animate-bounce" : "text-gray-600"}
+                            />
+                            <span
+                              className={`text-[0.9vw] font-medium ${
+                                isDraggingProfile ? "text-blue-700 font-semibold" : "text-gray-700"
+                              }`}
+                            >
+                              {isDraggingProfile ? "Drop Photo Here" : "Choose Photo"}
                             </span>
                             <input
                               type="file"
@@ -2053,9 +2241,9 @@ const AddEmployee = ({
                                         <button
                                           type="button"
                                           onClick={() =>
-                                            handleViewFile(doc.path)
+                                            handleViewFile(doc.path, doc.originalName || "Document")
                                           }
-                                          className="text-[0.85vw] text-blue-600 hover:underline"
+                                          className="text-[0.85vw] text-blue-600 hover:underline cursor-pointer"
                                         >
                                           View
                                         </button>
@@ -2109,11 +2297,48 @@ const AddEmployee = ({
                             </div>
                           )}
 
-                          {/* File Upload Input */}
-                          <label className="flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] bg-white border border-gray-700 rounded-full cursor-pointer hover:bg-gray-50 transition-all w-fit">
-                            <Upload size={"1vw"} className="text-gray-600" />
-                            <span className="text-[0.9vw] font-medium text-gray-700">
-                              Add More Files
+                          {/* File Upload Input & Drop Target */}
+                          <label
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingOther(true);
+                            }}
+                            onDragEnter={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingOther(true);
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingOther(false);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsDraggingOther(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                processMultipleFiles(e.dataTransfer.files);
+                              }
+                            }}
+                            className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all w-fit border ${
+                              isDraggingOther
+                                ? "bg-blue-50 border-blue-500 ring-2 ring-blue-300 scale-102"
+                                : "bg-white border-gray-700 hover:bg-gray-50"
+                            }`}
+                            title="Click to choose files or drag & drop files here"
+                          >
+                            <Upload
+                              size={"1vw"}
+                              className={isDraggingOther ? "text-blue-600 animate-bounce" : "text-gray-600"}
+                            />
+                            <span
+                              className={`text-[0.9vw] font-medium ${
+                                isDraggingOther ? "text-blue-700 font-semibold" : "text-gray-700"
+                              }`}
+                            >
+                              {isDraggingOther ? "Drop Files Here" : "Add More Files (or Drop Here)"}
                             </span>
                             <input
                               type="file"
@@ -2172,38 +2397,114 @@ const AddEmployee = ({
       </div>
 
       {/* File View Modal */}
-      {viewFileModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-xl shadow-2xl w-[70vw] h-[80vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-[1vw] border-b border-gray-200">
-              <h3 className="text-[1vw] font-semibold text-gray-800">
-                Document Viewer
-              </h3>
-              <button
-                onClick={() => setViewFileModal(null)}
-                className="p-[0.3vw] hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-              >
-                <X size={"1.2vw"} className="text-gray-500" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto bg-gray-100">
-              {viewFileModal.endsWith(".pdf") ? (
-                <iframe
-                  src={viewFileModal}
-                  className="w-full h-full"
-                  title="Document Viewer"
-                />
-              ) : (
-                <img
-                  src={viewFileModal}
-                  alt="Document"
-                  className="max-w-full max-h-full object-contain mx-auto"
-                />
-              )}
+      {viewFileModal && (() => {
+        const modalUrl = typeof viewFileModal === "object" ? viewFileModal.url : viewFileModal;
+        const modalTitle = typeof viewFileModal === "object" ? viewFileModal.title : "Document Viewer";
+        const rawPath = typeof viewFileModal === "object" ? viewFileModal.rawPath : viewFileModal;
+
+        const isPdf =
+          modalUrl.toLowerCase().includes(".pdf") ||
+          (rawPath && rawPath.toLowerCase().includes(".pdf"));
+
+        const isOfficeDoc =
+          modalUrl.toLowerCase().includes(".doc") ||
+          modalUrl.toLowerCase().includes(".docx") ||
+          (rawPath && (rawPath.toLowerCase().includes(".doc") || rawPath.toLowerCase().includes(".docx")));
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60]">
+            <div className="bg-white rounded-xl shadow-2xl w-[75vw] h-[85vh] flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-[1.2vw] py-[0.8vw] border-b border-gray-200 bg-gray-50/70">
+                <div className="flex items-center gap-[0.6vw]">
+                  <FileText className="w-[1.2vw] h-[1.2vw] text-gray-700" />
+                  <h3 className="text-[1vw] font-semibold text-gray-800">
+                    {modalTitle || "Document Viewer"}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-[0.5vw]">
+                  <a
+                    href={modalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-[0.3vw] px-[0.7vw] py-[0.3vw] text-[0.8vw] text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    title="Open in new window"
+                  >
+                    <ExternalLink size={"0.85vw"} />
+                    <span>Open in new tab</span>
+                  </a>
+                  <button
+                    onClick={() => setViewFileModal(null)}
+                    className="p-[0.3vw] hover:bg-gray-200 rounded-full transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X size={"1.2vw"} className="text-gray-600" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto bg-gray-100 flex items-center justify-center p-[1vw] relative">
+                {/* Loading Spinner */}
+                {isFileLoading && !isOfficeDoc && (
+                  <div className="absolute inset-0 bg-gray-100/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10">
+                    <div className="w-[2.5vw] h-[2.5vw] border-4 border-gray-300 border-t-black rounded-full animate-spin mb-[0.8vw]"></div>
+                    <p className="text-[0.9vw] font-medium text-gray-700 animate-pulse">
+                      Loading document...
+                    </p>
+                  </div>
+                )}
+
+                {isPdf ? (
+                  <iframe
+                    src={modalUrl}
+                    className="w-full h-full rounded-lg bg-white border border-gray-200"
+                    title="PDF Viewer"
+                    onLoad={() => setIsFileLoading(false)}
+                  />
+                ) : isOfficeDoc ? (
+                  <div className="text-center p-[2vw] bg-white rounded-xl shadow-sm border border-gray-200 max-w-[30vw]">
+                    <FileText className="w-[3vw] h-[3vw] text-blue-600 mx-auto mb-[1vw]" />
+                    <p className="text-[0.95vw] font-semibold text-gray-800 mb-[0.4vw]">
+                      Word Document (.docx / .doc)
+                    </p>
+                    <p className="text-[0.8vw] text-gray-500 mb-[1.2vw]">
+                      Word documents cannot be previewed directly in browser without Office Viewer. You can download or open it.
+                    </p>
+                    <a
+                      href={modalUrl}
+                      download
+                      className="inline-flex items-center gap-[0.4vw] px-[1vw] py-[0.5vw] text-[0.85vw] font-medium text-white bg-black rounded-lg hover:bg-gray-800 transition"
+                    >
+                      <Download size={"0.9vw"} />
+                      Download Document
+                    </a>
+                  </div>
+                ) : (
+                  <img
+                    src={modalUrl}
+                    alt={modalTitle || "Document"}
+                    className="max-w-full max-h-full object-contain mx-auto rounded-lg shadow-sm"
+                    onLoad={() => setIsFileLoading(false)}
+                    onError={(e) => {
+                      // If image fails to load, fallback to iframe (it could be a PDF without .pdf in URL or Drive stream)
+                      const parent = e.target.parentElement;
+                      if (parent && !parent.querySelector("iframe")) {
+                        e.target.style.display = "none";
+                        const iframe = document.createElement("iframe");
+                        iframe.src = modalUrl;
+                        iframe.className = "w-full h-full rounded-lg bg-white border border-gray-200";
+                        iframe.title = "Document Preview";
+                        iframe.onload = () => setIsFileLoading(false);
+                        parent.appendChild(iframe);
+                      } else {
+                        setIsFileLoading(false);
+                      }
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* Password Verification Modal for unlocking Employee ID / Intern ID */}
       {passwordModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70]">

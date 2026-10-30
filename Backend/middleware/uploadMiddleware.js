@@ -86,12 +86,12 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max file size
+    fileSize: 50 * 1024 * 1024, // 50MB max file size per file
   },
 });
 
 // Multiple file fields
-const uploadFields = upload.fields([
+const multerUploadFields = upload.fields([
   { name: 'profile', maxCount: 1 },
   { name: 'resume', maxCount: 1 },
   { name: 'offerLetter', maxCount: 1 },
@@ -110,5 +110,30 @@ const uploadFields = upload.fields([
   { name: 'InternofferLetter', maxCount: 1 },
   { name: 'otherDocs', maxCount: 10 },
 ]);
+
+const uploadFields = (req, res, next) => {
+  multerUploadFields(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      console.error("Multer Error:", err);
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({
+          status: false,
+          message: `File too large. Maximum allowed file size is 50MB. (${err.field || "upload"})`,
+        });
+      }
+      return res.status(400).json({
+        status: false,
+        message: `Upload error: ${err.message}`,
+      });
+    } else if (err) {
+      console.error("Upload Middleware Error:", err);
+      return res.status(400).json({
+        status: false,
+        message: err.message || "File upload failed",
+      });
+    }
+    next();
+  });
+};
 
 module.exports = uploadFields;
