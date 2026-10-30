@@ -18,6 +18,8 @@ import {
   X,
   Trash2,
   Download,
+  Edit2,
+  Lock,
 } from "lucide-react";
 import { useNotification } from "../../NotificationContext";
 import { useConfirm } from "../../ConfirmContext";
@@ -40,6 +42,13 @@ const AddEmployee = ({
   const [loadingDesignations, setLoadingDesignations] = useState(false);
   const [viewFileModal, setViewFileModal] = useState(null);
   const [canEditEmployeeId, setCanEditEmployeeId] = useState(false);
+  const [canEditInternId, setCanEditInternId] = useState(false);
+  const [passwordModal, setPasswordModal] = useState({
+    isOpen: false,
+    field: null, // "employeeId" | "internId"
+    password: "",
+    error: "",
+  });
 
   const [expandedSections, setExpandedSections] = useState({
     basicInfo: true,
@@ -241,6 +250,8 @@ const AddEmployee = ({
       });
 
       setCanEditEmployeeId(isCurrentlyIntern);
+      setCanEditInternId(false);
+      setPasswordModal({ isOpen: false, field: null, password: "", error: "" });
 
       if (editingEmployee.profile_url) {
         setProfilePreview(resolveFileUrl(editingEmployee.profile_url));
@@ -333,13 +344,16 @@ const AddEmployee = ({
     editingEmployee,
   ]);
 
+  const [checkingIntern, setCheckingIntern] = useState(false);
+  const [internIdAvailable, setInternIdAvailable] = useState(null);
+
   useEffect(() => {
     if (!formData.userName || (editingEmployee && !canEditEmployeeId)) {
       setUsernameAvailable(null);
       return;
     }
 
-    if (editingEmployee && formData.userName === editingEmployee.employee_id) {
+    if (editingEmployee && formData.userName.trim().toUpperCase() === (editingEmployee.employee_id || "").trim().toUpperCase()) {
       setUsernameAvailable(true);
       return;
     }
@@ -349,7 +363,7 @@ const AddEmployee = ({
       setChecking(true);
       try {
         const res = await fetch(
-          `${API_URL}/employeeRegister/check/${formData.userName}`,
+          `${API_URL}/employeeRegister/check/${encodeURIComponent(formData.userName.trim())}`,
         );
 
         if (!res.ok) {
@@ -365,10 +379,47 @@ const AddEmployee = ({
       } finally {
         setChecking(false);
       }
-    }, 500);
+    }, 400);
 
     return () => clearTimeout(timeoutId);
   }, [formData.userName, editingEmployee, canEditEmployeeId]);
+
+  useEffect(() => {
+    if (!formData.internId || (editingEmployee && !canEditInternId)) {
+      setInternIdAvailable(null);
+      return;
+    }
+
+    if (editingEmployee && formData.internId.trim().toUpperCase() === (editingEmployee.intern_id || "").trim().toUpperCase()) {
+      setInternIdAvailable(true);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setInternIdAvailable(null);
+      setCheckingIntern(true);
+      try {
+        const res = await fetch(
+          `${API_URL}/employeeRegister/check/${encodeURIComponent(formData.internId.trim())}`,
+        );
+
+        if (!res.ok) {
+          setCheckingIntern(false);
+          return;
+        }
+
+        const data = await res.json();
+        setInternIdAvailable(data.available);
+      } catch (error) {
+        console.error("Error checking internId:", error);
+        setInternIdAvailable(null);
+      } finally {
+        setCheckingIntern(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timeoutId);
+  }, [formData.internId, editingEmployee, canEditInternId]);
 
   const calculateDuration = (startDate, endDate) => {
     if (startDate && endDate) {
@@ -590,19 +641,48 @@ const AddEmployee = ({
     if (!formData.workingStatus)
       newErrors.workingStatus = "Working status is required";
 
-    if (formData.employmentType === "On Role") {
-      if (!formData.doj) newErrors.doj = "Date of joining is required";
+    if (usernameAvailable === false) {
+      newErrors.userName = "This Employee ID is already Exist";
+    }
+
+    if (internIdAvailable === false) {
+      newErrors.internId = "This Intern ID is already Exist";
     }
 
     setErrors(newErrors);
     return (
       Object.keys(newErrors).length === 0 &&
-      (!editingEmployee || !canEditEmployeeId || usernameAvailable)
+      usernameAvailable !== false &&
+      internIdAvailable !== false
     );
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (checking || checkingIntern) {
+      notify({
+        title: "Please wait",
+        message: "Checking ID availability...",
+      });
+      return;
+    }
+
+    if (usernameAvailable === false) {
+      notify({
+        title: "Validation Error",
+        message: "This Employee ID is already registered to another employee.",
+      });
+      return;
+    }
+
+    if (internIdAvailable === false) {
+      notify({
+        title: "Validation Error",
+        message: "This Intern ID is already registered to another employee.",
+      });
+      return;
+    }
 
     if (!validateForm()) {
       notify({
@@ -848,7 +928,38 @@ const AddEmployee = ({
 
   if (!isOpen) return null;
 
+  const handleOpenPasswordModal = (field) => {
+    setPasswordModal({
+      isOpen: true,
+      field,
+      password: "",
+      error: "",
+    });
+  };
+
+  const handleVerifyPassword = (e) => {
+    e?.preventDefault();
+    if (passwordModal.password === "1212312123") {
+      if (passwordModal.field === "employeeId") {
+        setCanEditEmployeeId(true);
+      } else if (passwordModal.field === "internId") {
+        setCanEditInternId(true);
+      }
+      setPasswordModal({ isOpen: false, field: null, password: "", error: "" });
+      notify({
+        title: "Unlocked",
+        message: `${passwordModal.field === "employeeId" ? "Employee ID" : "Intern ID"} is now editable.`,
+      });
+    } else {
+      setPasswordModal((prev) => ({
+        ...prev,
+        error: "Incorrect password. Please try again.",
+      }));
+    }
+  };
+
   const isEmployeeIdDisabled = editingEmployee && !canEditEmployeeId;
+  const isInternIdDisabled = editingEmployee && !canEditInternId;
 
   return (
     <>
@@ -892,12 +1003,32 @@ const AddEmployee = ({
                         className={`col-span-3 grid ${formData.internId ? "grid-cols-4" : "grid-cols-3"} gap-[1vw]`}
                       >
                         <div>
-                          <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                            {formData.employmentType === "Intern"
-                              ? "Intern ID"
-                              : "Employee ID"}{" "}
-                            <span className="text-red-500">*</span>
-                          </label>
+                          <div className="flex items-center justify-between mb-[0.4vw]">
+                            <label className="block text-[0.92vw] font-semibold text-gray-900">
+                              {formData.employmentType === "Intern"
+                                ? "Intern ID"
+                                : "Employee ID"}{" "}
+                              <span className="text-red-500">*</span>
+                            </label>
+                            {editingEmployee && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPasswordModal("employeeId")}
+                                className={`p-[0.2vw] rounded-full transition-colors cursor-pointer ${
+                                  canEditEmployeeId
+                                    ? "text-green-600 hover:bg-green-50"
+                                    : "text-gray-400 hover:text-black hover:bg-gray-100"
+                                }`}
+                                title={
+                                  canEditEmployeeId
+                                    ? "Editable"
+                                    : "Click to enter password and edit Employee ID"
+                                }
+                              >
+                                <Edit2 size={"0.85vw"} />
+                              </button>
+                            )}
+                          </div>
                           <div className="relative">
                             <Building2 className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -907,7 +1038,7 @@ const AddEmployee = ({
                               onChange={handleInputChange}
                               disabled={isEmployeeIdDisabled}
                               className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border rounded-full text-[0.9vw] uppercase focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent placeholder:text-gray-400 placeholder:text-[0.85vw] transition-all ${
-                                errors.userName
+                                errors.userName || usernameAvailable === false
                                   ? "border-red-500"
                                   : "border-gray-300"
                               } ${
@@ -923,7 +1054,7 @@ const AddEmployee = ({
                               Checking...
                             </p>
                           )}
-                          {!editingEmployee && usernameAvailable === false && (
+                          {usernameAvailable === false && (
                             <p className="text-red-500 text-[0.75vw] mt-[0.3vw] ml-[0.3vw]">
                               This Employee ID is already Exist
                             </p>
@@ -936,25 +1067,61 @@ const AddEmployee = ({
                           )}
                         </div>
 
-                        {formData.internId &&
-                          formData.employmentType === "On Role" && (
+                        {Boolean(formData.internId) && (
                             <div>
-                              <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
-                                Intern ID
-                              </label>
+                              <div className="flex items-center justify-between mb-[0.4vw]">
+                                <label className="block text-[0.92vw] font-semibold text-gray-900">
+                                  Intern ID
+                                </label>
+                                {editingEmployee && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenPasswordModal("internId")}
+                                    className={`p-[0.2vw] rounded-full transition-colors cursor-pointer ${
+                                      canEditInternId
+                                        ? "text-green-600 hover:bg-green-50"
+                                        : "text-gray-400 hover:text-black hover:bg-gray-100"
+                                    }`}
+                                    title={
+                                      canEditInternId
+                                        ? "Editable"
+                                        : "Click to enter password and edit Intern ID"
+                                    }
+                                  >
+                                    <Edit2 size={"0.85vw"} />
+                                  </button>
+                                )}
+                              </div>
                               <div className="relative">
                                 <Building2 className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
                                 <input
                                   type="text"
-                                  name="userName"
+                                  name="internId"
                                   value={formData.internId}
                                   onChange={handleInputChange}
-                                  disabled={true}
-                                  className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border border-gray-300 rounded-full text-[0.9vw] uppercase focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent placeholder:text-gray-400 placeholder:text-[0.85vw] transition-all 
-                              bg-gray-100 cursor-not-allowed `}
+                                  disabled={isInternIdDisabled}
+                                  className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border rounded-full text-[0.9vw] uppercase focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent placeholder:text-gray-400 placeholder:text-[0.85vw] transition-all ${
+                                    internIdAvailable === false
+                                      ? "border-red-500"
+                                      : "border-gray-300"
+                                  } ${
+                                    isInternIdDisabled
+                                      ? "bg-gray-100 cursor-not-allowed border-gray-300"
+                                      : ""
+                                  }`}
                                   placeholder="FSTINT001"
                                 />
                               </div>
+                              {checkingIntern && (
+                                <p className="text-gray-500 text-[0.75vw] mt-[0.3vw]">
+                                  Checking...
+                                </p>
+                              )}
+                              {internIdAvailable === false && (
+                                <p className="text-red-500 text-[0.75vw] mt-[0.3vw] ml-[0.3vw]">
+                                  This Intern ID is already Exist
+                                </p>
+                              )}
                             </div>
                           )}
 
@@ -1590,11 +1757,13 @@ const AddEmployee = ({
               </div>
 
               {(() => {
-                const isOnRoleNonEditable =
+                const hasInternHistory =
                   editingEmployee?.employment_type === "On Role" &&
-                  formData.internStartDate &&
-                  formData.internEndDate;
-                if (!isOnRoleNonEditable) return null;
+                  (formData.internStartDate ||
+                    formData.internEndDate ||
+                    formData.internId ||
+                    editingEmployee?.intern_id);
+                if (!hasInternHistory) return null;
                 return (
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
                     <button
@@ -1976,8 +2145,14 @@ const AddEmployee = ({
             <button
               type="submit"
               onClick={handleSubmit}
-              disabled={isLoading}
-              className="px-[1vw] py-[0.4vw] text-[0.85vw] text-white bg-black rounded-lg hover:bg-gray-800 transition-colors cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-[0.3vw] min-w-[5vw] justify-center"
+              disabled={
+                isLoading ||
+                checking ||
+                checkingIntern ||
+                usernameAvailable === false ||
+                internIdAvailable === false
+              }
+              className="px-[1vw] py-[0.4vw] text-[0.85vw] text-white bg-black rounded-lg hover:bg-gray-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-[0.3vw] min-w-[5vw] justify-center"
             >
               {isLoading ? (
                 <>
@@ -2026,6 +2201,92 @@ const AddEmployee = ({
                 />
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {/* Password Verification Modal for unlocking Employee ID / Intern ID */}
+      {passwordModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70]">
+          <div className="bg-white rounded-2xl shadow-2xl w-[26vw] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between px-[1.2vw] py-[0.9vw] border-b border-gray-100 bg-gray-50/70">
+              <div className="flex items-center gap-[0.5vw]">
+                <div className="w-[1.8vw] h-[1.8vw] rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                  <Lock size={"0.95vw"} />
+                </div>
+                <div>
+                  <h3 className="text-[0.92vw] font-bold text-gray-900 leading-tight">
+                    Security Authorization
+                  </h3>
+                  <p className="text-[0.68vw] text-gray-500 leading-tight">
+                    Unlock {passwordModal.field === "employeeId" ? "Employee ID" : "Intern ID"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setPasswordModal({ isOpen: false, field: null, password: "", error: "" })
+                }
+                className="p-[0.3vw] hover:bg-gray-200/60 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X size={"1vw"} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleVerifyPassword} className="p-[1.2vw] space-y-[0.9vw]">
+              <p className="text-[0.78vw] text-gray-600">
+                Please enter the security password to edit{" "}
+                <span className="font-semibold text-gray-900">
+                  {passwordModal.field === "employeeId" ? "Employee ID" : "Intern ID"}
+                </span>
+                .
+              </p>
+
+              <div>
+                <input
+                  type="password"
+                  autoFocus
+                  placeholder="Enter authorization password"
+                  value={passwordModal.password}
+                  onChange={(e) =>
+                    setPasswordModal((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                      error: "",
+                    }))
+                  }
+                  className={`w-full px-[0.9vw] py-[0.5vw] border rounded-lg text-[0.85vw] focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent transition ${
+                    passwordModal.error ? "border-red-500 ring-1 ring-red-500" : "border-gray-300"
+                  }`}
+                />
+                {passwordModal.error && (
+                  <p className="text-red-500 text-[0.72vw] mt-[0.3vw] font-medium">
+                    {passwordModal.error}
+                  </p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-[0.5vw] pt-[0.4vw]">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPasswordModal({ isOpen: false, field: null, password: "", error: "" })
+                  }
+                  className="px-[0.9vw] py-[0.4vw] text-[0.8vw] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-[1vw] py-[0.4vw] text-[0.8vw] font-medium text-white bg-black hover:bg-gray-800 rounded-lg transition cursor-pointer"
+                >
+                  Verify & Unlock
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

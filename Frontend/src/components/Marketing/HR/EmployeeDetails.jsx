@@ -70,6 +70,7 @@ const EmployeeOverview = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("Active"); // "Active", "Inactive", "all"
   const [dateFilter, setDateFilter] = useState({
     startDate: "",
     endDate: ""
@@ -89,7 +90,7 @@ const EmployeeOverview = () => {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, dateFilter, sortOrder]);
+  }, [searchTerm, dateFilter, sortOrder, statusFilter]);
 
   // Close popups when clicking outside
   useEffect(() => {
@@ -258,7 +259,7 @@ const EmployeeOverview = () => {
     return true;
   };
 
-  // Filter employees based on search and date of joining
+  // Filter employees based on search, status and date of joining
   const filteredEmployees = employees.filter((emp) => {
     const matchesSearch =
       emp.employee_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -273,7 +274,15 @@ const EmployeeOverview = () => {
       dateFilter.endDate
     );
 
-    return matchesSearch && matchesDateFilter;
+    const workingStatus = (emp.working_status || "").trim().toLowerCase();
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "Active"
+        ? workingStatus === "active"
+        : workingStatus !== "active";
+
+    return matchesSearch && matchesDateFilter && matchesStatus;
   });
 
   // Sort employees by date of joining
@@ -311,8 +320,11 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
   const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
   const endIndex = startIndex + RECORDS_PER_PAGE;
   
-  // When filters are active, show all results without pagination
-  const hasActiveFilters = searchTerm.trim() !== "" || dateFilter.startDate || dateFilter.endDate;
+  // When special search or date filters are active, show all results without pagination
+  const hasActiveFilters =
+    searchTerm.trim() !== "" ||
+    Boolean(dateFilter.startDate) ||
+    Boolean(dateFilter.endDate);
   const displayedEmployees = hasActiveFilters ? sortedEmployees : sortedEmployees.slice(startIndex, endIndex);
   const displayStartIndex = hasActiveFilters ? 0 : startIndex;
 
@@ -341,9 +353,10 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
       doc.text(`Generated: ${timestamp}`, 14, 22);
 
       // Add filter info if active
-      if (hasActiveFilters) {
+      if (hasActiveFilters || statusFilter === "Active") {
         doc.setFontSize(9);
         let filterText = `Filters Applied: `;
+        filterText += `Status: ${statusFilter === "all" ? "All" : statusFilter} `;
         if (searchTerm.trim()) filterText += `Search: "${searchTerm}" `;
         if (dateFilter.startDate || dateFilter.endDate) {
           filterText += `DOJ: ${dateFilter.startDate ? formatDate(dateFilter.startDate) : 'Any'} to ${dateFilter.endDate ? formatDate(dateFilter.endDate) : 'Any'}`;
@@ -450,6 +463,12 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
   const handleSelectPendingEmployee = (emp) => {
     setShowNotificationPopup(false);
 
+    // If the employee is relieved/inactive, ensure statusFilter shows them
+    const empStatus = (emp.working_status || "").trim().toLowerCase();
+    if (empStatus !== "active" && statusFilter === "Active") {
+      setStatusFilter("Inactive");
+    }
+
     const empIndex = sortedEmployees.findIndex((e) => e.employee_id === emp.employee_id);
     if (empIndex !== -1) {
       if (!hasActiveFilters) {
@@ -535,7 +554,11 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
       <div className="flex items-center justify-between p-[0.8vw] h-[10%] flex-shrink-0">
         <div className="flex items-center gap-[0.5vw]">
           <span className="font-medium text-[0.95vw] text-gray-800">
-            All Employees
+            {statusFilter === "Active"
+              ? "Active Employees"
+              : statusFilter === "Inactive"
+              ? "Inactive Employees"
+              : "All Employees"}
           </span>
           <span className="text-[0.85vw] text-gray-500">
             ({filteredEmployees.length})
@@ -641,6 +664,18 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-[2.1vw] pr-[0vw] py-[0.24vw] rounded-full text-[0.9vw] bg-gray-200 focus:ring-blue-500 focus:border-blue-500"
           />
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-[0.8vw] py-[0.38vw] rounded-full text-[0.78vw] font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition border-none"
+            title="Filter by Employee Status"
+          >
+            <option value="Active">Active Employees</option>
+            <option value="Inactive">Inactive Employees</option>
+            <option value="all">All Employees</option>
+          </select>
 
           {/* Date Filter Tooltip */}
           <div className="relative" ref={dateFilterRef}>
