@@ -79,6 +79,7 @@ const EmployeeOverview = () => {
   const [sortOrder, setSortOrder] = useState("asc"); // "none", "asc", "desc"
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
   const [highlightedEmpId, setHighlightedEmpId] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null);
 
   const dateFilterRef = useRef(null);
   const notificationRef = useRef(null);
@@ -491,40 +492,55 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
     }
   };
 
-  const renderEmployeeCell = (emp) => (
-    <div className="flex items-center gap-[0.5vw]">
-      <div className="w-[2.2vw] h-[2.2vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
-        {emp.profile_url ? (
-          <img
-            src={resolveFileUrl(emp.profile_url)}
-            alt={emp.employee_name}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              e.target.style.display = "none";
-              e.target.nextSibling.style.display = "flex";
-            }}
-          />
-        ) : null}
+  const renderEmployeeCell = (emp) => {
+    const fileUrl = resolveFileUrl(emp.profile_url);
+
+    return (
+      <div className="flex items-center gap-[0.5vw]">
         <div
-          className={`w-full h-full items-center justify-center bg-gray-800 text-white ${
-            emp.profile_url ? "hidden" : "flex"
+          onClick={() => {
+            if (emp.profile_url) {
+              setPreviewImage({
+                url: fileUrl,
+                name: emp.employee_name,
+                id: emp.employee_id,
+              });
+            }
+          }}
+          className={`w-[1.8vw] h-[1.8vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200 transition-transform ${
+            emp.profile_url ? "cursor-pointer hover:scale-110 hover:ring-2 hover:ring-blue-400" : ""
           }`}
+          title={emp.profile_url ? "Click to view photo" : ""}
         >
-          <span className="text-[0.9vw] font-semibold">
-            {emp.employee_name?.charAt(0).toUpperCase() || "?"}
-          </span>
+          {emp.profile_url ? (
+            <img
+              src={fileUrl}
+              alt={emp.employee_name}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.target.style.display = "none";
+                e.target.nextSibling.style.display = "flex";
+              }}
+            />
+          ) : null}
+          <div
+            className={`w-full h-full items-center justify-center bg-gray-800 text-white ${
+              emp.profile_url ? "hidden" : "flex"
+            }`}
+          >
+            <span className="text-[0.75vw] font-semibold">
+              {emp.employee_name?.charAt(0).toUpperCase() || "?"}
+            </span>
+          </div>
+        </div>
+        <div>
+          <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
+            {emp.employee_name}
+          </div>
         </div>
       </div>
-      <div>
-        <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
-          {emp.employee_name}
-        </div>
-        <div className="text-[0.72vw] text-gray-500 leading-tight">
-          {emp.employee_id}
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";
@@ -876,19 +892,22 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                   <th className="w-[4%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     S.NO
                   </th>
-                  <th className="w-[18%] px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[14%] px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Employee
                   </th>
+                  <th className="w-[9%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    Employee ID
+                  </th>
                   {isAdmin && (
-                    <th className="w-[9%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                    <th className="w-[8%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                       Password
                     </th>
                   )}
-                  <th className="w-[13%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[12%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Designation
                   </th>
                   <th 
-                    className="w-[11%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
+                    className="w-[10%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
                     onClick={toggleSort}
                   >
                     <div className="flex items-center justify-center gap-[0.3vw]">
@@ -896,16 +915,16 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                       <span>{getSortIcon()}</span>
                     </div>
                   </th>
-                  <th className="w-[18%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[16%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Email
                   </th>
-                  <th className="w-[11%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[10%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Employment Type
                   </th>
-                  <th className="w-[13%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[11%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Status
                   </th>
-                  <th className="w-[7%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                  <th className="w-[6%] px-[0.5vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Action
                   </th>
                 </tr>
@@ -932,6 +951,9 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                       </td>
                       <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
                         {renderEmployeeCell(emp)}
+                      </td>
+                      <td className="px-[0.5vw] py-[0.56vw] text-[0.86vw] text-gray-700 font-normal border border-gray-300 text-center whitespace-nowrap">
+                        {emp.employee_id || "-"}
                       </td>
                       {isAdmin && (
                         <td className="px-[0.5vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-mono">
@@ -1071,6 +1093,51 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
           editingEmployee={editingEmployee}
           onSuccess={handleSuccess}
         />
+      )}
+
+      {/* Image Preview Modal Popup */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div 
+            className="relative bg-white rounded-2xl shadow-2xl overflow-hidden max-w-[28vw] w-full border border-gray-200 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-[1vw] py-[0.8vw] border-b border-gray-100 bg-gray-50/80">
+              <div>
+                <h3 className="text-[0.95vw] font-bold text-gray-800 leading-tight">
+                  {previewImage.name}
+                </h3>
+                {previewImage.id && (
+                  <p className="text-[0.75vw] text-gray-500 font-normal leading-tight mt-[0.1vw]">
+                    {previewImage.id}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="p-[0.35vw] text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-full transition cursor-pointer"
+                title="Close"
+              >
+                <X size={"1.1vw"} />
+              </button>
+            </div>
+
+            {/* Image Body */}
+            <div className="p-[1.2vw] flex items-center justify-center bg-gray-100/50">
+              <div className="relative w-[18vw] h-[18vw] rounded-xl overflow-hidden shadow-inner bg-white border border-gray-200 flex items-center justify-center">
+                <img
+                  src={previewImage.url}
+                  alt={previewImage.name}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -894,7 +894,7 @@ router.get("/team-members", async (req, res) => {
       }
     });
 
-    // Get team heads for three departments
+    // Get team heads for departments
     const teamHeadsQuery = `SELECT 
       employee_id as id,
       employee_name as name,
@@ -906,7 +906,13 @@ router.get("/team-members", async (req, res) => {
     AND working_status = 'Active'`;
 
     const teamHeads = await queryWithRetry(teamHeadsQuery);
-    const teamHeadMap = new Map(teamHeads.map((head) => [head.role, head]));
+    const teamHeadsMap = new Map();
+    teamHeads.forEach((head) => {
+      if (!teamHeadsMap.has(head.role)) {
+        teamHeadsMap.set(head.role, []);
+      }
+      teamHeadsMap.get(head.role).push(head);
+    });
 
     // Get all employees for task assignment mapping
     const employeeMap = await getEmployeesFromMySQL();
@@ -1178,16 +1184,22 @@ router.get("/team-members", async (req, res) => {
     const departments = ["Software Developer", "UI/UX", "3D"];
 
     departments.forEach((dept) => {
-      const teamHead = teamHeadMap.get(dept);
-      if (teamHead) {
+      const heads = teamHeadsMap.get(dept) || [];
+      if (heads.length > 0) {
         departmentGroups.set(dept, {
           department: dept,
           teamHead: {
-            id: teamHead.id,
-            name: teamHead.name,
-            profile: teamHead.profile,
-            role: teamHead.role,
+            id: heads[0].id,
+            name: heads[0].name,
+            profile: heads[0].profile,
+            role: heads[0].role,
           },
+          teamHeads: heads.map((h) => ({
+            id: h.id,
+            name: h.name,
+            profile: h.profile,
+            role: h.role,
+          })),
           projects: [],
           summary: {
             totalProjects: 0,

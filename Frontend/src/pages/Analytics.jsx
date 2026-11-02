@@ -2865,31 +2865,47 @@ const Analytics = () => {
                                 className="px-[0.4vw] py-[0.4vw] border-r border-gray-300 bg-gray-50"
                                 rowSpan={dept.projects.length}
                               >
-                                <div className="flex gap-2 items-center">
-                                  <div className="relative w-[1.6vw] h-[1.6vw]">
-                                    <img
-                                      src={`${import.meta.env.VITE_API_BASE_URL1}${
-                                        dept.teamHead.profile
-                                      }`}
-                                      alt="profile"
-                                      className="w-full h-full rounded-full object-cover bg-white"
-                                      onError={(e) => {
-                                        e.target.style.display = "none";
-                                        e.target.nextSibling.style.display =
-                                          "flex";
-                                      }}
-                                    />
-                                    <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.9vw]">
-                                      {dept.teamHead.name?.[0]?.toUpperCase() ||
-                                        "?"}
+                                {(() => {
+                                  const heads = Array.isArray(dept.teamHeads) && dept.teamHeads.length > 0
+                                    ? dept.teamHeads
+                                    : dept.teamHead
+                                    ? [dept.teamHead]
+                                    : [];
+
+                                  if (heads.length === 0) {
+                                    return <span className="text-gray-400 text-[0.75vw]">-</span>;
+                                  }
+
+                                  return (
+                                    <div className="flex flex-col gap-[0.4vw]">
+                                      {heads.map((head, hIdx) => (
+                                        <div key={head.id || hIdx} className="flex gap-2 items-center">
+                                          <div className="relative w-[1.6vw] h-[1.6vw] flex-shrink-0">
+                                            <img
+                                              src={`${import.meta.env.VITE_API_BASE_URL1}${
+                                                head.profile
+                                              }`}
+                                              alt="profile"
+                                              className="w-full h-full rounded-full object-cover bg-white"
+                                              onError={(e) => {
+                                                e.target.style.display = "none";
+                                                e.target.nextSibling.style.display = "flex";
+                                              }}
+                                            />
+                                            <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.8vw]">
+                                              {head.name?.[0]?.toUpperCase() || "?"}
+                                            </div>
+                                          </div>
+                                          <div>
+                                            <p className="text-black text-[0.75vw] font-medium whitespace-nowrap">
+                                              {head.name}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))}
                                     </div>
-                                  </div>
-                                  <div>
-                                    <p className="text-black text-[0.75vw] font-medium">
-                                      {dept.teamHead.name}
-                                    </p>
-                                  </div>
-                                </div>
+                                  );
+                                })()}
                               </td>
                             </>
                           )}
