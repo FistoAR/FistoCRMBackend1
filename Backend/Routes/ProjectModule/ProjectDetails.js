@@ -1247,22 +1247,29 @@ const getProjectEnrichedTasks = async (projectId) => {
     return { tasks: [], percentage: 0 };
   }
 
-  // 1. Batch fetch all employee details for tasks in 1 SQL query
-  const employeeIds = [...new Set(tasks.map((t) => t.employeeID).filter(Boolean))];
-  const assignedByMap = {};
+  // 1. Batch fetch all employee details for tasks (both assignedBy and assignedTo) in 1 SQL query
+  const employeeIds = [...new Set([
+    ...tasks.map((t) => t.employeeID).filter(Boolean),
+    ...tasks.map((t) => t.employee).filter(Boolean),
+    ...tasks.flatMap((t) => (t.activities || []).map((a) => a.employee)).filter(Boolean)
+  ])];
+  const employeeDetailsMap = {};
   if (employeeIds.length > 0) {
     const placeholders = employeeIds.map(() => "?").join(",");
     const empQuery = `
       SELECT 
         employee_id as id,
+        intern_id,
         employee_name as name,
-        profile_url as profile
+        profile_url as profile,
+        designation as department
       FROM employees_details 
-      WHERE employee_id IN (${placeholders})
+      WHERE employee_id IN (${placeholders}) OR intern_id IN (${placeholders})
     `;
-    const empResults = await queryWithRetry(empQuery, employeeIds);
+    const empResults = await queryWithRetry(empQuery, [...employeeIds, ...employeeIds]);
     empResults.forEach((emp) => {
-      assignedByMap[emp.id] = emp;
+      if (emp.id) employeeDetailsMap[emp.id] = emp;
+      if (emp.intern_id) employeeDetailsMap[emp.intern_id] = emp;
     });
   }
 
@@ -1320,7 +1327,8 @@ const getProjectEnrichedTasks = async (projectId) => {
 
   const tasksWithAssignedBy = tasks.map((task) => {
     const tIdStr = task._id.toString();
-    const assignedBy = task.employeeID ? (assignedByMap[task.employeeID] || null) : null;
+    const assignedBy = task.employeeID ? (employeeDetailsMap[task.employeeID] || null) : null;
+    const assignedTo = task.employee ? (employeeDetailsMap[task.employee] || null) : null;
 
     let latestTaskReport = reviewMap.get(tIdStr) || reportMap.get(tIdStr) || null;
     if (latestTaskReport?.status === "underReview") {
@@ -1340,8 +1348,12 @@ const getProjectEnrichedTasks = async (projectId) => {
           activity.percentage = latestActivityReport.percentage ?? activity.percentage;
         }
 
+        const actAssignedTo = activity.employee ? (employeeDetailsMap[activity.employee] || null) : null;
+
         return {
           ...activity,
+          assignedTo: actAssignedTo,
+          assigned_to: actAssignedTo,
           latestReportDate: latestActivityReport?.createdAt || null,
         };
       });
@@ -1370,6 +1382,8 @@ const getProjectEnrichedTasks = async (projectId) => {
       activities: activitiesWithReports,
       assignedBy,
       assigned_by: assignedBy,
+      assignedTo,
+      assigned_to: assignedTo,
       latestReportDate: latestTaskReport?.createdAt || null,
     };
   });
@@ -1613,6 +1627,34 @@ router.get("/:projectId", async (req, res) => {
         ? project.department.map(() => "?").join(",")
         : null;
 
+      // Also gather any task assignees for this project
+      let taskAssigneeIds = [];
+      try {
+        const projectTasks = await Tasks.find({ projectId: req.params.projectId })
+          .select("employee employeeID activities.employee")
+          .lean();
+        if (projectTasks && projectTasks.length > 0) {
+          projectTasks.forEach((t) => {
+            if (t.employee) taskAssigneeIds.push(t.employee.toString().trim());
+            if (t.employeeID) taskAssigneeIds.push(t.employeeID.toString().trim());
+            if (t.activities && t.activities.length > 0) {
+              t.activities.forEach((a) => {
+                if (a.employee) taskAssigneeIds.push(a.employee.toString().trim());
+              });
+            }
+          });
+        }
+      } catch (err) {
+        // ignore task lookup failure
+      }
+
+      const explicitEmployeeIds = [
+        ...originalEmployeeIds.map((id) => id.toString().trim()),
+        ...(project.accessGrantedTo || []).map((item) => item.employeeId?.toString().trim()).filter(Boolean),
+        ...taskAssigneeIds,
+      ].filter(Boolean);
+      const uniqueExplicitIds = [...new Set(explicitEmployeeIds)];
+
       let employeesByDeptQuery = `
         SELECT 
           e.employee_id AS id,
@@ -1627,10 +1669,19 @@ router.get("/:projectId", async (req, res) => {
       `;
       const queryParams = [];
 
+      const conditions = [];
       if (deptPlaceholders) {
-        employeesByDeptQuery += ` AND (d.id IN (${deptPlaceholders}) OR e.working_status = 'Active')`;
+        conditions.push(`d.id IN (${deptPlaceholders})`);
         queryParams.push(...project.department);
       }
+      conditions.push(`e.working_status = 'Active'`);
+      if (uniqueExplicitIds.length > 0) {
+        const idPlaceholders = uniqueExplicitIds.map(() => "?").join(",");
+        conditions.push(`e.employee_id IN (${idPlaceholders}) OR e.intern_id IN (${idPlaceholders})`);
+        queryParams.push(...uniqueExplicitIds, ...uniqueExplicitIds);
+      }
+
+      employeesByDeptQuery += ` AND (${conditions.join(" OR ")})`;
       return await queryWithRetry(employeesByDeptQuery, queryParams);
     })();
 

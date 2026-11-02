@@ -479,7 +479,7 @@ router.get("/dashboard", async (req, res) => {
     `;
 
     const employeeQuery = `
-      SELECT employee_id, employee_name, profile_url, designation, working_status
+      SELECT employee_id, intern_id, employee_name, profile_url, designation, working_status
       FROM employees_details
       WHERE working_status = 'Active'
     `;
