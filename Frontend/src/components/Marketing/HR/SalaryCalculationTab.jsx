@@ -704,7 +704,7 @@ const SalaryCalculationTab = ({
 
   const renderEmployeeCell = (data) => (
     <div className="flex items-center gap-[0.5vw]">
-      <div className="w-[2.2vw] h-[2.2vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
+      <div className="w-[1.75vw] h-[1.75vw] rounded-full overflow-hidden flex-shrink-0 bg-gray-200">
         {data.profile_url ? (
           <img
             src={`${API_BASE_URL1}${data.profile_url}`}
@@ -725,11 +725,8 @@ const SalaryCalculationTab = ({
         </div>
       </div>
       <div>
-        <div className="text-[0.86vw] font-medium text-gray-900 leading-tight">
+        <div className="text-[0.86vw] font-regular text-gray-900 leading-tight">
           {data.employeeName || data.employeeId}
-        </div>
-        <div className="text-[0.72vw] text-gray-500 leading-tight">
-          {data.employeeId}
         </div>
       </div>
     </div>
@@ -1282,10 +1279,10 @@ const SalaryCalculationTab = ({
                           S.No
                         </th>
                         <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                          Employee ID
+                          Employee Name
                         </th>
                         <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                          Employee Name
+                          Employee ID
                         </th>
                         <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Designation
@@ -1343,13 +1340,13 @@ const SalaryCalculationTab = ({
                               <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
                                 {globalIndex}
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
-                                {emp.employeeId}
-                              </td>
                               <td className="px-[0.8vw] py-[0.72vw] border border-gray-300">
                                 {renderEmployeeCell(emp)}
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
+                                {emp.employeeId}
+                              </td>
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-left">
                                 {emp.designation}
                               </td>
                               <td className="px-[0.8vw] py-[0.72vw] border border-gray-300 text-center">
@@ -1363,18 +1360,18 @@ const SalaryCalculationTab = ({
                                   {emp.jobRole}
                                 </span>
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-medium">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-regular">
                                 {emp.month && emp.year
                                   ? `${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}`
                                   : "-"}
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-regular text-gray-900 border border-gray-300 text-center">
                                 {totalLeave}
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-regular text-gray-900 border border-gray-300 text-center">
                                 {paidLeave}
                               </td>
-                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-regular text-gray-900 border border-gray-300 text-center">
                                 {unpaidLeave}
                               </td>
                               <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
