@@ -101,9 +101,9 @@ const getEmployeesFromMySQL = () => {
       intern_id,
       employee_name as name,
       profile_url as profile,
-      designation as role
-    FROM employees_details 
-    WHERE working_status = 'Active'`;
+      designation as role,
+      working_status as workingStatus
+    FROM employees_details`;
     
     try {
       const results = await queryWithRetry(query);
@@ -894,16 +894,17 @@ router.get("/team-members", async (req, res) => {
       }
     });
 
-    // Get team heads for departments
+    // Get team heads for departments (both Active and Relieved)
     const teamHeadsQuery = `SELECT 
       employee_id as id,
       employee_name as name,
       profile_url as profile,
-      designation as role
+      designation as role,
+      working_status as workingStatus
     FROM employees_details 
     WHERE team_head = 1 
     AND designation IN ('Software Developer', 'UI/UX', '3D')
-    AND working_status = 'Active'`;
+    ORDER BY CASE WHEN working_status = 'Active' THEN 0 ELSE 1 END, employee_name ASC`;
 
     const teamHeads = await queryWithRetry(teamHeadsQuery);
     const teamHeadsMap = new Map();
@@ -970,6 +971,7 @@ router.get("/team-members", async (req, res) => {
                   name: emp.name,
                   role: emp.role,
                   profile: emp.profile,
+                  workingStatus: emp.workingStatus,
                 });
               }
             }
@@ -1020,6 +1022,7 @@ router.get("/team-members", async (req, res) => {
                 name: emp.name,
                 role: emp.role,
                 profile: emp.profile,
+                workingStatus: emp.workingStatus,
               });
             }
           }
@@ -1185,31 +1188,31 @@ router.get("/team-members", async (req, res) => {
 
     departments.forEach((dept) => {
       const heads = teamHeadsMap.get(dept) || [];
-      if (heads.length > 0) {
-        departmentGroups.set(dept, {
-          department: dept,
-          teamHead: {
-            id: heads[0].id,
-            name: heads[0].name,
-            profile: heads[0].profile,
-            role: heads[0].role,
-          },
-          teamHeads: heads.map((h) => ({
-            id: h.id,
-            name: h.name,
-            profile: h.profile,
-            role: h.role,
-          })),
-          projects: [],
-          summary: {
-            totalProjects: 0,
-            completedProjects: 0,
-            ongoingProjects: 0,
-            overdueProjects: 0,
-            delayedProjects: 0,
-          },
-        });
-      }
+      departmentGroups.set(dept, {
+        department: dept,
+        teamHead: heads.length > 0 ? {
+          id: heads[0].id,
+          name: heads[0].name,
+          profile: heads[0].profile,
+          role: heads[0].role,
+          workingStatus: heads[0].workingStatus,
+        } : null,
+        teamHeads: heads.map((h) => ({
+          id: h.id,
+          name: h.name,
+          profile: h.profile,
+          role: h.role,
+          workingStatus: h.workingStatus,
+        })),
+        projects: [],
+        summary: {
+          totalProjects: 0,
+          completedProjects: 0,
+          ongoingProjects: 0,
+          overdueProjects: 0,
+          delayedProjects: 0,
+        },
+      });
     });
 
     // Assign projects to departments
@@ -1245,7 +1248,10 @@ router.get("/team-members", async (req, res) => {
       }
     });
 
-    const departmentData = Array.from(departmentGroups.values());
+    // Only include departments that have at least 1 project
+    const departmentData = Array.from(departmentGroups.values()).filter(
+      (deptGroup) => deptGroup.projects.length > 0
+    );
 
     const overallSummary = {
       totalProjects: activeProjects.length,

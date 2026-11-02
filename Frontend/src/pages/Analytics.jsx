@@ -106,6 +106,7 @@ const Analytics = () => {
   const hideTimeout = useRef(null);
   const filterRef = useRef(null);
   const [departments, setDepartments] = useState([]);
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState("All");
   const [projectEmployees, setProjectEmployees] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -2744,44 +2745,63 @@ const Analytics = () => {
             <Timelines timelineData={timelineData} />
           </div>
           <div className="bg-white px-[0.8vw] py-[0.6vw] rounded-lg shadow col-span-1 lg:col-span-2">
-            <div className="flex items-center gap-[1vw] mb-[0.7vw]">
-              <h2 className="text-[1vw] font-normal ">Admin's Overview</h2>
-              <div className="relative">
-                <button
-                  className=" bg-white  flex items-center gap-2 px-[0.6vw] py-[0.2vw] text-[0.8vw] bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors border"
-                  onMouseEnter={() => {
-                    setShowCodes(true);
-                    clearTimeout(hideTimeout.current);
-                  }}
-                  onMouseLeave={() => {
-                    hideTimeout.current = setTimeout(
-                      () => setShowCodes(false),
-                      500,
-                    );
-                  }}
-                >
-                  <span className=" w-[0.7vw] h-[0.7vw] rounded-full bg-red-500"></span>
-                  Codes
-                </button>
+            <div className="flex items-center justify-between gap-[1vw] mb-[0.7vw]">
+              <div className="flex items-center gap-[1vw]">
+                <h2 className="text-[1vw] font-normal ">Admin's Overview</h2>
+                <div className="relative">
+                  <button
+                    className=" bg-white  flex items-center gap-2 px-[0.6vw] py-[0.2vw] text-[0.8vw] bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors border"
+                    onMouseEnter={() => {
+                      setShowCodes(true);
+                      clearTimeout(hideTimeout.current);
+                    }}
+                    onMouseLeave={() => {
+                      hideTimeout.current = setTimeout(
+                        () => setShowCodes(false),
+                        500,
+                      );
+                    }}
+                  >
+                    <span className=" w-[0.7vw] h-[0.7vw] rounded-full bg-red-500"></span>
+                    Codes
+                  </button>
 
-                {showCodes && (
-                  <div className="absolute flex flex-col gap-[0.5vw] mt-[0.3vw] py-[0.6vw] px-[0.7vw] bg-white border border-[#d1d5db] border-[0.13vw] rounded-xl shadow w-max text-[0.75vw] z-50">
-                    <div className="flex items-center gap-[0.3vw]">
-                      <div
-                        className="w-[1vw] h-[1vw]  rounded"
-                        style={{ backgroundColor: "#ffa86bf0" }}
-                      ></div>
-                      Hold
+                  {showCodes && (
+                    <div className="absolute flex flex-col gap-[0.5vw] mt-[0.3vw] py-[0.6vw] px-[0.7vw] bg-white border border-[#d1d5db] border-[0.13vw] rounded-xl shadow w-max text-[0.75vw] z-50">
+                      <div className="flex items-center gap-[0.3vw]">
+                        <div
+                          className="w-[1vw] h-[1vw]  rounded"
+                          style={{ backgroundColor: "#ffa86bf0" }}
+                        ></div>
+                        Hold
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-[1vw] h-[1vw]  rounded"
+                          style={{ backgroundColor: "#0000003d" }}
+                        ></div>
+                        Canceled
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-[1vw] h-[1vw]  rounded"
-                        style={{ backgroundColor: "#0000003d" }}
-                      ></div>
-                      Canceled
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+
+              {/* Department Filter */}
+              <div className="flex items-center gap-[0.4vw]">
+                <span className="text-[0.78vw] text-gray-500 font-medium">Department:</span>
+                <select
+                  value={selectedDepartmentFilter}
+                  onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
+                  className="bg-white border border-gray-300 text-gray-700 text-[0.78vw] rounded-lg px-[0.6vw] py-[0.25vw] focus:outline-none focus:border-blue-500 cursor-pointer shadow-xs"
+                >
+                  <option value="All">All Departments</option>
+                  {Array.from(new Set(departments.map((d) => d.department))).map((deptName) => (
+                    <option key={deptName} value={deptName}>
+                      {deptName}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -2814,7 +2834,13 @@ const Analytics = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {departments.map((dept, deptIndex) =>
+                  {departments
+                    .filter((dept) =>
+                      selectedDepartmentFilter === "All"
+                        ? true
+                        : dept.department === selectedDepartmentFilter
+                    )
+                    .map((dept, deptIndex) =>
                     dept.projects.map((project, projectIndex) => {
                       const reportDate = new Date(project.lastReportDate);
                       const endDateTime = createDateTime(
@@ -2876,33 +2902,59 @@ const Analytics = () => {
                                     return <span className="text-gray-400 text-[0.75vw]">-</span>;
                                   }
 
-                                  return (
+                                   return (
                                     <div className="flex flex-col gap-[0.4vw]">
-                                      {heads.map((head, hIdx) => (
-                                        <div key={head.id || hIdx} className="flex gap-2 items-center">
-                                          <div className="relative w-[1.6vw] h-[1.6vw] flex-shrink-0">
-                                            <img
-                                              src={`${import.meta.env.VITE_API_BASE_URL1}${
-                                                head.profile
-                                              }`}
-                                              alt="profile"
-                                              className="w-full h-full rounded-full object-cover bg-white"
-                                              onError={(e) => {
-                                                e.target.style.display = "none";
-                                                e.target.nextSibling.style.display = "flex";
-                                              }}
-                                            />
-                                            <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.8vw]">
-                                              {head.name?.[0]?.toUpperCase() || "?"}
+                                      {heads.map((head, hIdx) => {
+                                        const isRelieved = head.workingStatus && head.workingStatus !== "Active";
+                                        return (
+                                           <div
+                                            key={head.id || hIdx}
+                                            className={`flex gap-2 items-center ${
+                                              isRelieved ? "opacity-75 filter grayscale-[35%]" : ""
+                                            }`}
+                                          >
+                                            <div className="relative group/head w-[1.6vw] h-[1.6vw] flex-shrink-0 cursor-pointer">
+                                              <img
+                                                src={`${import.meta.env.VITE_API_BASE_URL1}${
+                                                  head.profile
+                                                }`}
+                                                alt="profile"
+                                                className="w-full h-full rounded-full object-cover bg-white ring-1 ring-gray-200"
+                                                onError={(e) => {
+                                                  e.target.style.display = "none";
+                                                  e.target.nextSibling.style.display = "flex";
+                                                }}
+                                              />
+                                              <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full items-center justify-center font-medium text-[0.8vw]">
+                                                {head.name?.[0]?.toUpperCase() || "?"}
+                                              </div>
+
+                                              {/* Custom Tooltip */}
+                                              <div className="absolute left-1/2 -top-[1.9vw] -translate-x-1/2 px-[0.5vw] py-[0.2vw] bg-gray-900/90 backdrop-blur-xs text-white text-[0.65vw] rounded-md shadow-lg pointer-events-none opacity-0 invisible group-hover/head:opacity-100 group-hover/head:visible transition-all duration-150 whitespace-nowrap z-50 flex items-center gap-[0.3vw]">
+                                                <span className="font-medium">{head.name}</span>
+                                                {isRelieved && (
+                                                  <span className="text-amber-300 font-normal">
+                                                    ({head.workingStatus || "Relieved"})
+                                                  </span>
+                                                )}
+                                                <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900/90" />
+                                              </div>
+                                            </div>
+                                            <div>
+                                              <p className={`text-[0.75vw] font-medium whitespace-nowrap ${
+                                                isRelieved ? "text-gray-500" : "text-black"
+                                              }`}>
+                                                {head.name}
+                                                {isRelieved && (
+                                                  <span className="ml-[0.3vw] text-[0.62vw] text-gray-400 font-normal">
+                                                    ({head.workingStatus || "Relieved"})
+                                                  </span>
+                                                )}
+                                              </p>
                                             </div>
                                           </div>
-                                          <div>
-                                            <p className="text-black text-[0.75vw] font-medium whitespace-nowrap">
-                                              {head.name}
-                                            </p>
-                                          </div>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   );
                                 })()}
@@ -2964,34 +3016,53 @@ const Analytics = () => {
                               project.teamMembers.length > 0 ? (
                                 <>
                                   <div className="flex -space-x-2">
-                                    {project.teamMembers.map((member, idx) => (
-                                      <div
-                                        key={member.id}
-                                        className="relative group "
-                                        style={{
-                                          zIndex:
-                                            project.teamMembers.length - idx,
-                                        }}
-                                        title={member.name}
-                                      >
-                                        <img
-                                          src={`${
-                                            import.meta.env.VITE_API_BASE_URL1
-                                          }${member.profile}`}
-                                          alt={member.name}
-                                          className="w-[1.8vw] h-[1.8vw] rounded-full object-cover border-2 border-white bg-white"
-                                          onError={(e) => {
-                                            e.target.style.display = "none";
-                                            e.target.nextSibling.style.display =
-                                              "flex";
+                                    {project.teamMembers.map((member, idx) => {
+                                      const isRelievedMember =
+                                        member.workingStatus &&
+                                        member.workingStatus !== "Active";
+                                      return (
+                                        <div
+                                          key={member.id}
+                                          className={`relative group ${
+                                            isRelievedMember
+                                              ? "opacity-75 filter grayscale-[35%]"
+                                              : ""
+                                          }`}
+                                          style={{
+                                            zIndex:
+                                              project.teamMembers.length - idx,
                                           }}
-                                        />
-                                        <div className="hidden w-[1.8vw] h-[1.8vw] bg-blue-400 text-white text-[0.75vw] rounded-full items-center justify-center text-[0.5vw] border-2 border-white">
-                                          {member.name?.[0]?.toUpperCase() ||
-                                            "?"}
+                                        >
+                                          <img
+                                            src={`${
+                                              import.meta.env.VITE_API_BASE_URL1
+                                            }${member.profile}`}
+                                            alt={member.name}
+                                            className="w-[1.8vw] h-[1.8vw] rounded-full object-cover border-2 border-white bg-white hover:scale-110 transition-transform cursor-pointer"
+                                            onError={(e) => {
+                                              e.target.style.display = "none";
+                                              e.target.nextSibling.style.display =
+                                                "flex";
+                                            }}
+                                          />
+                                          <div className="hidden w-[1.8vw] h-[1.8vw] bg-blue-400 text-white text-[0.75vw] rounded-full items-center justify-center text-[0.5vw] border-2 border-white">
+                                            {member.name?.[0]?.toUpperCase() ||
+                                              "?"}
+                                          </div>
+
+                                          {/* Custom Tooltip */}
+                                          <div className="absolute left-1/2 -top-[2vw] -translate-x-1/2 px-[0.5vw] py-[0.2vw] bg-gray-900/90 backdrop-blur-xs text-white text-[0.65vw] rounded-md shadow-lg pointer-events-none opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 whitespace-nowrap z-50 flex items-center gap-[0.3vw]">
+                                            <span className="font-medium">{member.name}</span>
+                                            {isRelievedMember && (
+                                              <span className="text-amber-300 font-normal">
+                                                ({member.workingStatus || "Relieved"})
+                                              </span>
+                                            )}
+                                            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900/90" />
+                                          </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 </>
                               ) : (
@@ -3024,9 +3095,14 @@ const Analytics = () => {
                 </tbody>
               </table>
 
-              {(!departments || departments.length === 0) && (
+              {(!departments ||
+                departments.filter((dept) =>
+                  selectedDepartmentFilter === "All"
+                    ? true
+                    : dept.department === selectedDepartmentFilter
+                ).length === 0) && (
                 <div className="text-center py-8 text-gray-500">
-                  <p className="text-[0.9vw]">No project data available</p>
+                  <p className="text-[0.9vw]">No project data available for selected department</p>
                 </div>
               )}
             </div>
