@@ -14,20 +14,152 @@ import {
 const tabsConfig = {
   All: null,
   Requests: {
-    tabs: ["Leave", "Permission", "Meetings"],
+    tabs: ["Leave", "Permission", "Meetings", "Attendance"],
     subTabsConfig: {
       Leave: ["Pending", "Approved", "Rejected"],
       Permission: ["Pending", "Approved", "Rejected"],
       Meetings: ["Upcoming", "Completed"],
+      Attendance: ["Pending", "Approved", "Rejected"],
     },
   },
   Tasks: {
-    tabs: ["Assigned", "Completed"],
+    tabs: ["Assigned", "Completed", "Messages"],
     subTabsConfig: {
       Assigned: ["Pending", "In Progress"],
       Completed: ["Done"],
     },
   },
+};
+
+// Check if a notification belongs to a top-level tab (Requests vs Tasks)
+const matchesMainTab = (notification, tab) => {
+  if (!tab || tab === "All") return true;
+  const type = (notification.type || "").toLowerCase();
+  const reqType = (notification.requestType || "").toLowerCase();
+
+  if (tab === "Requests") {
+    return (
+      type === "leave" ||
+      type === "permission" ||
+      type.includes("meeting") ||
+      type.includes("attendance") ||
+      type.includes("project_request") ||
+      reqType === "new_request" ||
+      reqType === "new_meeting"
+    );
+  }
+
+  if (tab === "Tasks") {
+    return (
+      type === "task" ||
+      type === "tasks" ||
+      type.includes("task") ||
+      type === "chat-message" ||
+      reqType === "new_task" ||
+      reqType === "task_edit"
+    );
+  }
+
+  return type === tab.toLowerCase();
+};
+
+// Check if a notification matches a subTab (Leave, Permission, Meetings, Attendance, Assigned, Completed, Messages)
+const matchesSubTab = (notification, subTab) => {
+  if (!subTab) return true;
+  const type = (notification.type || "").toLowerCase();
+  const reqType = (notification.requestType || "").toLowerCase();
+  const sub = subTab.toLowerCase();
+
+  if (sub === "leave") return type === "leave";
+  if (sub === "permission") return type === "permission";
+  if (sub === "meetings") return type.includes("meeting") || reqType === "new_meeting";
+  if (sub === "attendance") return type.includes("attendance");
+
+  if (sub === "assigned") {
+    const status = (notification.status || "").toLowerCase();
+    return (
+      (type.includes("task") || reqType === "new_task" || reqType === "task_edit") &&
+      status !== "done" &&
+      status !== "completed"
+    );
+  }
+  if (sub === "completed") {
+    const status = (notification.status || "").toLowerCase();
+    return (
+      (type.includes("task") || reqType === "new_task" || reqType === "task_edit") &&
+      (status === "done" || status === "completed")
+    );
+  }
+  if (sub === "messages") {
+    return type === "chat-message";
+  }
+
+  return type === sub;
+};
+
+// Check if a notification matches an activity status chip (Pending, Approved, Rejected, etc.)
+const matchesActivityStatus = (notification, activityStatus) => {
+  if (!activityStatus) return true;
+  const status = (notification.status || "").toLowerCase();
+  const target = activityStatus.toLowerCase();
+
+  const effectiveStatus = getNotificationStatus(notification);
+  if (target === "pending") {
+    return (
+      effectiveStatus === "pending" ||
+      effectiveStatus === "hold" ||
+      notification.requestType === "new_request" ||
+      !effectiveStatus
+    );
+  }
+  if (target === "approved") {
+    return effectiveStatus === "approved";
+  }
+  if (target === "rejected") {
+    return effectiveStatus === "rejected";
+  }
+  if (target === "in progress") {
+    return effectiveStatus === "in progress" || effectiveStatus === "progress";
+  }
+  if (target === "done" || target === "completed") {
+    return effectiveStatus === "done" || effectiveStatus === "completed";
+  }
+  if (target === "upcoming") {
+    return effectiveStatus === "upcoming" || effectiveStatus === "scheduled";
+  }
+
+  return effectiveStatus === target;
+};
+
+// Helper to determine the true effective status of a notification
+const getNotificationStatus = (notification) => {
+  if (!notification) return "";
+  const rawStatus = (notification.status || "").toLowerCase();
+  if (rawStatus === "approved" || rawStatus === "rejected") return rawStatus;
+
+  const type = (notification.type || "").toLowerCase();
+  const title = (notification.title || "").toLowerCase();
+  const data = notification.data || {};
+
+  if (
+    type === "project_request_approved" ||
+    type === "request-approved" ||
+    title.includes("approved") ||
+    data.approvedBy
+  ) {
+    return "approved";
+  }
+
+  if (
+    type === "project_request_rejected" ||
+    type === "request-rejected" ||
+    title.includes("rejected") ||
+    data.rejectedBy
+  ) {
+    return "rejected";
+  }
+
+  return rawStatus;
 };
 
 // Helper function to calculate age
@@ -277,6 +409,7 @@ const NotificationListItem = ({
   isDeleting,
 }) => {
   const itemData = getNotificationDetails(notification);
+  const effectiveStatus = getNotificationStatus(notification);
   const timeData = useMemo(
     () => ({
       time: new Date(notification.timestamp).toLocaleTimeString("en-US", {
@@ -305,11 +438,11 @@ const NotificationListItem = ({
       >
         <div className="flex items-center gap-4 flex-1">
           <div className="w-[2.5vw] h-[2.5vw] rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-            {notification.status === "approved" ? (
+            {effectiveStatus === "approved" ? (
               <CheckCircle className="w-[1.3vw] h-[1.3vw] text-green-600" />
-            ) : notification.status === "rejected" ? (
+            ) : effectiveStatus === "rejected" ? (
               <XCircle className="w-[1.3vw] h-[1.3vw] text-red-600" />
-            ) : notification.status === "pending" ||
+            ) : effectiveStatus === "pending" ||
               notification.requestType === "new_request" ? (
               <Clock className="w-[1.3vw] h-[1.3vw] text-yellow-600" />
             ) : notification.requestType === "new_meeting" ||
@@ -381,12 +514,12 @@ const NotificationListItem = ({
           )}
 
           {/* Approval/Rejection badges */}
-          {notification.status === "approved" && (
+          {effectiveStatus === "approved" && (
             <span className="px-[0.6vw] py-[0.2vw] text-[0.7vw] font-medium text-green-600 bg-green-100 rounded-full">
               Approved
             </span>
           )}
-          {notification.status === "rejected" && (
+          {effectiveStatus === "rejected" && (
             <span className="px-[0.6vw] py-[0.2vw] text-[0.7vw] font-medium text-red-600 bg-red-100 rounded-full">
               Rejected
             </span>
@@ -422,6 +555,7 @@ const NotificationDetailView = ({
   const [submitted, setSubmitted] = useState(false);
   const submittingRef = useRef(false);
   const data = getNotificationDetails(notification);
+  const effectiveStatus = getNotificationStatus(notification);
   useEffect(() => {
     if (!notification.read) {
       onMarkAsRead(notification.id);
@@ -593,11 +727,11 @@ const NotificationDetailView = ({
         <div className="bg-white border-b border-gray-200 p-[1vw]">
           <div className="flex items-center gap-[1vw]">
             <div className="w-[2.5vw] h-[2.5vw] rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-              {notification.status === "approved" ? (
+              {effectiveStatus === "approved" ? (
                 <CheckCircle className="w-[1.5vw] h-[1.5vw] text-green-600" />
-              ) : notification.status === "rejected" ? (
+              ) : effectiveStatus === "rejected" ? (
                 <XCircle className="w-[1.5vw] h-[1.5vw] text-red-600" />
-              ) : notification.status === "pending" ||
+              ) : effectiveStatus === "pending" ||
                 notification.requestType === "new_request" ? (
                 <Clock className="w-[1.5vw] h-[1.5vw] text-yellow-600" />
               ) : notification.requestType === "new_meeting" ||
@@ -625,18 +759,18 @@ const NotificationDetailView = ({
               </p>
             </div>
 
-            {notification.status && notification.status !== "pending" && (
+            {effectiveStatus && effectiveStatus !== "pending" && (
               <span
                 className={`inline-flex items-center px-[0.8vw] py-[0.4vh] rounded-full text-[0.75vw] font-medium ${
-                  notification.status === "approved"
+                  effectiveStatus === "approved"
                     ? "bg-green-100 text-green-800"
-                    : notification.status === "rejected"
+                    : effectiveStatus === "rejected"
                       ? "bg-red-100 text-red-800"
                       : "bg-blue-100 text-blue-800"
                 }`}
               >
-                {notification.status.charAt(0).toUpperCase() +
-                  notification.status.slice(1)}
+                {effectiveStatus.charAt(0).toUpperCase() +
+                  effectiveStatus.slice(1)}
               </span>
             )}
           </div>
@@ -1140,27 +1274,29 @@ const NotificationDetailView = ({
             {/* Rejection/Approval Info */}
             {(data.approvedBy ||
               data.rejectedBy ||
-              data.updatedBy) && (
+              data.updatedBy ||
+              effectiveStatus === "approved" ||
+              effectiveStatus === "rejected") && (
               <div
                 className={`mt-[1.5vh] p-[0.8vw] rounded-lg ${
-                  notification.status === "approved"
+                  effectiveStatus === "approved"
                     ? "bg-green-50 border border-green-200"
                     : "bg-red-50 border border-red-200"
                 }`}
               >
                 <p
                   className={`text-[0.75vw] font-semibold ${
-                    notification.status === "approved"
+                    effectiveStatus === "approved"
                       ? "text-green-700"
                       : "text-red-700"
                   }`}
                 >
-                  {notification.status === "approved" ? "Approved" : "Rejected"}{" "}
+                  {effectiveStatus === "approved" ? "Approved" : "Rejected"}{" "}
                   by:{" "}
                   <span className="font-semibold text-gray-800">
-                    {data.approvedBy ||
-                      data.updatedBy ||
-                      data.rejectedBy}
+                    {effectiveStatus === "approved"
+                      ? data.approvedBy || data.updatedBy || "Project Head"
+                      : data.rejectedBy || data.updatedBy || "Project Head"}
                   </span>
                   {data.designation && (
                     <span className="text-gray-600 font-normal ml-[0.3vw]">
@@ -1448,10 +1584,9 @@ export default function NotificationsModal({
   const mainTabCounts = useMemo(() => {
     const counts = {};
     Object.keys(tabsConfig).forEach((tab) => {
-      counts[tab] = notifications.filter((n) => {
-        if (tab === "All") return n.read === false;
-        return n.type === tab.toLowerCase() && n.read === false;
-      }).length;
+      counts[tab] = notifications.filter(
+        (n) => n.read === false && matchesMainTab(n, tab),
+      ).length;
     });
     return counts;
   }, [notifications]);
@@ -1464,7 +1599,10 @@ export default function NotificationsModal({
 
     config.tabs?.forEach((subTab) => {
       counts[subTab] = notifications.filter(
-        (n) => n.type === subTab.toLowerCase() && n.read === false,
+        (n) =>
+          n.read === false &&
+          matchesMainTab(n, activeTab) &&
+          matchesSubTab(n, subTab),
       ).length;
     });
     return counts;
@@ -1476,12 +1614,13 @@ export default function NotificationsModal({
     const config = tabsConfig[activeTab]?.subTabsConfig?.[activeSubTab];
     if (!config) return {};
 
-    config.forEach((subTab) => {
-      counts[subTab] = notifications.filter(
+    config.forEach((statusChip) => {
+      counts[statusChip] = notifications.filter(
         (n) =>
-          n.type === activeSubTab.toLowerCase() &&
-          n.status === subTab.toLowerCase() &&
-          n.read === false,
+          n.read === false &&
+          matchesMainTab(n, activeTab) &&
+          matchesSubTab(n, activeSubTab) &&
+          matchesActivityStatus(n, statusChip),
       ).length;
     });
     return counts;
@@ -1492,16 +1631,16 @@ export default function NotificationsModal({
     let filtered = [...notifications];
 
     if (activeTab !== "All") {
-      filtered = filtered.filter((n) => n.type === activeTab.toLowerCase());
+      filtered = filtered.filter((n) => matchesMainTab(n, activeTab));
     }
 
     if (activeSubTab) {
-      filtered = filtered.filter((n) => n.type === activeSubTab.toLowerCase());
+      filtered = filtered.filter((n) => matchesSubTab(n, activeSubTab));
     }
 
     if (activeActivitySubTab) {
-      filtered = filtered.filter(
-        (n) => n.status === activeActivitySubTab.toLowerCase(),
+      filtered = filtered.filter((n) =>
+        matchesActivityStatus(n, activeActivitySubTab),
       );
     }
 
@@ -1638,7 +1777,11 @@ export default function NotificationsModal({
                 No notifications yet
               </p>
               <p className="text-[0.85vw] text-gray-400 mt-1">
-                You'll see request updates here
+                {activeTab === "Requests"
+                  ? "You'll see request updates here"
+                  : activeTab === "Tasks"
+                    ? "You'll see task and message updates here"
+                    : "You're all caught up!"}
               </p>
             </div>
           ) : (

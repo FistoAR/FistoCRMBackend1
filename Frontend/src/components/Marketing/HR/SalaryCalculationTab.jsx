@@ -149,12 +149,24 @@ const SalaryCalculationTab = ({
     }
 
     const logoImg = await loadImage(fistoLogo);
-    const doc = new jsPDF("p", "pt", "a4");
+    // Landscape A4 orientation
+    const doc = new jsPDF("l", "pt", "a4");
     const timestampStr = getFormattedCurrentTimestamp();
     const filterInfo = getFilterDisplayInfo(appliedFilters, reportsActiveEmployees, reportsInactiveEmployees);
 
     const head = [
-      ["S.No", "Employee ID", "Employee Name", "Designation", "Job Role", "Month", "Total Leave", "Salary"]
+      [
+        "S.No",
+        "Employee ID",
+        "Employee Name",
+        "Designation",
+        "Job Role",
+        "Month",
+        "Total Leave Days",
+        "Paid Leave Days",
+        "Unpaid Leave",
+        "Salary",
+      ],
     ];
 
     let pdfSNo = 1;
@@ -166,9 +178,13 @@ const SalaryCalculationTab = ({
         const prevKey = `${prev.month}-${prev.year}`;
         const currKey = `${emp.month}-${emp.year}`;
         if (prevKey !== currKey) {
-          body.push(["", "", "", "", "", "", "", ""]);
+          body.push(["", "", "", "", "", "", "", "", "", ""]);
         }
       }
+
+      const totalLeave = emp.salaryData?.totalLeaveDays ?? 0;
+      const paidLeave = emp.salaryData?.paidLeaveDays ?? 0;
+      const unpaidLeave = Math.max(0, totalLeave - paidLeave);
 
       body.push([
         pdfSNo++,
@@ -179,10 +195,12 @@ const SalaryCalculationTab = ({
         emp.month && emp.year
           ? `${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}`
           : "-",
-        emp.salaryData?.totalLeaveDays ?? 0,
+        totalLeave,
+        paidLeave,
+        unpaidLeave,
         emp.hasSalary && emp.salaryData?.totalSalary !== undefined
           ? `Rs. ${emp.salaryData.totalSalary.toLocaleString("en-IN")}`
-          : "Not Added"
+          : "Not Added",
       ]);
     });
 
@@ -191,107 +209,136 @@ const SalaryCalculationTab = ({
       body: body,
       startY: 110,
       margin: { top: 110, bottom: 40, left: 30, right: 30 },
-      theme: "striped",
+      tableWidth: "auto",
+      theme: "grid",
+      styles: {
+        cellPadding: { top: 7, bottom: 7, left: 6, right: 6 },
+        valign: "middle",
+        lineWidth: 0.5,
+        lineColor: [209, 213, 219], // soft gray-300 border
+      },
       headStyles: {
         fillColor: [226, 235, 255],
         textColor: [30, 41, 59],
         fontStyle: "bold",
-        fontSize: 8,
-        halign: "center"
+        fontSize: 9,
+        halign: "center",
+        cellPadding: { top: 8, bottom: 8, left: 6, right: 6 },
+        lineWidth: 0.5,
+        lineColor: [186, 203, 236], // crisp border matching the header tone
       },
       bodyStyles: {
-        fontSize: 8,
-        textColor: [51, 65, 85]
+        fontSize: 9,
+        textColor: [51, 65, 85],
+        cellPadding: { top: 9.5, bottom: 9.5, left: 6, right: 6 },
+        minCellHeight: 24,
       },
       columnStyles: {
-        0: { halign: "center", cellWidth: 35 },
-        1: { halign: "center", cellWidth: 65 },
+        0: { halign: "center", cellWidth: 40 },
+        1: { halign: "center", cellWidth: 80 },
         2: { halign: "left" },
-        3: { halign: "center" },
-        4: { halign: "center", cellWidth: 55 },
-        5: { halign: "center", cellWidth: 65 },
-        6: { halign: "center", cellWidth: 55 },
-        7: { halign: "center", cellWidth: 65 }
+        3: { halign: "left" },
+        4: { halign: "center", cellWidth: 75 },
+        5: { halign: "center", cellWidth: 90 },
+        6: { halign: "center", cellWidth: 70 },
+        7: { halign: "center", cellWidth: 65 },
+        8: { halign: "center", cellWidth: 65 },
+        9: {
+          halign: "left",
+          cellWidth: 95,
+          cellPadding: { left: 22, right: 6, top: 9.5, bottom: 9.5 },
+        },
       },
       didDrawPage: (data) => {
+        const pageWidth = doc.internal.pageSize.width;
+        const pageHeight = doc.internal.pageSize.height;
+
         // Top Banner background
         doc.setFillColor(248, 250, 252);
-        doc.rect(0, 0, doc.internal.pageSize.width, 100, "F");
+        doc.rect(0, 0, pageWidth, 100, "F");
 
         // Top Left: Company Logo
         if (logoImg) {
           try {
-            doc.addImage(logoImg, "PNG", 30, 12, 75, 26);
+            doc.addImage(logoImg, "PNG", 30, 12, 85, 30);
           } catch (e) {
-            doc.setFontSize(9);
+            doc.setFontSize(11);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(71, 85, 105);
-            doc.text("FIST-O CRM", 30, 25);
+            doc.text("FIST-O CRM", 30, 28);
           }
         } else {
-          doc.setFontSize(9);
+          doc.setFontSize(11);
           doc.setFont("helvetica", "bold");
           doc.setTextColor(71, 85, 105);
-          doc.text("FIST-O CRM", 30, 25);
+          doc.text("FIST-O CRM", 30, 28);
         }
 
         // Center Title
-        doc.setFontSize(16);
+        doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(37, 99, 235);
-        doc.text("Salary Report", doc.internal.pageSize.width / 2, 28, { align: "center" });
+        doc.text("Salary Report", pageWidth / 2, 30, { align: "center" });
 
         // Right Timestamp block
-        doc.setFontSize(8);
+        doc.setFontSize(9.5);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(100, 116, 139);
-        doc.text("Generated On:", doc.internal.pageSize.width - 30, 25, { align: "right" });
+        doc.text("Generated On:", pageWidth - 30, 25, { align: "right" });
         doc.setFont("helvetica", "bold");
         doc.setTextColor(51, 65, 85);
-        doc.text(timestampStr, doc.internal.pageSize.width - 30, 36, { align: "right" });
+        doc.text(timestampStr, pageWidth - 30, 38, { align: "right" });
 
         // Line separator
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(1);
-        doc.line(30, 46, doc.internal.pageSize.width - 30, 46);
+        doc.line(30, 48, pageWidth - 30, 48);
 
         // Applied Filters Section
-        doc.setFontSize(8.5);
+        doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(30, 41, 59);
-        doc.text("Employee  : ", 30, 62);
+        doc.text("Employee  : ", 30, 66);
         doc.setFont("helvetica", "normal");
-        doc.text(filterInfo.empDisplay, 85, 62);
+        doc.text(filterInfo.empDisplay, 95, 66);
 
         if (filterInfo.hasDateFilter) {
           doc.setFont("helvetica", "bold");
-          doc.text("From          : ", 30, 75);
+          doc.text("From          : ", 30, 80);
           doc.setFont("helvetica", "normal");
-          doc.text(filterInfo.fromStr, 85, 75);
+          doc.text(filterInfo.fromStr, 95, 80);
 
           if (filterInfo.toStr !== "-") {
             doc.setFont("helvetica", "bold");
-            doc.text("To   : ", 160, 75);
+            doc.text("To   : ", 190, 80);
             doc.setFont("helvetica", "normal");
-            doc.text(filterInfo.toStr, 185, 75);
+            doc.text(filterInfo.toStr, 220, 80);
           }
         } else {
           doc.setFont("helvetica", "bold");
-          doc.text("Date Range: ", 30, 75);
+          doc.text("Date Range: ", 30, 80);
           doc.setFont("helvetica", "normal");
-          doc.text("All Months", 85, 75);
+          doc.text("All Months", 95, 80);
         }
 
         // Footer on every page
         const pageCount = doc.internal.getNumberOfPages();
-        const pageHeight = doc.internal.pageSize.height;
-        doc.setFontSize(8);
+        doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(148, 163, 184);
 
-        doc.text(`Total Records: ${reportsData.length}  |  Generated by: CRM System`, 30, pageHeight - 20);
-        doc.text(`Page ${data.pageNumber} of ${pageCount}`, doc.internal.pageSize.width - 30, pageHeight - 20, { align: "right" });
-      }
+        doc.text(
+          `Total Records: ${reportsData.length}  |  Generated by: CRM System`,
+          30,
+          pageHeight - 20
+        );
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}`,
+          pageWidth - 30,
+          pageHeight - 20,
+          { align: "right" }
+        );
+      },
     });
 
     doc.save(`Salary_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -322,7 +369,7 @@ const SalaryCalculationTab = ({
 
     csvContent += `\n`; // Blank line before header
 
-    csvContent += `S.No,Employee ID,Employee Name,Designation,Job Role,Month,Total Leave,Salary\n`;
+    csvContent += `S.No,Employee ID,Employee Name,Designation,Job Role,Month,Total Leave Days,Paid Leave Days,Unpaid Leave,Salary\n`;
 
     let csvSNo = 1;
     reportsData.forEach((emp, index) => {
@@ -331,7 +378,7 @@ const SalaryCalculationTab = ({
         const prevKey = `${prev.month}-${prev.year}`;
         const currKey = `${emp.month}-${emp.year}`;
         if (prevKey !== currKey) {
-          csvContent += `,,,,,,,\n`;
+          csvContent += `,,,,,,,,,\n`;
         }
       }
 
@@ -344,11 +391,13 @@ const SalaryCalculationTab = ({
         ? `"${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}"`
         : `"-"`;
       const totalLeave = emp.salaryData?.totalLeaveDays ?? 0;
+      const paidLeave = emp.salaryData?.paidLeaveDays ?? 0;
+      const unpaidLeave = Math.max(0, totalLeave - paidLeave);
       const salary = emp.hasSalary && emp.salaryData?.totalSalary !== undefined
         ? `"₹${emp.salaryData.totalSalary.toLocaleString("en-IN")}"`
         : `"Not Added"`;
 
-      csvContent += `${sNo},${empId},${empName},${designation},${jobRole},${monthStr},${totalLeave},${salary}\n`;
+      csvContent += `${sNo},${empId},${empName},${designation},${jobRole},${monthStr},${totalLeave},${paidLeave},${unpaidLeave},${salary}\n`;
     });
 
     const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
@@ -361,7 +410,7 @@ const SalaryCalculationTab = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    triggerToast("Success", "CSV exported successfully");
+    triggerToast("Success", "Excel/CSV exported successfully");
   };
 
   // Modal & Toast States
@@ -1229,28 +1278,34 @@ const SalaryCalculationTab = ({
                   <table className="w-full border-collapse border border-gray-300">
                     <thead className="bg-[#E2EBFF] sticky top-0">
                       <tr>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           S.No
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Employee ID
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Employee Name
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Designation
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Job Role
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Month
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
-                          Total Leave
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Total Leave Days
                         </th>
-                        <th className="px-[0.7vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Paid Leave Days
+                        </th>
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
+                          Unpaid Leave
+                        </th>
+                        <th className="px-[0.8vw] py-[0.65vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                           Salary
                         </th>
                       </tr>
@@ -1259,7 +1314,7 @@ const SalaryCalculationTab = ({
                       {currentReportsPageData.length === 0 ? (
                         <tr>
                           <td
-                            colSpan="8"
+                            colSpan="10"
                             className="text-center py-[3vw] text-gray-500 text-[0.9vw]"
                           >
                             <div className="flex flex-col items-center justify-center gap-[0.4vw]">
@@ -1276,24 +1331,28 @@ const SalaryCalculationTab = ({
                         currentReportsPageData.map((emp, index) => {
                           const globalIndex =
                             (currentPage - 1) * recordsPerPage + index + 1;
+                          const totalLeave = emp.salaryData?.totalLeaveDays ?? 0;
+                          const paidLeave = emp.salaryData?.paidLeaveDays ?? 0;
+                          const unpaidLeave = Math.max(0, totalLeave - paidLeave);
+
                           return (
                             <tr
                               key={`${emp.employeeId}-${emp.month}-${emp.year}-${index}`}
                               className="hover:bg-gray-50 transition-colors"
                             >
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
                                 {globalIndex}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-900 border border-gray-300 text-center">
                                 {emp.employeeId}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] border border-gray-300">
+                              <td className="px-[0.8vw] py-[0.72vw] border border-gray-300">
                                 {renderEmployeeCell(emp)}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
                                 {emp.designation}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] border border-gray-300 text-center">
                                 <span
                                   className={`px-[0.6vw] py-[0.25vw] rounded-full text-[0.75vw] font-medium ${
                                     emp.jobRole === "On Role"
@@ -1304,15 +1363,21 @@ const SalaryCalculationTab = ({
                                   {emp.jobRole}
                                 </span>
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-medium">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center font-medium">
                                 {emp.month && emp.year
                                   ? `${MONTHS.find((m) => m.value === emp.month)?.label || ""} ${emp.year}`
                                   : "-"}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
-                                {emp.salaryData?.totalLeaveDays || 0}
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                                {totalLeave}
                               </td>
-                              <td className="px-[0.7vw] py-[0.56vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                                {paidLeave}
+                              </td>
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
+                                {unpaidLeave}
+                              </td>
+                              <td className="px-[0.8vw] py-[0.72vw] text-[0.86vw] font-medium text-gray-900 border border-gray-300 text-center">
                                 {emp.hasSalary && emp.salaryData?.totalSalary !== undefined ? (
                                   `₹ ${emp.salaryData.totalSalary.toLocaleString(
                                     "en-IN"
