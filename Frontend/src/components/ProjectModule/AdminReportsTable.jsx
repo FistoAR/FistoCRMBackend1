@@ -242,16 +242,42 @@ export default function AdminReportsTable({
     ];
   });
 
-  const getEmployeeDetails = (employeeId) => {
+  const getEmployeeDetails = (employeeId, taskContext = null) => {
+    if (taskContext?.assignedTo && taskContext.assignedTo.name) {
+      return taskContext.assignedTo;
+    }
+    if (taskContext?.assigned_to && taskContext.assigned_to.name) {
+      return taskContext.assigned_to;
+    }
     if (!employeeId) return null;
     const cleanId = String(employeeId).trim();
-    return (
-      currentEmployees?.find(
-        (emp) =>
-          String(emp.id || "").trim() === cleanId ||
-          (emp.intern_id && String(emp.intern_id).trim() === cleanId)
-      ) || null
+    const foundInCurrent = currentEmployees?.find(
+      (emp) =>
+        String(emp.id || "").trim() === cleanId ||
+        (emp.intern_id && String(emp.intern_id).trim() === cleanId)
     );
+    if (foundInCurrent) return foundInCurrent;
+
+    // Check if any task has assignedTo matching this employeeId
+    const foundInTasks = tasks?.find((t) => {
+      const matchId = (empObj) =>
+        empObj &&
+        (String(empObj.id || "").trim() === cleanId ||
+          (empObj.intern_id && String(empObj.intern_id).trim() === cleanId));
+      return matchId(t.assignedTo) || matchId(t.assigned_to) || matchId(t.assignedBy) || matchId(t.assigned_by);
+    });
+    if (foundInTasks) {
+      const matchId = (empObj) =>
+        empObj &&
+        (String(empObj.id || "").trim() === cleanId ||
+          (empObj.intern_id && String(empObj.intern_id).trim() === cleanId));
+      if (matchId(foundInTasks.assignedTo)) return foundInTasks.assignedTo;
+      if (matchId(foundInTasks.assigned_to)) return foundInTasks.assigned_to;
+      if (matchId(foundInTasks.assignedBy)) return foundInTasks.assignedBy;
+      if (matchId(foundInTasks.assigned_by)) return foundInTasks.assigned_by;
+    }
+
+    return null;
   };
 
   const departmentOptions = useMemo(() => {
@@ -1537,7 +1563,7 @@ export default function AdminReportsTable({
                       </td>
                       <td className="px-[0.6vw] py-[0.6vw] border border-gray-300">
                         {(() => {
-                          const employee = getEmployeeDetails(task.employee);
+                          const employee = getEmployeeDetails(task.employee, task);
                           if (!employee)
                             return (
                               <span className="text-gray-400 text-[0.7vw]">

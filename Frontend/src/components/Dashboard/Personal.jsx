@@ -767,19 +767,39 @@ const TodayTasksCard = ({
     (source || []).forEach((e) => {
       const id = e.employee_id?.toString() || e._id?.toString();
       if (id) map.set(id, e);
+      if (e.intern_id) {
+        map.set(e.intern_id.toString().trim(), e);
+      }
+      if (e.internId) {
+        map.set(e.internId.toString().trim(), e);
+      }
     });
     return map;
   }, [allEmployees, employees]);
 
+  const resolveAvatarUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("data:")) {
+      return path;
+    }
+    const cleanPath = path.startsWith("/api/") ? path.slice(4) : path;
+    const base1 = (import.meta.env.VITE_API_BASE_URL1 || "").replace(/\/+$/, "");
+    const base = (apiBaseUrl || "").replace(/\/api\/?$/, "");
+    const root = base1 || base || "";
+    return `${root}${cleanPath.startsWith("/") ? "" : "/"}${cleanPath}`;
+  };
+
   const fetchEmployeeData = async (employeeId) => {
     if (!employeeId) return null;
-    const strId = employeeId.toString();
+    const strId = employeeId.toString().trim();
     if (employeeCache[strId]) return employeeCache[strId];
     const local = allEmpMap.get(strId);
     if (local) {
       const norm = {
         employeeName: local.employee_name,
         profile: local.profile_url || null,
+        employee_id: local.employee_id,
+        intern_id: local.intern_id,
       };
       setEmployeeCache((p) => ({ ...p, [strId]: norm }));
       return norm;
@@ -822,8 +842,20 @@ const TodayTasksCard = ({
       const items = [],
         withReports = new Set();
 
+      const markReported = (rawEmpId) => {
+        if (!rawEmpId) return;
+        const cleanId = rawEmpId.toString().trim();
+        withReports.add(cleanId);
+        const emp = allEmpMap.get(cleanId);
+        if (emp) {
+          if (emp.employee_id) withReports.add(emp.employee_id.toString().trim());
+          if (emp.intern_id) withReports.add(emp.intern_id.toString().trim());
+          if (emp.internId) withReports.add(emp.internId.toString().trim());
+        }
+      };
+
       (dayTask || []).forEach((day) => {
-        withReports.add(day.employeeID);
+        markReported(day.employeeID);
         items.push({
           id: day._id?.$oid || day._id?.toString() || Math.random(),
           type: day.activityId ? "activity" : "dayTask",
@@ -846,7 +878,7 @@ const TodayTasksCard = ({
       });
 
       (unscheduledTask || []).forEach((u) => {
-        withReports.add(u.employeeID);
+        markReported(u.employeeID);
         items.push({
           id: u._id?.$oid || Math.random(),
           type: "unscheduled",
@@ -875,8 +907,11 @@ const TodayTasksCard = ({
       (employees || []).forEach((emp) => {
         const empId =
           emp.employee_id?.toString() || emp._id?.$oid || emp._id?.toString();
-        if (!withReports.has(empId)) {
-          const leaveInfo = approvedLeaveMap.get(empId);
+        const internId = emp.intern_id?.toString() || emp.internId?.toString();
+        const hasReport = withReports.has(empId) || (internId && withReports.has(internId));
+
+        if (!hasReport) {
+          const leaveInfo = approvedLeaveMap.get(empId) || (internId ? approvedLeaveMap.get(internId) : null);
           if (leaveInfo) {
             items.push({
               id: `leave-${empId}`,
@@ -943,7 +978,7 @@ const TodayTasksCard = ({
             endDate: fmtEnd,
             avatar:
               emp && (emp.profile || emp.profile_url)
-                ? `${apiBaseUrl}${emp.profile || emp.profile_url}`
+                ? resolveAvatarUrl(emp.profile || emp.profile_url)
                 : null,
             initials: emp
               ? getInitials(emp.employeeName || emp.employee_name)
@@ -1388,6 +1423,8 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
   const [slideDir, setSlideDir] = useState("left");
   const [imgError, setImgError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [quoteTooltip, setQuoteTooltip] = useState(null); // { text, x, y }
   const intervalRef = useRef(null);
 
   const isToday = toDateString(selectedDate) === toDateString(new Date());
@@ -1560,6 +1597,8 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                 // then in the div:
                 return (
                   <div
+                    onClick={() => setShowModal(true)}
+                    title="Click to view full celebration"
                     style={{
                       height: "100%",
                       borderRadius: "0.7vw",
@@ -1571,6 +1610,8 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                       gap: "0.7vw",
                       overflow: "hidden",
                       position: "relative",
+                      cursor: "pointer",
+                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
                     }}
                   >
                     {isBday && <BirthdayConfetti />}
@@ -1626,7 +1667,7 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                         zIndex: 1,
                       }}
                     >
-                      <div>
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                         <div
                           style={{
                             display: "inline-flex",
@@ -1636,7 +1677,8 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                             border: `0.05vw solid ${os.accent}33`,
                             borderRadius: "2vw",
                             padding: "0.15vw 0.5vw",
-                            marginBottom: "0.45vw",
+                            marginBottom: "0.35vw",
+                            alignSelf: "flex-start",
                           }}
                         >
                           <span style={{ fontSize: "0.85vw" }}>{os.icon}</span>
@@ -1653,16 +1695,39 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                         </div>
                         {item.quote && (
                           <p
+                            onMouseEnter={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setQuoteTooltip({
+                                text: item.quote,
+                                x: Math.min(rect.left, window.innerWidth - 380),
+                                y: rect.bottom + 8,
+                              });
+                            }}
+                            onMouseMove={(e) => {
+                              setQuoteTooltip((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      x: Math.min(e.clientX + 10, window.innerWidth - 380),
+                                      y: e.clientY + 14,
+                                    }
+                                  : null,
+                              );
+                            }}
+                            onMouseLeave={() => setQuoteTooltip(null)}
                             style={{
-                              fontSize: "0.9vw",
+                              fontSize: "0.82vw",
                               color: "#374151",
-                              lineHeight: "1.55",
+                              lineHeight: "1.45",
                               fontStyle: "italic",
-                              paddingLeft: "0.9vw",
+                              paddingLeft: "0.6vw",
                               display: "-webkit-box",
-                              WebkitLineClamp: showImg ? 5 : 7,
+                              WebkitLineClamp: showImg ? 8 : 10,
                               WebkitBoxOrient: "vertical",
                               overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              margin: 0,
+                              flex: 1,
                             }}
                           >
                             {item.quote}
@@ -1674,13 +1739,14 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                           style={{
                             display: "flex",
                             gap: "0.25vw",
-                            marginTop: "0.5vw",
+                            marginTop: "0.4vw",
                           }}
                         >
                           {celebrations.map((_, i) => (
                             <div
                               key={i}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 if (i !== currentIndex) {
                                   triggerSlide(
                                     i > currentIndex ? "left" : "right",
@@ -1758,6 +1824,129 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
           </>
         )}
       </div>
+
+      {/* Full Celebration Popup Modal */}
+      {showModal && celebrations[currentIndex] && (
+        <div
+          onClick={() => setShowModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs transition-opacity duration-200"
+          style={{ animation: "fadeIn 0.2s ease-out" }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-2xl w-full flex flex-col md:flex-row relative animate-scaleUp"
+            style={{ maxHeight: "85vh" }}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowModal(false)}
+              className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-white/80 hover:bg-white text-gray-600 hover:text-gray-900 flex items-center justify-center shadow-md transition-all cursor-pointer"
+              title="Close"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            {/* Modal Image */}
+            {celebrations[currentIndex].imageUrl && !imgError && (
+              <div className="md:w-1/2 bg-gray-50 flex items-center justify-center overflow-hidden p-2">
+                <img
+                  src={
+                    celebrations[currentIndex].imageUrl.startsWith("http") || celebrations[currentIndex].imageUrl.startsWith("data:")
+                      ? celebrations[currentIndex].imageUrl
+                      : celebrations[currentIndex].imageUrl.startsWith("/api/")
+                        ? `${(apiBaseUrl || "").replace(/\/api\/?$/, "")}${celebrations[currentIndex].imageUrl}`
+                        : `${API_URL1}${celebrations[currentIndex].imageUrl}`
+                  }
+                  alt={celebrations[currentIndex].occasion}
+                  className="w-full h-auto max-h-[70vh] object-contain rounded-xl shadow-sm"
+                />
+              </div>
+            )}
+
+            {/* Modal Text Details */}
+            <div className={`p-6 flex flex-col justify-between overflow-y-auto ${celebrations[currentIndex].imageUrl && !imgError ? "md:w-1/2" : "w-full"}`}>
+              <div>
+                {/* Badge */}
+                {(() => {
+                  const modalOs = getOccasionStyle(celebrations[currentIndex].occasion);
+                  return (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider mb-4"
+                      style={{
+                        backgroundColor: modalOs.soft || "#EEF2FF",
+                        color: modalOs.accent || "#4F46E5",
+                      }}
+                    >
+                      <span>{modalOs.icon || "🎉"}</span>
+                      <span>{modalOs.label || celebrations[currentIndex].occasion}</span>
+                    </div>
+                  );
+                })()}
+
+                {/* Name / Title if available */}
+                {celebrations[currentIndex].employee_name && (
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">
+                    {celebrations[currentIndex].employee_name}
+                  </h3>
+                )}
+
+                {/* Full Unclipped Message */}
+                {celebrations[currentIndex].quote && (
+                  <blockquote className="text-gray-700 text-sm md:text-base leading-relaxed italic border-l-4 border-indigo-300 pl-4 my-2">
+                    "{celebrations[currentIndex].quote}"
+                  </blockquote>
+                )}
+              </div>
+
+              {/* Bottom bar inside modal */}
+              <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                <span>{selectedDate ? new Date(selectedDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : ""}</span>
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Custom Tooltip for Quote */}
+      {quoteTooltip &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed",
+              left: `${quoteTooltip.x}px`,
+              top: `${quoteTooltip.y}px`,
+              backgroundColor: "rgba(17, 24, 39, 0.95)",
+              color: "#F9FAFB",
+              padding: "8px 12px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              lineHeight: "1.5",
+              zIndex: 999999,
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)",
+              maxWidth: "360px",
+              wordBreak: "break-word",
+              pointerEvents: "none",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <div className="flex items-center gap-1.5 mb-1 text-[11px] font-semibold text-amber-300">
+              <span>💬 Celebration Message</span>
+            </div>
+            <p className="italic m-0">{quoteTooltip.text}</p>
+            <div className="text-[10px] text-gray-400 mt-1.5 pt-1 border-t border-gray-700/60">
+              Click card to view in full popup
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

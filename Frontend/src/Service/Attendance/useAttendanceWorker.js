@@ -87,12 +87,16 @@ export default function useAttendanceWorker() {
 
       // ✅ FIX 3: Resume audio context if suspended
       if (ctx.state === "suspended") {
-        
         const resumeAudio = async () => {
           try {
-            await ctx.resume();
+            if (ctx.state === "suspended") {
+              await ctx.resume();
+            }
           } catch (err) {
-            console.error("❌ Failed to resume audio:", err);
+            // Ignore if context was closed during page navigation / cleanup
+            if (err?.name !== "InvalidStateError") {
+              console.error("❌ Failed to resume audio:", err);
+            }
           }
         };
 
