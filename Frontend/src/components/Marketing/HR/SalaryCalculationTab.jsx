@@ -232,7 +232,7 @@ const SalaryCalculationTab = ({
       bodyStyles: {
         fontSize: 9,
         textColor: [51, 65, 85],
-        cellPadding: { top: 9.5, bottom: 9.5, left: 6, right: 6 },
+        cellPadding: { top: 8.5, bottom: 8.5, left: 6, right: 6 },
         minCellHeight: 24,
       },
       columnStyles: {
@@ -248,7 +248,7 @@ const SalaryCalculationTab = ({
         9: {
           halign: "left",
           cellWidth: 95,
-          cellPadding: { left: 22, right: 6, top: 9.5, bottom: 9.5 },
+          cellPadding: { left: 22, right: 6, top: 8.5, bottom: 8.5 },
         },
       },
       didDrawPage: (data) => {
@@ -569,10 +569,10 @@ const SalaryCalculationTab = ({
   // Sort reports data based on reportsSortBy
   const sortedReportsData = [...reportsData].sort((a, b) => {
     if (reportsSortBy === "name-asc") {
-      return (a.employeeName || "").localeCompare(b.employeeName || "");
+      return (a.employeeName || "").trim().localeCompare((b.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
     if (reportsSortBy === "name-desc") {
-      return (b.employeeName || "").localeCompare(a.employeeName || "");
+      return (b.employeeName || "").trim().localeCompare((a.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
 
     // Date of Joining / Intern Start Date
@@ -580,7 +580,7 @@ const SalaryCalculationTab = ({
     const dateB = b.joinDate || b.intern_start_date || b.join_date || b.date_of_joining;
 
     if (!dateA && !dateB) {
-      return (a.employeeName || "").localeCompare(b.employeeName || "");
+      return (a.employeeName || "").trim().localeCompare((b.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
     if (!dateA) return 1;
     if (!dateB) return -1;
@@ -742,10 +742,10 @@ const SalaryCalculationTab = ({
   // Sort employees based on selected sort option
   const sortedEmployeeSalaries = [...employeeSalaries].sort((a, b) => {
     if (sortBy === "name-asc") {
-      return (a.employeeName || "").localeCompare(b.employeeName || "");
+      return (a.employeeName || "").trim().localeCompare((b.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
     if (sortBy === "name-desc") {
-      return (b.employeeName || "").localeCompare(a.employeeName || "");
+      return (b.employeeName || "").trim().localeCompare((a.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
 
     // Date of Joining: doj-asc (Oldest to Newest) or doj-desc (Newest to Oldest)
@@ -753,7 +753,7 @@ const SalaryCalculationTab = ({
     const dateB = b.joinDate || b.join_date || b.date_of_joining;
 
     if (!dateA && !dateB) {
-      return (a.employeeName || "").localeCompare(b.employeeName || "");
+      return (a.employeeName || "").trim().localeCompare((b.employeeName || "").trim(), undefined, { sensitivity: "accent" });
     }
     if (!dateA) return 1;
     if (!dateB) return -1;
@@ -1192,7 +1192,7 @@ const SalaryCalculationTab = ({
         /* ================= REPORTS TAB ================= */
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Filters Section */}
-          <div className="px-[0.8vw] py-[0.5vw] border-b border-gray-200 bg-gray-50/50 flex items-center justify-between gap-[0.6vw] flex-nowrap flex-shrink-0 overflow-x-auto">
+          <div className="px-[0.8vw] py-[0.5vw] border-b border-gray-200 bg-gray-50/50 flex items-center justify-between gap-[0.6vw] flex-nowrap flex-shrink-0 ">
             <div className="flex items-end gap-[0.5vw] flex-shrink-0">
               {/* Active Employee Dropdown */}
               <div className="flex flex-col gap-[0.15vw]">
@@ -1203,7 +1203,7 @@ const SalaryCalculationTab = ({
                   value={selectedActiveEmpFilter}
                   disabled={selectedInactiveEmpFilter !== "all"}
                   onChange={(e) => handleActiveEmpChange(e.target.value)}
-                  className={`w-[10.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[9.2vw] px-[0.4vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.75vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     selectedInactiveEmpFilter !== "all"
                       ? "bg-gray-100 cursor-not-allowed opacity-60"
                       : ""
@@ -1227,7 +1227,7 @@ const SalaryCalculationTab = ({
                   value={selectedInactiveEmpFilter}
                   disabled={selectedActiveEmpFilter !== "all"}
                   onChange={(e) => handleInactiveEmpChange(e.target.value)}
-                  className={`w-[10.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[9.2vw] px-[0.4vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.75vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     selectedActiveEmpFilter !== "all"
                       ? "bg-gray-100 cursor-not-allowed opacity-60"
                       : ""
@@ -1254,7 +1254,7 @@ const SalaryCalculationTab = ({
                     setReportsSortBy(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="w-[11.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  className="w-[10.5vw] px-[0.4vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.75vw] bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 >
                   <option value="doj-asc">Date of Joining (Ascending)</option>
                   <option value="doj-desc">Date of Joining (Descending)</option>
@@ -1278,7 +1278,7 @@ const SalaryCalculationTab = ({
                       setToDate(e.target.value);
                     }
                   }}
-                  className="w-[8.5vw] px-[0.45vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-[7.5vw] px-[0.35vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.75vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
@@ -1294,7 +1294,7 @@ const SalaryCalculationTab = ({
                   min={fromDate || undefined}
                   max={currentMonthYear}
                   onChange={(e) => setToDate(e.target.value)}
-                  className={`w-[8.5vw] px-[0.45vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[7.5vw] px-[0.35vw] py-[0.28vw] border border-gray-300 rounded-lg text-[0.75vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     !fromDate ? "bg-gray-100 cursor-not-allowed opacity-60" : ""
                   }`}
                 />
@@ -1303,7 +1303,7 @@ const SalaryCalculationTab = ({
               {/* Reset Button */}
               <button
                 onClick={handleResetFilter}
-                className="flex items-center gap-[0.25vw] px-[0.7vw] py-[0.35vw] bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium text-[0.78vw] rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-[0.25vw] px-[0.6vw] py-[0.3vw] bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium text-[0.75vw] rounded-lg transition-colors cursor-pointer"
               >
                 <RotateCcw size="0.8vw" />
                 Reset

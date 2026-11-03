@@ -2,6 +2,29 @@ console.log("🚀 LOADING Salary Calculation route...");
 
 const express = require("express");
 const router = express.Router();
+
+// Helper to get earliest valid joining date between join_date and intern_start_date (Option B)
+const isValidJoinDate = (d) => {
+  if (!d) return false;
+  const dateObj = new Date(d);
+  const time = dateObj.getTime();
+  if (isNaN(time)) return false;
+  // Ignore dummy/default placeholder dates (e.g., 1899, 1970)
+  return dateObj.getFullYear() >= 2000;
+};
+
+const getEarliestJoinDate = (joinDate, internStartDate) => {
+  const validJoin = isValidJoinDate(joinDate) ? joinDate : null;
+  const validIntern = isValidJoinDate(internStartDate) ? internStartDate : null;
+
+  if (validJoin && validIntern) {
+    const tJoin = new Date(validJoin).getTime();
+    const tIntern = new Date(validIntern).getTime();
+    return tJoin <= tIntern ? validJoin : validIntern;
+  }
+  return validJoin || validIntern || null;
+};
+
 const { queryWithRetry } = require("../../dataBase/connection");
 
 // ========== HELPER FUNCTION: Calculate Sundays in Month ==========
@@ -107,11 +130,11 @@ router.get("/employees/:month/:year", async (req, res) => {
 
     const employees = results.map((row) => ({
       employeeId: row.employee_id,
-      employeeName: row.employee_name,
+      employeeName: (row.employee_name || "").trim(),
       profile_url: row.profile_url || null,
       designation: row.designation,
       jobRole: row.employment_type || 'On Role',
-      joinDate: (row.employment_type === 'Intern' ? (row.intern_start_date || row.join_date) : (row.join_date || row.intern_start_date)) || null,
+      joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       hasSalary: row.salary_id ? true : false,
       date: row.salary_date ? new Date(row.salary_date).toLocaleDateString('en-IN') : '-',
       salaryData: row.salary_id ? {
@@ -795,11 +818,11 @@ router.get("/reports", async (req, res) => {
 
     const reports = results.map((row) => ({
       employeeId: row.employee_id,
-      employeeName: row.employee_name,
+      employeeName: (row.employee_name || "").trim(),
       profile_url: row.profile_url || null,
       designation: row.designation,
       jobRole: row.employment_type || 'On Role',
-      joinDate: (row.employment_type === 'Intern' ? (row.intern_start_date || row.join_date) : (row.join_date || row.intern_start_date)) || null,
+      joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       month: row.month || null,
       year: row.year || null,
       hasSalary: row.salary_id ? true : false,
