@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Calendar, ArrowLeft, Eye, User, Search, RotateCcw, ChevronLeft, ChevronRight, Download, ChevronDown, FileText, FileSpreadsheet } from "lucide-react";
+import { Calendar, ArrowLeft, Eye, User, Search, RotateCcw, ChevronLeft, ChevronRight, Download, ChevronDown, FileText, FileSpreadsheet, ArrowUpDown } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { MONTHS } from "./utils.jsx";
@@ -29,6 +29,8 @@ const SalaryCalculationTab = ({
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [editingLeave, setEditingLeave] = useState({}); // Track which cell is being edited
   const [designation, setDesignation] = useState("");
+  const [sortBy, setSortBy] = useState("doj-asc");
+  const [reportsSortBy, setReportsSortBy] = useState("doj-asc");
 
   // Tab State: "salary" | "reports"
   const [activeTab, setActiveTab] = useState("salary");
@@ -172,9 +174,9 @@ const SalaryCalculationTab = ({
     let pdfSNo = 1;
     const body = [];
 
-    reportsData.forEach((emp, index) => {
+    sortedReportsData.forEach((emp, index) => {
       if (index > 0) {
-        const prev = reportsData[index - 1];
+        const prev = sortedReportsData[index - 1];
         const prevKey = `${prev.month}-${prev.year}`;
         const currKey = `${emp.month}-${emp.year}`;
         if (prevKey !== currKey) {
@@ -372,9 +374,9 @@ const SalaryCalculationTab = ({
     csvContent += `S.No,Employee ID,Employee Name,Designation,Job Role,Month,Total Leave Days,Paid Leave Days,Unpaid Leave,Salary\n`;
 
     let csvSNo = 1;
-    reportsData.forEach((emp, index) => {
+    sortedReportsData.forEach((emp, index) => {
       if (index > 0) {
-        const prev = reportsData[index - 1];
+        const prev = sortedReportsData[index - 1];
         const prevKey = `${prev.month}-${prev.year}`;
         const currKey = `${emp.month}-${emp.year}`;
         if (prevKey !== currKey) {
@@ -564,9 +566,44 @@ const SalaryCalculationTab = ({
     setToDate("");
   };
 
+  // Sort reports data based on reportsSortBy
+  const sortedReportsData = [...reportsData].sort((a, b) => {
+    if (reportsSortBy === "name-asc") {
+      return (a.employeeName || "").localeCompare(b.employeeName || "");
+    }
+    if (reportsSortBy === "name-desc") {
+      return (b.employeeName || "").localeCompare(a.employeeName || "");
+    }
+
+    // Date of Joining / Intern Start Date
+    const dateA = a.joinDate || a.intern_start_date || a.join_date || a.date_of_joining;
+    const dateB = b.joinDate || b.intern_start_date || b.join_date || b.date_of_joining;
+
+    if (!dateA && !dateB) {
+      return (a.employeeName || "").localeCompare(b.employeeName || "");
+    }
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+
+    const timeA = new Date(dateA).getTime();
+    const timeB = new Date(dateB).getTime();
+
+    if (isNaN(timeA) && isNaN(timeB)) return 0;
+    if (isNaN(timeA)) return 1;
+    if (isNaN(timeB)) return -1;
+
+    if (reportsSortBy === "doj-asc") {
+      return timeA - timeB;
+    }
+    if (reportsSortBy === "doj-desc") {
+      return timeB - timeA;
+    }
+    return 0;
+  });
+
   // Pagination Math for Reports
-  const totalPages = Math.ceil(reportsData.length / recordsPerPage) || 1;
-  const currentReportsPageData = reportsData.slice(
+  const totalPages = Math.ceil(sortedReportsData.length / recordsPerPage) || 1;
+  const currentReportsPageData = sortedReportsData.slice(
     (currentPage - 1) * recordsPerPage,
     currentPage * recordsPerPage
   );
@@ -701,6 +738,41 @@ const SalaryCalculationTab = ({
       loadEmployeesWithSalary(selectedMonthYear.month, selectedMonthYear.year);
     }
   };
+
+  // Sort employees based on selected sort option
+  const sortedEmployeeSalaries = [...employeeSalaries].sort((a, b) => {
+    if (sortBy === "name-asc") {
+      return (a.employeeName || "").localeCompare(b.employeeName || "");
+    }
+    if (sortBy === "name-desc") {
+      return (b.employeeName || "").localeCompare(a.employeeName || "");
+    }
+
+    // Date of Joining: doj-asc (Oldest to Newest) or doj-desc (Newest to Oldest)
+    const dateA = a.joinDate || a.join_date || a.date_of_joining;
+    const dateB = b.joinDate || b.join_date || b.date_of_joining;
+
+    if (!dateA && !dateB) {
+      return (a.employeeName || "").localeCompare(b.employeeName || "");
+    }
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+
+    const timeA = new Date(dateA).getTime();
+    const timeB = new Date(dateB).getTime();
+
+    if (isNaN(timeA) && isNaN(timeB)) return 0;
+    if (isNaN(timeA)) return 1;
+    if (isNaN(timeB)) return -1;
+
+    if (sortBy === "doj-asc") {
+      return timeA - timeB;
+    }
+    if (sortBy === "doj-desc") {
+      return timeB - timeA;
+    }
+    return 0;
+  });
 
   const renderEmployeeCell = (data) => (
     <div className="flex items-center gap-[0.5vw]">
@@ -908,9 +980,27 @@ const SalaryCalculationTab = ({
                   {selectedMonthYear.year}
                 </span>
               </div>
-              <span className="text-[0.85vw] text-gray-600">
-                Total Employees: {employeeSalaries.length}
-              </span>
+              <div className="flex items-center gap-[1vw]">
+                {/* Sort By Dropdown */}
+                <div className="flex items-center gap-[0.4vw]">
+                  <ArrowUpDown size="0.95vw" className="text-gray-500" />
+                  <span className="text-[0.82vw] font-medium text-gray-600">Sort by:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="px-[0.6vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.8vw] bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs"
+                  >
+                    <option value="doj-asc">Date of Joining (Ascending)</option>
+                    <option value="doj-desc">Date of Joining (Descending)</option>
+                    <option value="name-asc">Employee Name (A - Z)</option>
+                    <option value="name-desc">Employee Name (Z - A)</option>
+                  </select>
+                </div>
+
+                <span className="text-[0.85vw] text-gray-600">
+                  Total Employees: {employeeSalaries.length}
+                </span>
+              </div>
             </div>
 
             {/* Employee Salary Table */}
@@ -969,7 +1059,7 @@ const SalaryCalculationTab = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {employeeSalaries.length === 0 ? (
+                      {sortedEmployeeSalaries.length === 0 ? (
                         <tr>
                           <td
                             colSpan="8"
@@ -979,7 +1069,7 @@ const SalaryCalculationTab = ({
                           </td>
                         </tr>
                       ) : (
-                        employeeSalaries.map((emp, index) => (
+                        sortedEmployeeSalaries.map((emp, index) => (
                           <tr
                             key={emp.employeeId}
                             className="hover:bg-gray-50 transition-colors"
@@ -1102,18 +1192,18 @@ const SalaryCalculationTab = ({
         /* ================= REPORTS TAB ================= */
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Filters Section */}
-          <div className="p-[0.8vw] border-b border-gray-200 bg-gray-50/50 flex flex-wrap items-end justify-between gap-[0.8vw] flex-shrink-0">
-            <div className="flex flex-wrap items-end gap-[0.8vw]">
+          <div className="px-[0.8vw] py-[0.5vw] border-b border-gray-200 bg-gray-50/50 flex items-center justify-between gap-[0.6vw] flex-nowrap flex-shrink-0 overflow-x-auto">
+            <div className="flex items-end gap-[0.5vw] flex-shrink-0">
               {/* Active Employee Dropdown */}
-              <div className="flex flex-col gap-[0.2vw]">
-                <label className="text-[0.75vw] font-medium text-gray-700">
+              <div className="flex flex-col gap-[0.15vw]">
+                <label className="text-[0.72vw] font-medium text-gray-700">
                   Active Employee
                 </label>
                 <select
                   value={selectedActiveEmpFilter}
                   disabled={selectedInactiveEmpFilter !== "all"}
                   onChange={(e) => handleActiveEmpChange(e.target.value)}
-                  className={`w-[13vw] px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[10.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     selectedInactiveEmpFilter !== "all"
                       ? "bg-gray-100 cursor-not-allowed opacity-60"
                       : ""
@@ -1129,15 +1219,15 @@ const SalaryCalculationTab = ({
               </div>
 
               {/* Inactive Employee Dropdown */}
-              <div className="flex flex-col gap-[0.2vw]">
-                <label className="text-[0.75vw] font-medium text-gray-700">
+              <div className="flex flex-col gap-[0.15vw]">
+                <label className="text-[0.72vw] font-medium text-gray-700">
                   Inactive Employee
                 </label>
                 <select
                   value={selectedInactiveEmpFilter}
                   disabled={selectedActiveEmpFilter !== "all"}
                   onChange={(e) => handleInactiveEmpChange(e.target.value)}
-                  className={`w-[13vw] px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[10.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     selectedActiveEmpFilter !== "all"
                       ? "bg-gray-100 cursor-not-allowed opacity-60"
                       : ""
@@ -1152,9 +1242,30 @@ const SalaryCalculationTab = ({
                 </select>
               </div>
 
+              {/* Sort by Dropdown in Reports (Placed right after Inactive Employee) */}
+              <div className="flex flex-col gap-[0.15vw]">
+                <label className="text-[0.72vw] font-medium text-gray-700 flex items-center gap-[0.2vw]">
+                  <ArrowUpDown size="0.7vw" className="text-gray-500" />
+                  Sort by
+                </label>
+                <select
+                  value={reportsSortBy}
+                  onChange={(e) => {
+                    setReportsSortBy(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-[11.5vw] px-[0.5vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="doj-asc">Date of Joining (Ascending)</option>
+                  <option value="doj-desc">Date of Joining (Descending)</option>
+                  <option value="name-asc">Employee Name (A - Z)</option>
+                  <option value="name-desc">Employee Name (Z - A)</option>
+                </select>
+              </div>
+
               {/* From Month & Year */}
-              <div className="flex flex-col gap-[0.2vw]">
-                <label className="text-[0.75vw] font-medium text-gray-700">
+              <div className="flex flex-col gap-[0.15vw]">
+                <label className="text-[0.72vw] font-medium text-gray-700">
                   From
                 </label>
                 <input
@@ -1167,13 +1278,13 @@ const SalaryCalculationTab = ({
                       setToDate(e.target.value);
                     }
                   }}
-                  className="px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-[8.5vw] px-[0.45vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               {/* To Month & Year */}
-              <div className="flex flex-col gap-[0.2vw]">
-                <label className="text-[0.75vw] font-medium text-gray-700">
+              <div className="flex flex-col gap-[0.15vw]">
+                <label className="text-[0.72vw] font-medium text-gray-700">
                   To
                 </label>
                 <input
@@ -1183,24 +1294,24 @@ const SalaryCalculationTab = ({
                   min={fromDate || undefined}
                   max={currentMonthYear}
                   onChange={(e) => setToDate(e.target.value)}
-                  className={`px-[0.6vw] py-[0.35vw] border border-gray-300 rounded-lg text-[0.82vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  className={`w-[8.5vw] px-[0.45vw] py-[0.3vw] border border-gray-300 rounded-lg text-[0.78vw] bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     !fromDate ? "bg-gray-100 cursor-not-allowed opacity-60" : ""
                   }`}
                 />
               </div>
 
-              {/* Reset Button (Search button removed; auto-filters on change) */}
+              {/* Reset Button */}
               <button
                 onClick={handleResetFilter}
-                className="flex items-center gap-[0.3vw] px-[1vw] py-[0.4vw] bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium text-[0.8vw] rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-[0.25vw] px-[0.7vw] py-[0.35vw] bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium text-[0.78vw] rounded-lg transition-colors cursor-pointer"
               >
-                <RotateCcw size="0.9vw" />
+                <RotateCcw size="0.8vw" />
                 Reset
               </button>
             </div>
 
-            <div className="flex items-center gap-[1vw]">
-              <span className="text-[0.8vw] text-gray-500 font-medium">
+            <div className="flex items-center gap-[0.7vw] flex-shrink-0">
+              <span className="text-[0.78vw] text-gray-500 font-medium whitespace-nowrap">
                 Total Records: {reportsData.length}
               </span>
 
@@ -1210,15 +1321,15 @@ const SalaryCalculationTab = ({
                   onClick={() => setShowExportMenu(!showExportMenu)}
                   disabled={reportsData.length === 0}
                   title={reportsData.length === 0 ? "No data available to export" : "Export Report"}
-                  className={`flex items-center gap-[0.4vw] px-[0.9vw] py-[0.4vw] rounded-lg text-[0.8vw] font-medium transition ${
+                  className={`flex items-center gap-[0.35vw] px-[0.8vw] py-[0.35vw] rounded-lg text-[0.78vw] font-medium whitespace-nowrap transition ${
                     reportsData.length === 0
                       ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
                       : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-xs cursor-pointer"
                   }`}
                 >
-                  <Download size="0.9vw" />
+                  <Download size="0.85vw" />
                   Export
-                  <ChevronDown size="0.8vw" />
+                  <ChevronDown size="0.75vw" />
                 </button>
 
                 {showExportMenu && reportsData.length > 0 && (
