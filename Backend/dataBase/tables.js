@@ -1083,6 +1083,12 @@ const databaseSchema = {
       default: "NULL",
     },
     {
+      column: "officialLetters_url",
+      type: "longtext",
+      nullable: true,
+      default: "NULL",
+    },
+    {
       column: "exit_docs_url",
       type: "longtext",
       nullable: true,

@@ -50,7 +50,7 @@ router.get("/", (req, res) => {
       join_date, intern_start_date, intern_end_date,
       address, password, profile_url, resume_url, offer_letter_url, 
       intern_offer_letter_url,
-      ID_url, Certificates_url, otherDocs_url, exit_docs_url
+      ID_url, Certificates_url, otherDocs_url, officialLetters_url, exit_docs_url
     FROM employees_details
     ORDER BY employee_id DESC
   `;
@@ -69,6 +69,7 @@ router.get("/", (req, res) => {
       let ID_url = {};
       let Certificates_url = {};
       let otherDocs_url = [];
+      let officialLetters_url = [];
       let exit_docs_url = {};
       let intern_offer_letter_url = null;
 
@@ -78,6 +79,9 @@ router.get("/", (req, res) => {
           ? JSON.parse(emp.Certificates_url)
           : {};
         otherDocs_url = emp.otherDocs_url ? JSON.parse(emp.otherDocs_url) : [];
+        officialLetters_url = emp.officialLetters_url
+          ? JSON.parse(emp.officialLetters_url)
+          : [];
         exit_docs_url = emp.exit_docs_url ? JSON.parse(emp.exit_docs_url) : {};
         intern_offer_letter_url = emp.intern_offer_letter_url 
           ? JSON.parse(emp.intern_offer_letter_url) 
@@ -119,6 +123,7 @@ router.get("/", (req, res) => {
         ID_url,
         Certificates_url,
         otherDocs_url,
+        officialLetters_url,
         exit_docs_url,
       };
     });
@@ -307,8 +312,8 @@ router.post("/", uploadFields, async (req, res) => {
      join_date, intern_start_date, intern_end_date,
      address, password, profile_url, resume_url, offer_letter_url,
      intern_offer_letter_url,
-     ID_url, Certificates_url, otherDocs_url, exit_docs_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ID_url, Certificates_url, otherDocs_url, officialLetters_url, exit_docs_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.pool.query(
@@ -451,7 +456,7 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
   const getExistingQuery = `
     SELECT employee_id, intern_id, profile_url, resume_url, offer_letter_url, 
            intern_offer_letter_url,
-           ID_url, Certificates_url, otherDocs_url, exit_docs_url 
+           ID_url, Certificates_url, otherDocs_url, officialLetters_url, exit_docs_url 
     FROM employees_details 
     WHERE employee_id = ?
   `;
@@ -546,6 +551,17 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         return docs;
       }
 
+      if (fileType === "officialLetters" && files.officialLetters) {
+        const letters = [];
+        for (const file of files.officialLetters) {
+          letters.push({
+            originalName: file.originalname,
+            path: await uploadSingleFileToDrive(file, "offer_letters", "offer_letters"),
+          });
+        }
+        return letters;
+      }
+
       if (fileType === "exit") {
         if (files.paySlip) {
           fileData.paySlip = {
@@ -579,11 +595,13 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
     const newIdsData = await processFiles("ids");
     const newCertificatesData = await processFiles("certificates");
     const newOtherDocsData = await processFiles("others");
+    const newOfficialLettersData = await processFiles("officialLetters");
     const newExitDocsData = await processFiles("exit");
 
     let existingIds = {};
     let existingCerts = {};
     let existingOthers = [];
+    let existingOfficialLetters = [];
     let existingExitDocs = {};
 
     try {
@@ -593,6 +611,9 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         : {};
       existingOthers = existing.otherDocs_url
         ? JSON.parse(existing.otherDocs_url)
+        : [];
+      existingOfficialLetters = existing.officialLetters_url
+        ? JSON.parse(existing.officialLetters_url)
         : [];
       existingExitDocs = existing.exit_docs_url
         ? JSON.parse(existing.exit_docs_url)
@@ -605,6 +626,8 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
     const finalCertificatesData = { ...existingCerts, ...newCertificatesData };
     const finalOtherDocsData =
       newOtherDocsData.length > 0 ? [...existingOthers, ...newOtherDocsData] : existingOthers;
+    const finalOfficialLettersData =
+      newOfficialLettersData.length > 0 ? [...existingOfficialLetters, ...newOfficialLettersData] : existingOfficialLetters;
     const finalExitDocsData = { ...existingExitDocs, ...newExitDocsData };
 
     const profileUrl = req.files?.profile
@@ -660,6 +683,7 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         ID_url = ?,
         Certificates_url = ?,
         otherDocs_url = ?,
+        officialLetters_url = ?,
         exit_docs_url = ?
       WHERE employee_id = ?
     `;
@@ -698,6 +722,7 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         JSON.stringify(finalIdsData),
         JSON.stringify(finalCertificatesData),
         JSON.stringify(finalOtherDocsData),
+        JSON.stringify(finalOfficialLettersData),
         JSON.stringify(finalExitDocsData),
         employeeId,
       ],
@@ -1186,5 +1211,87 @@ router.delete("/deleteOtherDoc/:id", (req, res) => {
   });
 });
 
+
+
+// Delete specific official letter by index
+router.delete("/deleteOfficialLetter/:employeeId", (req, res) => {
+  const { employeeId } = req.params;
+  const { docIndex } = req.body;
+
+  if (docIndex === undefined || docIndex === null) {
+    return res.status(400).json({
+      status: false,
+      message: "Document index is required",
+    });
+  }
+
+  const selectQuery = `SELECT officialLetters_url FROM employees_details WHERE employee_id = ?`;
+
+  db.pool.query(selectQuery, [employeeId], (err, results) => {
+    if (err) {
+      console.error("Select error:", err);
+      return res.status(500).json({
+        status: false,
+        message: "DB error",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "Employee not found",
+      });
+    }
+
+    const currentData = results[0].officialLetters_url;
+    
+    try {
+      const letters = currentData ? JSON.parse(currentData) : [];
+      
+      if (docIndex < 0 || docIndex >= letters.length) {
+        return res.status(404).json({
+          status: false,
+          message: "Document not found",
+        });
+      }
+
+      const docToDelete = letters[docIndex];
+      const filePath = docToDelete.path;
+
+      letters.splice(docIndex, 1);
+
+      const updateQuery = `UPDATE employees_details SET officialLetters_url = ? WHERE employee_id = ?`;
+      db.pool.query(
+        updateQuery,
+        [JSON.stringify(letters), employeeId],
+        (updateErr) => {
+          if (updateErr) {
+            console.error("Update error:", updateErr);
+            return res.status(500).json({
+              status: false,
+              message: "Failed to update database",
+            });
+          }
+
+          if (filePath) {
+            deleteFileFromStorage(filePath);
+          }
+
+          res.json({
+            status: true,
+            message: "Official letter deleted successfully",
+          });
+        }
+      );
+    } catch (parseErr) {
+      console.error("JSON parse error:", parseErr);
+      return res.status(500).json({
+        status: false,
+        message: "Failed to parse document data",
+      });
+    }
+  });
+});
 
 module.exports = router;

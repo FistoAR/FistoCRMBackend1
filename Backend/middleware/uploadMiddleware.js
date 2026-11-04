@@ -24,6 +24,7 @@ const storage = multer.diskStorage({
         break;
       case 'offerLetter':
       case 'InternofferLetter':
+      case 'officialLetters':
         uploadPath = path.join(__dirname, '../Images/offer_letters');
         break;
       case 'aadhar':
@@ -108,7 +109,14 @@ const multerUploadFields = upload.fields([
   { name: 'relievingLetter', maxCount: 1 },
   { name: 'intershipCertificate', maxCount: 1 },
   { name: 'InternofferLetter', maxCount: 1 },
-  { name: 'otherDocs', maxCount: 10 },
+  {
+    name: 'otherDocs',
+    maxCount: 10
+  },
+  {
+    name: 'officialLetters',
+    maxCount: 10
+  },
 ]);
 
 const uploadFields = (req, res, next) => {

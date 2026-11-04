@@ -47,6 +47,7 @@ const AddEmployee = ({
   const [canEditInternId, setCanEditInternId] = useState(false);
   const [isDraggingProfile, setIsDraggingProfile] = useState(false);
   const [isDraggingOther, setIsDraggingOther] = useState(false);
+  const [isDraggingOfficialLetters, setIsDraggingOfficialLetters] = useState(false);
   const [passwordModal, setPasswordModal] = useState({
     isOpen: false,
     field: null, // "employeeId" | "internId"
@@ -62,6 +63,7 @@ const AddEmployee = ({
   });
 
   const [expandedDocSections, setExpandedDocSections] = useState({
+    officialLetters: true,
     ids: true,
     certificates: true,
     exitDocs: true,
@@ -112,6 +114,7 @@ const AddEmployee = ({
     paySlip: null,
     experienceLetter: null,
     relievingLetter: null,
+    officialLetters: [],
     otherDocs: [],
     existingProfile: null,
     existingResume: null,
@@ -129,6 +132,7 @@ const AddEmployee = ({
     existingRelievingLetter: null,
     existingIntershipCertificate: null ,
     existingInternofferLetter:null,
+    existingOfficialLetters: [],
     existingOtherDocs: [],
   });
 
@@ -143,7 +147,7 @@ const AddEmployee = ({
 
     const date = new Date(dateString);
 
-    if (isNaN(date.getTime())) return "";
+    if (isNaN(date.getTime()) || date.getFullYear() < 1970) return "";
 
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -228,6 +232,7 @@ const AddEmployee = ({
         paySlip: null,
         experienceLetter: null,
         relievingLetter: null,
+        officialLetters: [],
         otherDocs: [],
         existingProfile: editingEmployee.profile_url || null,
         existingResume: editingEmployee.resume_url || null,
@@ -250,6 +255,17 @@ const AddEmployee = ({
           editingEmployee.exit_docs_url?.relievingLetter?.path || null,
         existingIntershipCertificate: editingEmployee.exit_docs_url?.intershipCertificate?.path ,
         existingInternofferLetter: editingEmployee.intern_offer_letter_url || null,
+        existingOfficialLetters: (() => {
+          const raw = editingEmployee.officialLetters_url;
+          if (!raw) return [];
+          if (Array.isArray(raw)) return raw;
+          try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            return [];
+          }
+        })(),
         existingOtherDocs: editingEmployee.otherDocs_url || [],
       });
 
@@ -305,6 +321,7 @@ const AddEmployee = ({
         paySlip: null,
         experienceLetter: null,
         relievingLetter: null,
+        officialLetters: [],
         otherDocs: [],
         existingProfile: null,
         existingResume: null,
@@ -563,6 +580,98 @@ const AddEmployee = ({
     }));
   };
 
+
+  const processMultipleOfficialLetters = (files) => {
+    const fileList = Array.from(files);
+    const validFiles = [];
+    let hasOversized = false;
+
+    fileList.forEach((file) => {
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        hasOversized = true;
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (hasOversized) {
+      notify({
+        title: "Error",
+        message: `Some files exceeded the maximum ${MAX_FILE_SIZE_MB}MB limit and were skipped.`,
+      });
+    }
+
+    if (validFiles.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        officialLetters: [...(Array.isArray(prev.officialLetters) ? prev.officialLetters : []), ...validFiles],
+      }));
+    }
+  };
+
+  const handleMultipleOfficialLettersChange = (e) => {
+    processMultipleOfficialLetters(e.target.files);
+    e.target.value = "";
+  };
+
+  const handleRemoveNewOfficialLetter = (indexToRemove) => {
+    setFormData((prev) => ({
+      ...prev,
+      officialLetters: (Array.isArray(prev.officialLetters) ? prev.officialLetters : []).filter((_, index) => index !== indexToRemove),
+    }));
+  };
+
+  const handleDeleteExistingOfficialLetter = async (docIndex) => {
+    const ok = await confirm({
+      type: "error",
+      title: "Delete Official Letter",
+      message: "Are you sure you want to delete this official letter?",
+      confirmText: "Yes, Delete",
+      cancelText: "Cancel",
+    });
+
+    if (!ok) return;
+
+    try {
+      const response = await fetch(
+        `${API_URL}/employeeRegister/deleteOfficialLetter/${editingEmployee.employee_id}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ docIndex }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.status) {
+        setFormData((prev) => ({
+          ...prev,
+          existingOfficialLetters: (Array.isArray(prev.existingOfficialLetters) ? prev.existingOfficialLetters : []).filter(
+            (_, index) => index !== docIndex
+          ),
+        }));
+        notify({
+          title: "Success",
+          message: "Official letter deleted successfully",
+        });
+      } else {
+        notify({
+          title: "Error",
+          message: data.message || "Failed to delete official letter",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting official letter:", error);
+      notify({
+        title: "Error",
+        message: "An error occurred while deleting the official letter",
+      });
+    }
+  };
+
   const handleDeleteExistingOtherDoc = async (docIndex) => {
     const ok = await confirm({
       type: "error",
@@ -689,6 +798,31 @@ const AddEmployee = ({
       title: title || "Document",
       rawPath: fileUrl,
     });
+  };
+
+  const handleDownloadFile = async (filePath, fileType) => {
+    try {
+      const fullUrl = resolveFileUrl(filePath);
+      const response = await fetch(fullUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      const fileName = fileType || "downloaded-file";
+      a.download = fileName;
+
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      notify({
+        title: "Error",
+        message: `Download failed: ${err}`,
+      });
+    }
   };
 
   const validateForm = () => {
@@ -838,6 +972,12 @@ const AddEmployee = ({
 
       if(formData.intershipCertificate)
           submitFormData.append("intershipCertificate", formData.intershipCertificate);
+
+      if (formData.officialLetters && formData.officialLetters.length > 0) {
+        formData.officialLetters.forEach((file) => {
+          submitFormData.append("officialLetters", file);
+        });
+      }
 
       if (formData.otherDocs && formData.otherDocs.length > 0) {
         formData.otherDocs.forEach((file) => {
@@ -1907,13 +2047,20 @@ const AddEmployee = ({
               </div>
 
               {(() => {
-                const hasInternHistory =
-                  editingEmployee?.employment_type === "On Role" &&
-                  (formData.internStartDate ||
-                    formData.internEndDate ||
-                    formData.internId ||
-                    editingEmployee?.intern_id);
-                if (!hasInternHistory) return null;
+                // Show Intern Details section ONLY if:
+                // 1) Employee is staying in as Intern (formData.employmentType === "Intern")
+                // 2) Or employee converted from Intern to On Role (has genuine intern history/intern ID)
+                const isStayingAsIntern = formData.employmentType === "Intern";
+                const convertedFromIntern =
+                  formData.employmentType === "On Role" &&
+                  Boolean(
+                    (editingEmployee?.intern_id && String(editingEmployee.intern_id).trim() !== "") ||
+                    (formData.internId && String(formData.internId).trim() !== "") ||
+                    (formData.originalEmploymentType === "Intern")
+                  );
+
+                const shouldShowInternDetails = isStayingAsIntern || convertedFromIntern;
+                if (!shouldShowInternDetails) return null;
                 return (
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
                     <button
@@ -2010,105 +2157,293 @@ const AddEmployee = ({
 
                 {expandedSections.documents && (
                   <div className="p-[1.2vw]">
-                    <div className="grid grid-cols-4 gap-[1vw] mb-[1.2vw] items-center">
-                      <div>
-                        <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.6vw]">
-                          Profile Picture
-                        </label>
-                        <div className="flex items-center gap-[1vw]">
-                          {profilePreview ? (
-                            <>
-                              <img
-                                src={profilePreview}
-                                alt="Profile Preview"
-                                className="w-[5vw] h-[5vw] rounded-full object-cover border-2 border-gray-300"
-                                onError={(e) => {
-                                  e.target.style.display = "none";
-                                  e.target.nextSibling.style.display = "flex";
-                                }}
-                              />
+                    {(() => {
+                      const isStayingAsIntern = formData.employmentType === "Intern";
+                      const convertedFromIntern =
+                        formData.employmentType === "On Role" &&
+                        Boolean(
+                          (editingEmployee?.intern_id && String(editingEmployee.intern_id).trim() !== "") ||
+                          (formData.internId && String(formData.internId).trim() !== "") ||
+                          (formData.originalEmploymentType === "Intern")
+                        );
+                      const shouldShowInternOfferLetter = isStayingAsIntern || convertedFromIntern;
 
-                              <div className="hidden w-[5vw] h-[5vw] rounded-full bg-gray-100 flex items-center justify-center border-2 border-dashed border-gray-300">
-                                <Camera className="text-gray-400 w-[2vw] h-[2vw]" />
+                      return (
+                        <div className={`grid ${shouldShowInternOfferLetter ? "grid-cols-4" : "grid-cols-3"} gap-[1vw] mb-[1.2vw] items-center`}>
+                          <div>
+                            <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.6vw]">
+                              Profile Picture
+                            </label>
+                            <div className="flex items-center gap-[1vw]">
+                              {profilePreview ? (
+                                <>
+                                  <img
+                                    src={profilePreview}
+                                    alt="Profile Preview"
+                                    className="w-[5vw] h-[5vw] rounded-full object-cover border-2 border-gray-300"
+                                    onError={(e) => {
+                                      e.target.style.display = "none";
+                                      e.target.nextSibling.style.display = "flex";
+                                    }}
+                                  />
+
+                                  <div className="hidden w-[5vw] h-[5vw] rounded-full bg-gray-100 flex items-center justify-center border-2 border-dashed border-gray-300">
+                                    <Camera className="text-gray-400 w-[2vw] h-[2vw]" />
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="w-[5vw] h-[5vw] rounded-full bg-gray-100 flex items-center justify-center border-2 border-dashed border-gray-300">
+                                  <Camera className="text-gray-400 w-[2vw] h-[2vw]" />
+                                </div>
+                              )}
+                              <label
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setIsDraggingProfile(true);
+                                }}
+                                onDragEnter={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setIsDraggingProfile(true);
+                                }}
+                                onDragLeave={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setIsDraggingProfile(false);
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setIsDraggingProfile(false);
+                                  const file = e.dataTransfer.files?.[0];
+                                  if (file) {
+                                    processProfileFile(file);
+                                  }
+                                }}
+                                className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all border ${
+                                  isDraggingProfile
+                                    ? "bg-blue-50 border-blue-500 ring-2 ring-blue-300 scale-102"
+                                    : "bg-white border-gray-700 hover:bg-gray-50"
+                                }`}
+                                title="Click to choose photo or drag & drop photo here"
+                              >
+                                <Upload
+                                  size={"1vw"}
+                                  className={isDraggingProfile ? "text-blue-600 animate-bounce" : "text-gray-600"}
+                                />
+                                <span
+                                  className={`text-[0.9vw] font-medium ${
+                                    isDraggingProfile ? "text-blue-700 font-semibold" : "text-gray-700"
+                                  }`}
+                                >
+                                  {isDraggingProfile ? "Drop Photo Here" : "Choose Photo"}
+                                </span>
+                                <input
+                                  type="file"
+                                  onChange={handleProfileChange}
+                                  accept="image/*"
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <FileUploadField
+                            label="Resume / CV"
+                            fieldName="resume"
+                            accept=".pdf,.doc,.docx"
+                          />
+
+                          {shouldShowInternOfferLetter && (
+                            <FileUploadField
+                              label="Intern Offer Letter"
+                              fieldName="InternofferLetter"
+                              accept=".pdf,.doc,.docx"
+                            />
+                          )}
+
+                          <FileUploadField
+                            label="On Role Offer Letter"
+                            fieldName="offerLetter"
+                            accept=".pdf,.doc,.docx"
+                          />
+                        </div>
+                      );
+                    })()}
+
+                    
+                    {/* Official Letters Collapsible Section */}
+                    <div className="border border-gray-300 rounded-lg overflow-hidden mb-[1.2vw]">
+                      <button
+                        type="button"
+                        onClick={() => toggleDocSection("officialLetters")}
+                        className="flex items-center justify-between w-full px-[0.8vw] py-[0.6vw] text-left bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                      >
+                        <span className="text-[0.9vw] font-bold text-gray-800">
+                          Official Letters
+                        </span>
+                        {expandedDocSections.officialLetters ? (
+                          <ChevronUp className="w-[1.2vw] h-[1.2vw]" />
+                        ) : (
+                          <ChevronDown className="w-[1.2vw] h-[1.2vw]" />
+                        )}
+                      </button>
+                      {expandedDocSections.officialLetters && (
+                        <div className="p-[0.8vw] bg-white">
+                          <p className="text-gray-600 text-[0.85vw] mb-[0.6vw]">
+                            Upload offer letters, increment letters, promotion letters, etc. (multiple files allowed)
+                          </p>
+
+                          {/* Existing Official Letters */}
+                          {formData.existingOfficialLetters &&
+                            formData.existingOfficialLetters.length > 0 && (
+                              <div className="mb-[0.8vw]">
+                                <p className="text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                                  Existing Letters:
+                                </p>
+                                <div className="grid grid-cols-3 gap-[0.5vw]">
+                                  {formData.existingOfficialLetters.map(
+                                    (doc, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-center justify-between gap-[0.5vw] p-[0.5vw] bg-blue-50/70 rounded-lg border border-blue-200"
+                                      >
+                                        <div className="flex items-center gap-[0.4vw] min-w-0 flex-1">
+                                          <FileText
+                                            size={"1vw"}
+                                            className="text-blue-600 flex-shrink-0"
+                                          />
+                                          <span className="text-[0.85vw] text-blue-800 truncate" title={doc.originalName}>
+                                            {doc.originalName}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-[0.35vw] flex-shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleViewFile(doc.path, doc.originalName || "Official Letter")
+                                            }
+                                            className="p-[0.35vw] bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors cursor-pointer"
+                                            title="View Document"
+                                          >
+                                            <Eye size={"0.9vw"} className="text-blue-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleDownloadFile(doc.path, doc.originalName || "Official Letter")
+                                            }
+                                            className="p-[0.35vw] bg-green-50 border border-green-200 rounded-full hover:bg-green-100 transition-colors cursor-pointer"
+                                            title="Download Document"
+                                          >
+                                            <Download size={"0.9vw"} className="text-green-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleDeleteExistingOfficialLetter(idx)
+                                            }
+                                            className="p-[0.35vw] bg-red-50 border border-red-200 rounded-full hover:bg-red-100 transition-colors cursor-pointer"
+                                            title="Delete Document"
+                                          >
+                                            <Trash2 size={"0.85vw"} className="text-red-600" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
                               </div>
-                            </>
-                          ) : (
-                            <div className="w-[5vw] h-[5vw] rounded-full bg-gray-100 flex items-center justify-center border-2 border-dashed border-gray-300">
-                              <Camera className="text-gray-400 w-[2vw] h-[2vw]" />
+                            )}
+
+                          {/* New Official Letters to Upload */}
+                          {formData.officialLetters && formData.officialLetters.length > 0 && (
+                            <div className="mb-[0.8vw]">
+                              <p className="text-[0.9vw] font-medium text-gray-700 mb-[0.4vw]">
+                                New Letters to Upload:
+                              </p>
+                              <div className="grid grid-cols-3 gap-[0.5vw]">
+                                {formData.officialLetters.map((file, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center gap-[0.5vw] p-[0.5vw] bg-blue-50 rounded-lg border border-blue-200"
+                                  >
+                                    <FileText
+                                      size={"1vw"}
+                                      className="text-blue-600"
+                                    />
+                                    <span className="text-[0.85vw] text-blue-700 flex-1 truncate">
+                                      {file.name}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveNewOfficialLetter(idx)}
+                                      className="p-[0.3vw] text-red-600 hover:bg-red-100 rounded transition-colors"
+                                      title="Remove"
+                                    >
+                                      <X size={"0.9vw"} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
+
+                          {/* File Upload Input & Drop Target */}
                           <label
                             onDragOver={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setIsDraggingProfile(true);
+                              setIsDraggingOfficialLetters(true);
                             }}
                             onDragEnter={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setIsDraggingProfile(true);
+                              setIsDraggingOfficialLetters(true);
                             }}
                             onDragLeave={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setIsDraggingProfile(false);
+                              setIsDraggingOfficialLetters(false);
                             }}
                             onDrop={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setIsDraggingProfile(false);
-                              const file = e.dataTransfer.files?.[0];
-                              if (file) {
-                                processProfileFile(file);
+                              setIsDraggingOfficialLetters(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                processMultipleOfficialLetters(e.dataTransfer.files);
                               }
                             }}
-                            className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all border ${
-                              isDraggingProfile
+                            className={`flex items-center gap-[0.5vw] px-[0.8vw] py-[0.5vw] rounded-full cursor-pointer transition-all w-fit border ${
+                              isDraggingOfficialLetters
                                 ? "bg-blue-50 border-blue-500 ring-2 ring-blue-300 scale-102"
                                 : "bg-white border-gray-700 hover:bg-gray-50"
                             }`}
-                            title="Click to choose photo or drag & drop photo here"
+                            title="Click to choose files or drag & drop files here"
                           >
                             <Upload
-                              size={"1vw"}
-                              className={isDraggingProfile ? "text-blue-600 animate-bounce" : "text-gray-600"}
+                              size={"1.1vw"}
+                              className={isDraggingOfficialLetters ? "text-blue-600 animate-bounce" : "text-gray-600"}
                             />
                             <span
-                              className={`text-[0.9vw] font-medium ${
-                                isDraggingProfile ? "text-blue-700 font-semibold" : "text-gray-700"
+                              className={`text-[0.85vw] font-medium ${
+                                isDraggingOfficialLetters ? "text-blue-700 font-semibold" : "text-gray-700"
                               }`}
                             >
-                              {isDraggingProfile ? "Drop Photo Here" : "Choose Photo"}
+                              {isDraggingOfficialLetters ? "Drop Files Here" : "Add More Files (or Drop Here)"}
                             </span>
                             <input
                               type="file"
-                              onChange={handleProfileChange}
-                              accept="image/*"
+                              multiple
+                              onChange={handleMultipleOfficialLettersChange}
                               className="hidden"
+                              accept=".pdf,.doc,.docx,image/*"
                             />
                           </label>
                         </div>
-                      </div>
-
-                      <FileUploadField
-                        label="Resume / CV"
-                        fieldName="resume"
-                        accept=".pdf,.doc,.docx"
-                      />
-
-                      <FileUploadField
-                        label="Intern Offer Letter"
-                        fieldName="InternofferLetter"
-                        accept=".pdf,.doc,.docx"
-                      />
-
-                      <FileUploadField
-                        label="On Role Offer Letter"
-                        fieldName="offerLetter"
-                        accept=".pdf,.doc,.docx"
-                      />
+                      )}
                     </div>
-
                     <div className="border border-gray-300 rounded-lg overflow-hidden mb-[1.2vw]">
                       <button
                         type="button"
@@ -2229,34 +2564,49 @@ const AddEmployee = ({
                                     (doc, idx) => (
                                       <div
                                         key={idx}
-                                        className="flex items-center gap-[0.5vw] p-[0.5vw] bg-green-50 rounded-lg border border-green-200"
+                                        className="flex items-center justify-between gap-[0.5vw] p-[0.5vw] bg-green-50 rounded-lg border border-green-200"
                                       >
-                                        <FileText
-                                          size={"1vw"}
-                                          className="text-green-600"
-                                        />
-                                        <span className="text-[0.85vw] text-green-700 flex-1 truncate">
-                                          {doc.originalName}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            handleViewFile(doc.path, doc.originalName || "Document")
-                                          }
-                                          className="text-[0.85vw] text-blue-600 hover:underline cursor-pointer"
-                                        >
-                                          View
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            handleDeleteExistingOtherDoc(idx)
-                                          }
-                                          className="p-[0.3vw] text-red-600 hover:bg-red-100 rounded transition-colors"
-                                          title="Delete"
-                                        >
-                                          <Trash2 size={"0.9vw"} />
-                                        </button>
+                                        <div className="flex items-center gap-[0.4vw] min-w-0 flex-1">
+                                          <FileText
+                                            size={"1vw"}
+                                            className="text-green-600 flex-shrink-0"
+                                          />
+                                          <span className="text-[0.85vw] text-green-700 truncate" title={doc.originalName}>
+                                            {doc.originalName}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-[0.35vw] flex-shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleViewFile(doc.path, doc.originalName || "Document")
+                                            }
+                                            className="p-[0.35vw] bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors cursor-pointer"
+                                            title="View Document"
+                                          >
+                                            <Eye size={"0.9vw"} className="text-blue-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleDownloadFile(doc.path, doc.originalName || "Document")
+                                            }
+                                            className="p-[0.35vw] bg-green-50 border border-green-200 rounded-full hover:bg-green-100 transition-colors cursor-pointer"
+                                            title="Download Document"
+                                          >
+                                            <Download size={"0.9vw"} className="text-green-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleDeleteExistingOtherDoc(idx)
+                                            }
+                                            className="p-[0.35vw] bg-red-50 border border-red-200 rounded-full hover:bg-red-100 transition-colors cursor-pointer"
+                                            title="Delete Document"
+                                          >
+                                            <Trash2 size={"0.85vw"} className="text-red-600" />
+                                          </button>
+                                        </div>
                                       </div>
                                     ),
                                   )}

@@ -1667,19 +1667,21 @@ router.get("/:projectId", async (req, res) => {
       `;
       const queryParams = [];
 
-      const conditions = [];
+      const targetConditions = [];
       if (deptPlaceholders) {
-        conditions.push(`d.id IN (${deptPlaceholders})`);
+        targetConditions.push(`d.id IN (${deptPlaceholders})`);
         queryParams.push(...project.department);
       }
-      conditions.push(`e.working_status = 'Active'`);
       if (uniqueExplicitIds.length > 0) {
         const idPlaceholders = uniqueExplicitIds.map(() => "?").join(",");
-        conditions.push(`e.employee_id IN (${idPlaceholders}) OR e.intern_id IN (${idPlaceholders})`);
+        targetConditions.push(`(e.employee_id IN (${idPlaceholders}) OR e.intern_id IN (${idPlaceholders}))`);
         queryParams.push(...uniqueExplicitIds, ...uniqueExplicitIds);
       }
 
-      employeesByDeptQuery += ` AND (${conditions.join(" OR ")})`;
+      employeesByDeptQuery += ` AND e.working_status = 'Active'`;
+      if (targetConditions.length > 0) {
+        employeesByDeptQuery += ` AND (${targetConditions.join(" OR ")})`;
+      }
       return await queryWithRetry(employeesByDeptQuery, queryParams);
     })();
 

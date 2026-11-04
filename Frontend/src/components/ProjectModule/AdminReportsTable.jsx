@@ -88,6 +88,8 @@ export default function AdminReportsTable({
   const [filterDepartment, setFilterDepartment] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterProgress, setFilterProgress] = useState("all");
+  const [filterAssignedBy, setFilterAssignedBy] = useState("all");
+  const [filterAssignedTo, setFilterAssignedTo] = useState("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const filterDropdownRef = useRef(null);
   const modalRef = useRef(null);
@@ -305,6 +307,33 @@ export default function AdminReportsTable({
     return Array.from(depts).filter(Boolean).sort();
   }, [currentEmployees, tasks]);
 
+  const getTaskAssignedByName = (task) => {
+    return task.assigned_by?.name || task.assignedBy?.name || "";
+  };
+
+  const getTaskAssignedToName = (task) => {
+    const emp = getEmployeeDetails(task.employee, task);
+    return emp?.name || "";
+  };
+
+  const assignedByOptions = useMemo(() => {
+    const names = new Set();
+    flattenedTasks.forEach((t) => {
+      const name = getTaskAssignedByName(t);
+      if (name && name.trim()) names.add(name.trim());
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [flattenedTasks]);
+
+  const assignedToOptions = useMemo(() => {
+    const names = new Set();
+    flattenedTasks.forEach((t) => {
+      const name = getTaskAssignedToName(t);
+      if (name && name.trim()) names.add(name.trim());
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [flattenedTasks, currentEmployees]);
+
   const filteredTasks = flattenedTasks.filter((task) => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch =
@@ -373,8 +402,25 @@ export default function AdminReportsTable({
         taskDept.toLowerCase() === filterDepartment.toLowerCase();
     }
 
+    let matchesAssignedBy = true;
+    if (filterAssignedBy !== "all") {
+      const assignedByName = getTaskAssignedByName(task);
+      matchesAssignedBy = assignedByName.trim().toLowerCase() === filterAssignedBy.trim().toLowerCase();
+    }
+
+    let matchesAssignedTo = true;
+    if (filterAssignedTo !== "all") {
+      const assignedToName = getTaskAssignedToName(task);
+      matchesAssignedTo = assignedToName.trim().toLowerCase() === filterAssignedTo.trim().toLowerCase();
+    }
+
     return (
-      matchesSearch && matchesStatus && matchesProgress && matchesDepartment
+      matchesSearch &&
+      matchesStatus &&
+      matchesProgress &&
+      matchesDepartment &&
+      matchesAssignedBy &&
+      matchesAssignedTo
     );
   });
 
@@ -1117,6 +1163,8 @@ export default function AdminReportsTable({
     setFilterDepartment("all");
     setFilterStatus("all");
     setFilterProgress("all");
+    setFilterAssignedBy("all");
+    setFilterAssignedTo("all");
   };
 
   const formatTime = (timestamp) => {
@@ -1288,7 +1336,9 @@ export default function AdminReportsTable({
                 <span>Filter</span>
                 {(filterStatus !== "all" ||
                   filterProgress !== "all" ||
-                  filterDepartment !== "all") && (
+                  filterDepartment !== "all" ||
+                  filterAssignedBy !== "all" ||
+                  filterAssignedTo !== "all") && (
                   <span className="w-[0.4vw] h-[0.4vw] bg-blue-500 rounded-full"></span>
                 )}
               </button>
@@ -1308,6 +1358,42 @@ export default function AdminReportsTable({
                       {departmentOptions.map((dept) => (
                         <option key={dept} value={dept}>
                           {dept}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mb-[0.7vw]">
+                    <label className="text-[0.7vw] font-medium text-gray-700 block mb-[0.3vw]">
+                      Assigned By
+                    </label>
+                    <select
+                      value={filterAssignedBy}
+                      onChange={(e) => setFilterAssignedBy(e.target.value)}
+                      className="w-full px-[0.5vw] py-[0.3vw] border border-gray-300 rounded text-[0.7vw] focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Assigned By</option>
+                      {assignedByOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mb-[0.7vw]">
+                    <label className="text-[0.7vw] font-medium text-gray-700 block mb-[0.3vw]">
+                      Assigned To
+                    </label>
+                    <select
+                      value={filterAssignedTo}
+                      onChange={(e) => setFilterAssignedTo(e.target.value)}
+                      className="w-full px-[0.5vw] py-[0.3vw] border border-gray-300 rounded text-[0.7vw] focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Assigned To</option>
+                      {assignedToOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
                         </option>
                       ))}
                     </select>

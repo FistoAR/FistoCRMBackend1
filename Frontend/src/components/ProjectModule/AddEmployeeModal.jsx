@@ -52,13 +52,21 @@ export default function EmployeeModal({
 
   if (!isOpen) return null;
 
-  const allocatedEmployees = allEmployees.filter(
+  const activeEmployees = allEmployees.filter((emp) => {
+    if (!emp) return false;
+    if (emp.working_status && String(emp.working_status).trim().toLowerCase() !== "active") {
+      return false;
+    }
+    return true;
+  });
+
+  const allocatedEmployees = activeEmployees.filter(
     (emp) =>
       selectedEmployees.includes(emp.id) &&
       emp.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const notAllocatedEmployees = allEmployees.filter(
+  const notAllocatedEmployees = activeEmployees.filter(
     (emp) =>
       !selectedEmployees.includes(emp.id) &&
       emp.name.toLowerCase().includes(searchQuery.toLowerCase()),

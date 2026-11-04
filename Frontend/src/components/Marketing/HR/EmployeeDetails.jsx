@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Edit2, Trash2, ChevronLeft, ChevronRight, Plus, Calendar, X, ArrowUpDown, ArrowUp, ArrowDown, Download, Bell, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Edit2, Trash2, ChevronLeft, ChevronRight, Plus, Calendar, X, ArrowUpDown, ArrowUp, ArrowDown, Download, Bell, AlertCircle, CheckCircle2, Info, FileText, Check, AlertTriangle, Eye, Shield, Briefcase, Mail, Phone, MapPin, Building2, User } from "lucide-react";
 import { useNotification } from "../../NotificationContext";
 import { useConfirm } from "../../ConfirmContext";
 import AddEmployeeModal from "./AddEmployeeModal";
@@ -44,11 +44,6 @@ export const getPendingExitDocuments = (employee) => {
     pending.push("Experience Letter");
   }
 
-  const hasRelievingLetter = isDocPresent(exitDocs.relievingLetter) || isDocPresent(exitDocs.relieving_letter);
-  if (!hasRelievingLetter) {
-    pending.push("Relieving Letter");
-  }
-
   return pending;
 };
 
@@ -57,6 +52,123 @@ export const hasPendingExitDocuments = (employee) => {
   const status = employee.working_status || employee.workingStatus;
   return status === "Relieved" && getPendingExitDocuments(employee).length > 0;
 };
+
+
+  // Helper to compile uploaded and pending documents
+  const getEmployeeDocumentChecklist = (emp) => {
+    if (!emp) return { uploaded: [], pending: [], totalUploaded: 0, totalMandatory: 0 };
+
+    const parseJson = (val) => {
+      if (!val) return null;
+      if (typeof val === "object") return val;
+      try {
+        return JSON.parse(val);
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const isPresent = (item) => {
+      if (!item) return false;
+      if (typeof item === "string") return item.trim() !== "";
+      if (typeof item === "object") {
+        return Boolean(item.path || item.url || item.filename || Object.keys(item).length > 0);
+      }
+      return false;
+    };
+
+    const getDocDetails = (item) => {
+      if (!item) return { path: null, name: "" };
+      if (typeof item === "string") return { path: item, name: item.split("/").pop() };
+      if (typeof item === "object") {
+        return {
+          path: item.path || item.url || null,
+          name: item.originalName || item.filename || (item.path ? item.path.split("/").pop() : "")
+        };
+      }
+      return { path: null, name: "" };
+    };
+
+    const ids = parseJson(emp.ID_url) || {};
+    const certs = parseJson(emp.Certificates_url) || {};
+    const exitDocs = parseJson(emp.exit_docs_url) || {};
+    const otherDocs = parseJson(emp.otherDocs_url) || [];
+    const officialLetters = parseJson(emp.officialLetters_url) || [];
+
+    const uploaded = [];
+    const pending = [];
+
+    // 1. Mandatory Standard Employee Documents
+    const standardSpecs = [
+      { key: "resume", label: "Resume / CV", val: emp.resume_url, category: "Basic" },
+      { key: "aadhar", label: "Aadhaar Card", val: ids.aadhar, category: "ID Documents" },
+      { key: "panCard", label: "PAN Card", val: ids.panCard, category: "ID Documents" },
+      { key: "voterId", label: "Voter ID", val: ids.voterId, category: "ID Documents", optional: true },
+      { key: "drivingLicense", label: "Driving License", val: ids.drivingLicense, category: "ID Documents", optional: true },
+      { key: "tenth", label: "10th Certificate", val: certs.tenth, category: "Certificates" },
+      { key: "twelfth", label: "12th Certificate", val: certs.twelfth, category: "Certificates" },
+      { key: "degree", label: "Degree Certificate", val: certs.degree, category: "Certificates" },
+      { key: "probation", label: "Probation Certificate", val: certs.probation, category: "Certificates", optional: true },
+    ];
+
+    standardSpecs.forEach((spec) => {
+      if (isPresent(spec.val)) {
+        const { path, name } = getDocDetails(spec.val);
+        uploaded.push({ label: spec.label, category: spec.category, path, name });
+      } else {
+        pending.push({ label: spec.label, category: spec.category });
+      }
+    });
+
+    // 2. Exit Documents (If Relieved)
+    if (emp.working_status === "Relieved") {
+      const exitSpecs = [
+        { key: "paySlip", label: "Pay Slip", val: exitDocs.paySlip || exitDocs.pay_slip || exitDocs.payslip },
+        { key: "experienceLetter", label: "Experience Letter", val: exitDocs.experienceLetter || exitDocs.experience_letter },
+        { key: "relievingLetter", label: "Relieving Letter", val: exitDocs.relievingLetter || exitDocs.relieving_letter },
+      ];
+
+      exitSpecs.forEach((spec) => {
+        if (isPresent(spec.val)) {
+          const { path, name } = getDocDetails(spec.val);
+          uploaded.push({ label: spec.label, category: "Exit Documents", path, name });
+        } else {
+          pending.push({ label: spec.label, category: "Exit Documents" });
+        }
+      });
+    }
+
+    // 3. Official Letters (Multiple)
+    if (Array.isArray(officialLetters) && officialLetters.length > 0) {
+      officialLetters.forEach((letter, i) => {
+        uploaded.push({
+          label: letter.originalName || `Official Letter ${i + 1}`,
+          category: "Official Letters",
+          path: letter.path,
+          name: letter.originalName || "Letter"
+        });
+      });
+    }
+
+    // 4. Other Documents (Multiple)
+    if (Array.isArray(otherDocs) && otherDocs.length > 0) {
+      otherDocs.forEach((doc, i) => {
+        uploaded.push({
+          label: doc.originalName || `Other Document ${i + 1}`,
+          category: "Other Documents",
+          path: doc.path,
+          name: doc.originalName || "Document"
+        });
+      });
+    }
+
+    return {
+      uploaded,
+      pending,
+      totalUploaded: uploaded.length,
+      highPendingCount: pending.filter((p) => p.priority !== "Optional").length,
+    };
+  };
 
 const EmployeeOverview = () => {
   const { notify } = useNotification();
@@ -80,6 +192,7 @@ const EmployeeOverview = () => {
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
   const [highlightedEmpId, setHighlightedEmpId] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [infoModalEmployee, setInfoModalEmployee] = useState(null);
 
   const dateFilterRef = useRef(null);
   const notificationRef = useRef(null);
@@ -587,7 +700,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
               className="relative p-[0.45vw] bg-gray-200 hover:bg-gray-300 rounded-full text-gray-700 transition flex items-center justify-center cursor-pointer"
               title="Pending Exit Documents"
             >
-              <Bell size={"1.1vw"} />
+              <Bell size={"1.1vw"} className={pendingCount > 0 ? "text-gray-800" : ""} />
               {pendingCount > 0 && (
                 <span className="absolute -top-[0.2vw] -right-[0.2vw] bg-red-600 text-white rounded-full min-w-[1.2vw] h-[1.2vw] px-[0.2vw] flex items-center justify-center text-[0.65vw] font-bold shadow-sm animate-pulse">
                   {pendingCount}
@@ -1027,6 +1140,13 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                             <Edit2 size={"1vw"} />
                           </button>
                           <button
+                            onClick={() => setInfoModalEmployee(emp)}
+                            className="p-[0.35vw] bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-100 transition cursor-pointer"
+                            title="View Employee & Document Details"
+                          >
+                            <Info size={"1vw"} />
+                          </button>
+                          <button
                             onClick={() => handleDelete(emp.employee_id)}
                             className="p-[0.35vw] bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition cursor-pointer"
                             title="Delete"
@@ -1139,6 +1259,174 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
           </div>
         </div>
       )}
+
+      {/* Employee Info & Document Status Modal */}
+      {infoModalEmployee && (() => {
+        const docStatus = getEmployeeDocumentChecklist(infoModalEmployee);
+        const profileImgUrl = resolveFileUrl(infoModalEmployee.profile_url);
+
+        return (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setInfoModalEmployee(null)}
+          >
+            <div
+              className="relative bg-white rounded-xl shadow-xl border border-gray-200 max-w-[42vw] w-full text-left"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-[1vw] py-[0.7vw] border-b border-gray-200 bg-gray-50 rounded-t-xl">
+                <div className="flex items-center gap-[0.6vw]">
+                  {profileImgUrl ? (
+                    <img
+                      src={profileImgUrl}
+                      alt={infoModalEmployee.employee_name}
+                      className="w-[2.2vw] h-[2.2vw] rounded-full object-cover border border-gray-300"
+                    />
+                  ) : (
+                    <div className="w-[2.2vw] h-[2.2vw] rounded-full bg-gray-700 text-white font-bold flex items-center justify-center text-[0.9vw]">
+                      {infoModalEmployee.employee_name?.charAt(0)?.toUpperCase() || "E"}
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="text-[0.95vw] font-bold text-gray-900 leading-tight">
+                      {infoModalEmployee.employee_name}{" "}
+                      <span className="text-gray-500 font-normal text-[0.8vw]">
+                        ({infoModalEmployee.employee_id})
+                      </span>
+                    </h3>
+                    <p className="text-[0.75vw] text-gray-600 mt-[0.1vw]">
+                      {infoModalEmployee.designation || "-"} • {infoModalEmployee.employment_type || "-"} • {infoModalEmployee.working_status || "Active"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setInfoModalEmployee(null)}
+                  className="p-[0.3vw] text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-full transition cursor-pointer"
+                  title="Close"
+                >
+                  <X size={"1.1vw"} />
+                </button>
+              </div>
+
+              {/* Modal Body (No vertical page scrolling) */}
+              <div className="p-[1vw] space-y-[0.8vw]">
+                {/* 1. Quick Info Bar */}
+                <div className="grid grid-cols-4 gap-[0.5vw] bg-gray-50 p-[0.6vw] rounded-lg border border-gray-200 text-[0.78vw]">
+                  <div>
+                    <span className="text-gray-500 block text-[0.7vw]">Email</span>
+                    <span className="font-medium text-gray-800 truncate block" title={infoModalEmployee.email_official || infoModalEmployee.email_personal || "-"}>
+                      {infoModalEmployee.email_official || infoModalEmployee.email_personal || "-"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block text-[0.7vw]">Phone</span>
+                    <span className="font-medium text-gray-800 block">
+                      {infoModalEmployee.phone_personal || infoModalEmployee.phone_official || "-"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block text-[0.7vw]">Joining Date</span>
+                    <span className="font-medium text-gray-800 block">
+                      {formatDate(infoModalEmployee.join_date)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block text-[0.7vw]">Bank Info</span>
+                    <span className="font-medium text-gray-800 truncate block" title={infoModalEmployee.bank_name || "-"}>
+                      {infoModalEmployee.bank_name ? `${infoModalEmployee.bank_name} (${infoModalEmployee.account_number || ""})` : "-"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Documents Breakdown */}
+                <div className="grid grid-cols-2 gap-[0.8vw]">
+                  {/* Uploaded Documents */}
+                  <div className="border border-gray-200 rounded-lg p-[0.6vw]">
+                    <div className="flex items-center justify-between pb-[0.4vw] mb-[0.4vw] border-b border-gray-200">
+                      <span className="text-[0.82vw] font-bold text-gray-800">
+                        Uploaded Documents ({docStatus.uploaded.length})
+                      </span>
+                    </div>
+                    <div className="space-y-[0.35vw] max-h-[14vw] overflow-y-auto pr-[0.2vw]">
+                      {docStatus.uploaded.length === 0 ? (
+                        <p className="text-[0.75vw] text-gray-400 py-[1vw] text-center">
+                          No documents uploaded
+                        </p>
+                      ) : (
+                        docStatus.uploaded.map((doc, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between gap-[0.4vw] p-[0.35vw] bg-gray-50 rounded border border-gray-200"
+                          >
+                            <span className="text-[0.78vw] font-medium text-gray-800 truncate flex-1" title={doc.name || doc.label}>
+                              {doc.label}
+                            </span>
+                            {doc.path && (
+                              <button
+                                onClick={() => {
+                                  const url = resolveFileUrl(doc.path);
+                                  window.open(url, "_blank");
+                                }}
+                                className="px-[0.4vw] py-[0.15vw] text-[0.72vw] text-blue-600 hover:text-blue-800 font-medium hover:underline flex items-center gap-[0.2vw] cursor-pointer"
+                                title="View Document"
+                              >
+                                <Eye size={"0.8vw"} />
+                                View
+                              </button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Pending Documents */}
+                  <div className="border border-gray-200 rounded-lg p-[0.6vw]">
+                    <div className="flex items-center justify-between pb-[0.4vw] mb-[0.4vw] border-b border-gray-200">
+                      <span className="text-[0.82vw] font-bold text-gray-800">
+                        Pending Documents ({docStatus.pending.length})
+                      </span>
+                    </div>
+                    <div className="space-y-[0.35vw] max-h-[14vw] overflow-y-auto pr-[0.2vw]">
+                      {docStatus.pending.length === 0 ? (
+                        <p className="text-[0.75vw] text-green-600 font-medium py-[1vw] text-center">
+                          All documents uploaded
+                        </p>
+                      ) : (
+                        docStatus.pending.map((doc, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between gap-[0.4vw] p-[0.35vw] bg-gray-50 rounded border border-gray-200"
+                          >
+                            <span className="text-[0.78vw] text-gray-700 truncate flex-1">
+                              {doc.label}
+                            </span>
+                            <span className="text-[0.7vw] text-red-600 font-medium">
+                              Pending
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-[1vw] py-[0.6vw] border-t border-gray-200 bg-gray-50 rounded-b-xl flex justify-end">
+                <button
+                  onClick={() => setInfoModalEmployee(null)}
+                  className="px-[0.9vw] py-[0.35vw] bg-gray-800 text-white rounded-lg text-[0.8vw] font-medium hover:bg-gray-900 transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
