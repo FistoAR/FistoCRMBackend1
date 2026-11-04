@@ -987,21 +987,29 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
 
         let projectDetails = { ...project };
 
+        const parseISTDate = (dateVal, timeStr, defaultH, defaultM) => {
+          if (!dateVal) return new Date();
+          let dStr = typeof dateVal === "string" ? dateVal.split("T")[0] : "";
+          if (!dStr && dateVal instanceof Date) {
+            const y = dateVal.getFullYear();
+            const m = String(dateVal.getMonth() + 1).padStart(2, "0");
+            const d = String(dateVal.getDate()).padStart(2, "0");
+            dStr = `${y}-${m}-${d}`;
+          }
+          let h = defaultH;
+          let min = defaultM;
+          if (timeStr && typeof timeStr === "string" && timeStr.includes(":")) {
+            const [hh, mm] = timeStr.split(":");
+            h = parseInt(hh, 10);
+            min = parseInt(mm, 10);
+            if (isNaN(h)) h = defaultH;
+            if (isNaN(min)) min = defaultM;
+          }
+          return new Date(`${dStr}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:59.999+05:30`);
+        };
         const isTaskAssigned = calendarAliases.includes(task.employee);
         const taskPercentage = task.percentage || 0;
-        let taskEndDate = new Date(task.endDate);
-
-        if (task.endTime) {
-          const [hours, minutes] = task.endTime.split(":");
-          taskEndDate.setHours(
-            parseInt(hours) || 23,
-            parseInt(minutes) || 59,
-            59,
-            999,
-          );
-        } else {
-          taskEndDate.setHours(23, 59, 59, 999);
-        }
+        let taskEndDate = parseISTDate(task.endDate, task.endTime, 23, 59);
 
         const taskHoldMs = calculateHoldDuration(task.statusHistory);
         taskEndDate.setTime(taskEndDate.getTime() + taskHoldMs);
@@ -1059,19 +1067,7 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
             task.activities
               .filter((activity) => calendarAliases.includes(activity.employee))
               .map(async (activity) => {
-                let activityEndDate = new Date(activity.endDate);
-
-                if (activity.endTime) {
-                  const [hours, minutes] = activity.endTime.split(":");
-                  activityEndDate.setHours(
-                    parseInt(hours) || 23,
-                    parseInt(minutes) || 59,
-                    59,
-                    999,
-                  );
-                } else {
-                  activityEndDate.setHours(23, 59, 59, 999);
-                }
+                let activityEndDate = parseISTDate(activity.endDate, activity.endTime, 23, 59);
 
                 const activityHoldMs = calculateHoldDuration(activity.statusHistory);
                 activityEndDate.setTime(activityEndDate.getTime() + activityHoldMs);
@@ -1152,7 +1148,9 @@ router.get("/employee-calendar-tasks/:employeeId", async (req, res) => {
           taskPercentage: taskPercentage,
           taskStatus: calculatedStatus,
           startDate: task.startDate,
+          startTime: task.startTime,
           endDate: taskEndDate,
+          endTime: task.endTime,
           isTask: isTaskAssigned,
           isComplete: taskPercentage >= 100,
           completionInfo: completionInfo,

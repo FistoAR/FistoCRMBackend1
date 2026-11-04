@@ -409,19 +409,26 @@ const EmployeeCalendar = () => {
     }
   });
 
+  const normalizeDateOnly = (val) => {
+    if (!val) return null;
+    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) {
+      const [y, m, d] = val.trim().split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+    const d = new Date(val);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  };
+
   const isTaskOnDate = (item, date) => {
     const startDateField =
       item.type === "activity" ? "activityStartDate" : "startDate";
     const endDateField =
       item.type === "activity" ? "activityEndDate" : "endDate";
 
-    const taskStart = new Date(item[startDateField]);
-    const taskEnd = new Date(item[endDateField]);
-    const checkDate = new Date(date);
-
-    taskStart.setHours(0, 0, 0, 0);
-    taskEnd.setHours(23, 59, 59, 999);
-    checkDate.setHours(0, 0, 0, 0);
+    const taskStart = normalizeDateOnly(item[startDateField]);
+    const taskEnd = normalizeDateOnly(item[endDateField]);
+    if (!taskStart || !taskEnd) return false;
+    const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
     return checkDate >= taskStart && checkDate <= taskEnd;
   };

@@ -33,6 +33,22 @@ const ChevronRightIcon = ({ className }) => (
     <polyline points="9 18 15 12 9 6" />
   </Icon>
 );
+const MinimizeIcon = ({ className }) => (
+  <Icon className={className}>
+    <polyline points="4 14 10 14 10 20" />
+    <polyline points="20 10 14 10 14 4" />
+    <line x1="14" y1="10" x2="21" y2="3" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </Icon>
+);
+const MaximizeIcon = ({ className }) => (
+  <Icon className={className}>
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </Icon>
+);
 const CalendarIcon = ({ className }) => (
   <Icon className={className}>
     <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -613,6 +629,23 @@ const DatePickerInline = ({ value, onChange }) => {
   const todayStr = toDateString(new Date());
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.3vw" }}>
+      {inputVal !== todayStr && (
+        <button
+          onClick={() => onChange(new Date())}
+          style={{
+            fontSize: "0.6vw",
+            padding: "0.1vw 0.35vw",
+            borderRadius: "0.6vw",
+            border: "none",
+            background: "#DBEAFE",
+            color: "#1D4ED8",
+            cursor: "pointer",
+            fontWeight: "600",
+          }}
+        >
+          Today
+        </button>
+      )}
       <button
         onClick={() => {
           const d = new Date(value);
@@ -667,23 +700,6 @@ const DatePickerInline = ({ value, onChange }) => {
       >
         <ChevronRightIcon className="w-[0.7vw] h-[0.7vw] text-gray-500" />
       </button>
-      {inputVal !== todayStr && (
-        <button
-          onClick={() => onChange(new Date())}
-          style={{
-            fontSize: "0.6vw",
-            padding: "0.1vw 0.35vw",
-            borderRadius: "0.6vw",
-            border: "none",
-            background: "#DBEAFE",
-            color: "#1D4ED8",
-            cursor: "pointer",
-            fontWeight: "600",
-          }}
-        >
-          Today
-        </button>
-      )}
     </div>
   );
 };
@@ -960,21 +976,42 @@ const TodayTasksCard = ({
       const display = await Promise.all(
         items.map(async (item, idx) => {
           const emp = await fetchEmployeeData(item.employeeId);
+          let fmtStart = "";
+          if (item.startDate) {
+            try {
+              fmtStart = new Date(item.startDate)
+                .toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                })
+                .replace(/\//g, "-");
+            } catch (_) {
+              fmtStart = item.startDate;
+            }
+          }
+
           let fmtEnd = "";
-          try {
-            fmtEnd = new Date(item.endDate)
-              .toLocaleDateString("en-GB", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-              })
-              .replace(/\//g, "-");
-          } catch (_) {}
+          if (item.endDate) {
+            try {
+              fmtEnd = new Date(item.endDate)
+                .toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                })
+                .replace(/\//g, "-");
+            } catch (_) {
+              fmtEnd = item.endDate;
+            }
+          }
+
           return {
             ...item,
             employeeName: emp
               ? emp.employeeName || emp.employee_name || "Unassigned"
               : "Unassigned",
+            startDate: fmtStart,
             endDate: fmtEnd,
             avatar:
               emp && (emp.profile || emp.profile_url)
@@ -1414,7 +1451,7 @@ const TodayTasksCard = ({
 };
 
 // ─── CELEBRATIONS CARD ────────────────────────────────────────────────────────
-const CelebrationsCard = ({ apiBaseUrl }) => {
+const CelebrationsCard = ({ apiBaseUrl, isExpanded }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [celebrations, setCelebrations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1604,14 +1641,15 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                       borderRadius: "0.7vw",
                       background: needsTransparentBg ? "transparent" : os.bg,
                       border: `0.05vw solid ${os.soft}`,
-                      padding: "0.8vw",
+                      padding: isExpanded ? "1vw" : "0.8vw",
                       display: "flex",
-                      flexDirection: showImg ? "row" : "column",
-                      gap: "0.7vw",
+                      flexDirection: showImg ? (isExpanded ? "column" : "row") : "column",
+                      alignItems: isExpanded ? "center" : "stretch",
+                      gap: isExpanded ? "0.8vw" : "0.7vw",
                       overflow: "hidden",
                       position: "relative",
                       cursor: "pointer",
-                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                      transition: "all 0.2s ease",
                     }}
                   >
                     {isBday && <BirthdayConfetti />}
@@ -1624,11 +1662,15 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                     {showImg && (
                       <div
                         style={{
-                          width: "40%",
-                          borderRadius: "0.5vw",
+                          width: isExpanded ? "100%" : "40%",
+                          height: isExpanded ? "58%" : "100%",
+                          borderRadius: "0.6vw",
                           overflow: "hidden",
                           flexShrink: 0,
                           position: "relative",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           zIndex: 1,
                         }}
                       >
@@ -1639,7 +1681,8 @@ const CelebrationsCard = ({ apiBaseUrl }) => {
                           style={{
                             width: "100%",
                             height: "100%",
-                            objectFit: "cover",
+                            objectFit: "contain",
+                            borderRadius: "0.6vw",
                           }}
                           onError={() => setImgError(true)}
                         />
@@ -2474,7 +2517,7 @@ const MiniCalendar = ({
 };
 
 // ─── MEETINGS CARD ────────────────────────────────────────────────────────────
-const MeetingsCard = ({ apiBaseUrl }) => {
+const MeetingsCard = ({ apiBaseUrl, isMinimized, onToggleMinimize }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [weekViewDates, setWeekViewDates] = useState([]);
   const [meetings, setMeetings] = useState([]);
@@ -2595,6 +2638,43 @@ const MeetingsCard = ({ apiBaseUrl }) => {
     };
   };
 
+  if (isMinimized) {
+    return (
+      <div
+        className="bg-white rounded-xl shadow-sm flex items-center justify-between border border-gray-100 hover:border-blue-200 transition-all"
+        style={{ padding: "0.6vw 1vw" }}
+      >
+        <div className="flex items-center gap-[0.6vw]">
+          <h3
+            style={{
+              fontSize: "0.9vw",
+              fontWeight: "600",
+              color: "#111827",
+              margin: 0,
+            }}
+          >
+            Meetings
+          </h3>
+          {meetings.length > 0 ? (
+            <span className="bg-blue-100 text-blue-700 font-semibold px-[0.5vw] py-[0.1vw] rounded-full text-[0.68vw]">
+              {meetings.length} {meetings.length === 1 ? "Meeting" : "Meetings"}
+            </span>
+          ) : (
+            <span className="text-gray-400 text-[0.7vw]">No meetings</span>
+          )}
+        </div>
+        <button
+          onClick={onToggleMinimize}
+          className="flex items-center gap-[0.3vw] px-[0.5vw] py-[0.2vw] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg text-[0.7vw] font-medium transition cursor-pointer border border-gray-200"
+          title="Expand Meetings"
+        >
+          <MaximizeIcon className="w-[0.8vw] h-[0.8vw]" />
+          <span>Expand</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className="bg-white rounded-xl shadow-sm flex flex-col overflow-hidden h-full"
@@ -2610,16 +2690,23 @@ const MeetingsCard = ({ apiBaseUrl }) => {
           flexShrink: 0,
         }}
       >
-        <h3
-          style={{
-            fontSize: "0.95vw",
-            fontWeight: "600",
-            color: "#111827",
-            margin: 0,
-          }}
-        >
-          Meetings
-        </h3>
+        <div className="flex items-center gap-[0.5vw]">
+          <h3
+            style={{
+              fontSize: "0.95vw",
+              fontWeight: "600",
+              color: "#111827",
+              margin: 0,
+            }}
+          >
+            Meetings
+          </h3>
+          {meetings.length > 0 && (
+            <span className="bg-blue-50 text-blue-600 font-semibold px-[0.4vw] py-[0.08vw] rounded-full text-[0.65vw]">
+              {meetings.length}
+            </span>
+          )}
+        </div>
         <div
           style={{
             display: "flex",
@@ -2642,6 +2729,13 @@ const MeetingsCard = ({ apiBaseUrl }) => {
             }}
           >
             Today
+          </button>
+          <button
+            onClick={onToggleMinimize}
+            className="flex items-center justify-center p-[0.3vw] text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition cursor-pointer"
+            title="Minimize Meetings"
+          >
+            <MinimizeIcon className="w-[0.8vw] h-[0.8vw]" />
           </button>
         </div>
       </div>
@@ -3191,6 +3285,23 @@ const Personal = () => {
   const [loadingTasks, setLoadingTasks] = useState(() => !cachedDashboard?.hasTasks);
   const [loadingStats, setLoadingStats] = useState(() => !cachedDashboard?.hasStats);
   const [error, setError] = useState(null);
+  const [isMeetingsMinimized, setIsMeetingsMinimized] = useState(() => {
+    try {
+      return localStorage.getItem("fisto_meetings_minimized") === "true";
+    } catch (_) {
+      return false;
+    }
+  });
+
+  const toggleMeetingsMinimized = () => {
+    setIsMeetingsMinimized((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("fisto_meetings_minimized", String(next));
+      } catch (_) {}
+      return next;
+    });
+  };
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
   const memoizedEmployees = useMemo(() => taskEmployees, [taskEmployees]);
@@ -3330,6 +3441,7 @@ const Personal = () => {
         </div>
       )}
       <div className="grid grid-cols-3 gap-[1vw] flex-1 min-h-0">
+        {/* Column 1: Today's Tasks */}
         <div className="h-full min-h-0">
           <TodayTasksCard
             loading={loadingTasks}
@@ -3341,16 +3453,33 @@ const Personal = () => {
             approvedLeaves={approvedLeaves}
           />
         </div>
+
+        {/* Column 2: Celebrations (Takes full height if meetings is minimized) */}
         <div className="flex flex-col gap-[1.5vh] h-full min-h-0">
-          <div className="flex-1 min-h-0">
-            <CelebrationsCard apiBaseUrl={API_BASE_URL} />
+          <div className="flex-1 min-h-0 h-full">
+            <CelebrationsCard apiBaseUrl={API_BASE_URL} isExpanded={isMeetingsMinimized} />
           </div>
-          <div className="h-[38%] flex-none">
-            <AnnouncementCard apiBaseUrl={API_BASE_URL} />
-          </div>
+          {!isMeetingsMinimized && (
+            <div className="h-[38%] flex-none">
+              <AnnouncementCard apiBaseUrl={API_BASE_URL} />
+            </div>
+          )}
         </div>
-        <div className="h-full min-h-0">
-          <MeetingsCard apiBaseUrl={API_BASE_URL} />
+
+        {/* Column 3: Meetings & Announcements when minimized */}
+        <div className="flex flex-col gap-[1.5vh] h-full min-h-0">
+          {isMeetingsMinimized && (
+            <div className="flex-1 min-h-0">
+              <AnnouncementCard apiBaseUrl={API_BASE_URL} />
+            </div>
+          )}
+          <div className={isMeetingsMinimized ? "flex-none" : "h-full min-h-0"}>
+            <MeetingsCard
+              apiBaseUrl={API_BASE_URL}
+              isMinimized={isMeetingsMinimized}
+              onToggleMinimize={toggleMeetingsMinimized}
+            />
+          </div>
         </div>
       </div>
     </div>
