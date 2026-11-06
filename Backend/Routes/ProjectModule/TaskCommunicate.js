@@ -5,6 +5,7 @@ const {
   TaskCommunicate,
   Project_Details,
   Tasks,
+  TaskReports,
 } = require("../../Models/DB_Collections");
 
 const sendDateChangeRequestNotification = (io, employeeId, taskName, projectName, timeline) => {
@@ -99,8 +100,14 @@ router.get("/", async (req, res) => {
     const updatedByIds = communication.dateChangeRequest.map(
       (r) => r.updatedBy
     );
+    const missedReportEmployeeIds = (communication.missedReportRequests || []).map(
+      (r) => r.employeeID
+    );
+    const missedReportReviewedByIds = (communication.missedReportRequests || []).map(
+      (r) => r.reviewedBy
+    );
     const allIds = [
-      ...new Set([...senderIds, ...updatedByIds].filter(Boolean)),
+      ...new Set([...senderIds, ...updatedByIds, ...missedReportEmployeeIds, ...missedReportReviewedByIds].filter(Boolean)),
     ];
 
     let employeeMap = {};
@@ -140,9 +147,19 @@ router.get("/", async (req, res) => {
       };
     });
 
+    const enrichedMissedReportRequests = (communication.missedReportRequests || []).map((req) => {
+      const reqObj = req.toObject ? req.toObject() : req;
+      return {
+        ...reqObj,
+        employeeDetails: employeeMap[req.employeeID] || null,
+        reviewedByDetails: employeeMap[req.reviewedBy] || null,
+      };
+    });
+
     res.status(200).json({
       messages: enrichedMessages,
       dateChangeRequests: enrichedDateRequests,
+      missedReportRequests: enrichedMissedReportRequests,
       data: communication,
     });
   } catch (error) {
@@ -185,12 +202,22 @@ router.get("/unread-counts", async (req, res) => {
         }
       }).length;
 
+      const missedReportStatusCount = (comm.missedReportRequests || []).filter((req) => {
+        const isAfterLastRead = req.updatedAt && new Date(req.updatedAt) > lastReadTime;
+        if (role === "employee") {
+          return (req.status === "approved" || req.status === "rejected") && isAfterLastRead;
+        } else {
+          return req.status === "requested";
+        }
+      }).length;
+
       return {
         taskId: comm.taskId,
         activityId: comm.activityId,
         unreadMessages,
         requestStatusCount,
-        totalCount: unreadMessages + requestStatusCount,
+        missedReportStatusCount,
+        totalCount: unreadMessages + requestStatusCount + missedReportStatusCount,
       };
     });
 
@@ -518,6 +545,239 @@ router.put("/date-change/:requestId", async (req, res) => {
       data: request,
     });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post("/missed-report", async (req, res) => {
+  try {
+    const {
+      projectId,
+      taskId,
+      activityId,
+      employeeID,
+      missedDate,
+      percentage,
+      taskStatus,
+      outcome,
+      empRemarks,
+    } = req.body;
+
+    if (!projectId || !taskId || !missedDate || !empRemarks || !empRemarks.trim()) {
+      return res.status(400).json({
+        message: "Missing required fields (projectId, taskId, missedDate, reason for missing report)",
+      });
+    }
+
+    const query = { projectId, taskId };
+    if (activityId) query.activityId = activityId;
+
+    let communication = await TaskCommunicate.findOne(query);
+
+    if (!communication) {
+      communication = new TaskCommunicate({
+        projectId,
+        taskId,
+        activityId: activityId || null,
+        employeeID: employeeID || "",
+        messages: [],
+        dateChangeRequest: [],
+        missedReportRequests: [],
+      });
+    }
+
+    const newRequest = {
+      status: "requested",
+      missedDate,
+      percentage: Number(percentage) || 0,
+      taskStatus: taskStatus || "In Progress",
+      outcome: outcome || "",
+      employeeID: employeeID || "",
+      empRemarks: empRemarks || "",
+    };
+
+    communication.missedReportRequests.push(newRequest);
+    await communication.save();
+
+    const savedRequest =
+      communication.missedReportRequests[
+        communication.missedReportRequests.length - 1
+      ];
+
+    const task = await Tasks.findById(taskId).lean();
+    const project = await Project_Details.findById(projectId).lean();
+    const room = `${projectId}-${taskId}${activityId ? `-${activityId}` : ""}`;
+    const io = req.app.get("io");
+
+    if (io) {
+      io.to(room).emit("missed_report_request", {
+        projectId,
+        taskId,
+        activityId,
+        request: savedRequest,
+      });
+
+      io.to(room).emit("request_status_update", {
+        projectId,
+        taskId,
+        activityId,
+        role: "admin",
+      });
+    }
+
+    res.status(200).json({
+      message: "Missed report request submitted successfully",
+      data: savedRequest,
+    });
+  } catch (error) {
+    console.error("❌ Error in /missed-report POST:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.put("/missed-report/:requestId", async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const {
+      projectId,
+      taskId,
+      activityId,
+      status, // "approved" or "rejected"
+      adminRemarks,
+      reviewedBy,
+    } = req.body;
+
+    if (!status || !["approved", "rejected"].includes(status)) {
+      return res.status(400).json({
+        message: "Valid status (approved/rejected) is required",
+      });
+    }
+
+    const query = { projectId, taskId };
+    if (activityId) query.activityId = activityId;
+
+    const communication = await TaskCommunicate.findOne(query);
+    if (!communication) {
+      return res.status(404).json({ message: "Communication not found" });
+    }
+
+    const request = communication.missedReportRequests.id(requestId);
+    if (!request) {
+      return res.status(404).json({ message: "Missed report request not found" });
+    }
+
+    request.status = status;
+    request.adminRemarks = adminRemarks || "";
+    request.reviewedBy = reviewedBy || "";
+    request.reviewedAt = new Date();
+
+    let createdReport = null;
+
+    if (status === "approved") {
+      // Create the real TaskReport with the specific missedDate as createdAt!
+      // Parse missedDate (assumed YYYY-MM-DD or valid date string)
+      let reportDate = new Date();
+      if (request.missedDate) {
+        // Set to 18:30 IST / end of workday on that missed date
+        const parsed = new Date(request.missedDate);
+        if (!isNaN(parsed.getTime())) {
+          reportDate = parsed;
+        }
+      }
+
+      const reportPayload = {
+        employeeID: request.employeeID || communication.employeeID || "",
+        projectId,
+        taskId,
+        activityId: activityId || null,
+        percentage: Number(request.percentage) || 0,
+        status: request.taskStatus || "In Progress",
+        outcome: request.outcome || "",
+        adminRemarks: adminRemarks || "",
+        verifiedBy: reviewedBy || "",
+        verifiedAt: new Date(),
+        createdAt: reportDate,
+      };
+
+      createdReport = await TaskReports.create(reportPayload);
+
+      // Also update Task progress/status if applicable
+      let updateData = {};
+      if (activityId) {
+        updateData = {
+          "activities.$[elem].percentage": Number(request.percentage),
+        };
+        if (request.taskStatus) {
+          updateData["activities.$[elem].status"] = request.taskStatus;
+        }
+      } else {
+        updateData = {
+          percentage: Number(request.percentage),
+        };
+        if (request.taskStatus) {
+          updateData.status = request.taskStatus;
+        }
+      }
+
+      await Tasks.findOneAndUpdate(
+        { _id: taskId },
+        { $set: updateData },
+        {
+          new: true,
+          ...(activityId ? { arrayFilters: [{ "elem._id": activityId }] } : {}),
+        },
+      );
+
+      // Recalculate parent task percentage if it has activities
+      const task = await Tasks.findById(taskId);
+      if (task && task.activities && task.activities.length > 0) {
+        const activeActivities = task.activities.filter(
+          (act) => act.status !== "Cancelled"
+        );
+        if (activeActivities.length > 0) {
+          const activitiesSum = activeActivities.reduce(
+            (sum, act) => sum + (act.percentage || 0),
+            0
+          );
+          const taskPercentage = Math.round(activitiesSum / activeActivities.length);
+          await Tasks.findByIdAndUpdate(taskId, {
+            $set: { percentage: taskPercentage },
+          });
+        }
+      }
+    }
+
+    await communication.save();
+
+    const room = `${projectId}-${taskId}${activityId ? `-${activityId}` : ""}`;
+    const io = req.app.get("io");
+
+    if (io) {
+      io.to(room).emit("missed_report_response", {
+        projectId,
+        taskId,
+        activityId,
+        requestId,
+        status,
+        adminRemarks,
+        createdReport,
+      });
+
+      io.to(room).emit("request_status_update", {
+        projectId,
+        taskId,
+        activityId,
+        role: "employee",
+      });
+    }
+
+    res.status(200).json({
+      message: `Missed report request ${status} successfully`,
+      data: request,
+      report: createdReport,
+    });
+  } catch (error) {
+    console.error("❌ Error in /missed-report/:requestId PUT:", error);
     res.status(500).json({ message: error.message });
   }
 });

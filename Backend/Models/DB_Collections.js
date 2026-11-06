@@ -208,6 +208,26 @@ const dateChangeRequestSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const missedReportRequestSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["requested", "approved", "rejected"],
+      default: "requested",
+    },
+    missedDate: { type: String, required: true },
+    percentage: { type: Number, default: 0 },
+    taskStatus: { type: String, default: "In Progress" },
+    outcome: { type: String, default: "" },
+    employeeID: { type: String, default: "" },
+    empRemarks: { type: String, default: "" },
+    adminRemarks: { type: String, default: "" },
+    reviewedBy: { type: String, default: "" },
+    reviewedAt: { type: Date, default: null },
+  },
+  { timestamps: true },
+);
+
 const taskCommunicate = new mongoose.Schema(
   {
     projectId: { type: String, required: true },
@@ -225,6 +245,7 @@ const taskCommunicate = new mongoose.Schema(
     ],
 
     dateChangeRequest: [dateChangeRequestSchema],
+    missedReportRequests: [missedReportRequestSchema],
 
     readReceipts: {
       type: Object,

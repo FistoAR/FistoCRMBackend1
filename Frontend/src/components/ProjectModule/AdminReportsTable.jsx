@@ -6,6 +6,7 @@ import {
   Send,
   MessageSquareMore,
   CalendarRange,
+  FileClock,
   Trash2,
 } from "lucide-react";
 import { useNotification } from "../NotificationContext";
@@ -78,11 +79,18 @@ export default function AdminReportsTable({
   const [sendingMessage, setSendingMessage] = useState(false);
   const [respondingToRequest, setRespondingToRequest] = useState(null);
   const [updatingDateRequest, setUpdatingDateRequest] = useState(null);
+  const [missedReportRequests, setMissedReportRequests] = useState([]);
+  const [missedReportSubTab, setMissedReportSubTab] = useState("requested"); // "requested" | "approved" | "rejected"
+  const [missedReportAdminRemarks, setMissedReportAdminRemarks] = useState({});
+  const [updatingMissedReport, setUpdatingMissedReport] = useState(null);
 
   const [adminResponses, setAdminResponses] = useState({});
 
   const [messageToDelete, setMessageToDelete] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState(null);
+  const [showDeleteReportConfirm, setShowDeleteReportConfirm] = useState(false);
+  const [deletingReport, setDeletingReport] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDepartment, setFilterDepartment] = useState("all");
@@ -116,6 +124,24 @@ export default function AdminReportsTable({
       .filter((req) => req.status === dateChangeSubTab)
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [dateChangeRequests, dateChangeSubTab]);
+
+  const pendingMissedReportsCount = useMemo(() => {
+    return missedReportRequests.filter((req) => req.status === "requested").length;
+  }, [missedReportRequests]);
+
+  const approvedMissedReportsCount = useMemo(() => {
+    return missedReportRequests.filter((req) => req.status === "approved").length;
+  }, [missedReportRequests]);
+
+  const rejectedMissedReportsCount = useMemo(() => {
+    return missedReportRequests.filter((req) => req.status === "rejected").length;
+  }, [missedReportRequests]);
+
+  const filteredMissedReportRequests = useMemo(() => {
+    return missedReportRequests
+      .filter((req) => req.status === missedReportSubTab)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [missedReportRequests, missedReportSubTab]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -573,6 +599,42 @@ export default function AdminReportsTable({
       }
     };
 
+    const handleMissedReportRequest = (data) => {
+      if (
+        selectedTask &&
+        data.projectId === selectedTask.projectId &&
+        data.taskId ===
+          (selectedTask.isActivityReport
+            ? selectedTask.taskId
+            : selectedTask._id)
+      ) {
+        setMissedReportRequests((prev) => [data.request, ...prev]);
+      }
+    };
+
+    const handleMissedReportResponse = (data) => {
+      if (
+        selectedTask &&
+        data.projectId === selectedTask.projectId &&
+        data.taskId ===
+          (selectedTask.isActivityReport
+            ? selectedTask.taskId
+            : selectedTask._id)
+      ) {
+        setMissedReportRequests((prev) =>
+          prev.map((req) =>
+            req._id === data.requestId
+              ? { ...req, status: data.status, adminRemarks: data.adminRemarks }
+              : req
+          )
+        );
+      }
+
+      if (data.status === "approved" && onTaskUpdate) {
+        onTaskUpdate();
+      }
+    };
+
     const handleMessageDeleted = (data) => {
       const currentTask = selectedTaskRef.current;
       if (
@@ -588,6 +650,8 @@ export default function AdminReportsTable({
     sock.on("new_message", handleNewMessage);
     sock.on("date_change_request", handleDateChangeRequest);
     sock.on("date_change_response", handleDateChangeResponse);
+    sock.on("missed_report_request", handleMissedReportRequest);
+    sock.on("missed_report_response", handleMissedReportResponse);
     sock.on("message_deleted", handleMessageDeleted);
     sock.on("unread_count_update", handleUnreadUpdate);
     sock.on("request_status_update", handleRequestStatusUpdate);
@@ -596,6 +660,8 @@ export default function AdminReportsTable({
       sock.off("new_message", handleNewMessage);
       sock.off("date_change_request", handleDateChangeRequest);
       sock.off("date_change_response", handleDateChangeResponse);
+      sock.off("missed_report_request", handleMissedReportRequest);
+      sock.off("missed_report_response", handleMissedReportResponse);
       sock.off("message_deleted", handleMessageDeleted);
       sock.off("unread_count_update", handleUnreadUpdate);
       sock.off("request_status_update", handleRequestStatusUpdate);
@@ -925,6 +991,7 @@ export default function AdminReportsTable({
       if (response.ok) {
         setMessages(data.messages || []);
         setDateChangeRequests(data.dateChangeRequests || []);
+        setMissedReportRequests(data.missedReportRequests || []);
       }
     } catch (error) {
       console.error("Error fetching communication data:", error);
@@ -939,6 +1006,8 @@ export default function AdminReportsTable({
     setShowCommunicateModal(true);
     setCommunicateTab("message");
     setDateChangeSubTab("requested");
+    setMissedReportSubTab("requested");
+    setMissedReportAdminRemarks({});
     setMessageText("");
     setRespondingToRequest(null);
     setAdminResponses({});
@@ -1049,6 +1118,108 @@ export default function AdminReportsTable({
     } finally {
       setShowDeleteConfirm(false);
       setMessageToDelete(null);
+    }
+  };
+
+  const handleMissedReportAction = async (requestId, status) => {
+    setUpdatingMissedReport(requestId);
+    try {
+      const isActivityReport = selectedTask.isActivityReport || false;
+      const remarks = missedReportAdminRemarks[requestId] || "";
+
+      const payload = {
+        projectId: selectedTask.projectId,
+        taskId: isActivityReport ? selectedTask.taskId : selectedTask._id,
+        activityId: isActivityReport ? selectedTask.activityId : null,
+        status, // "approved" or "rejected"
+        adminRemarks: remarks,
+        reviewedBy: currentUserId,
+      };
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/taskCommunicate/missed-report/${requestId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to update missed report request");
+      }
+
+      notify({
+        title: "Success",
+        message: `Missed report request ${status} successfully`,
+      });
+
+      setMissedReportAdminRemarks((prev) => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
+
+      if (onTaskUpdate) {
+        onTaskUpdate();
+      }
+
+      fetchCommunicationData(selectedTask);
+    } catch (error) {
+      console.error("handleMissedReportAction error:", error);
+      notify({
+        title: "Error",
+        message: error.message || "Failed to update request",
+      });
+    } finally {
+      setUpdatingMissedReport(null);
+    }
+  };
+
+  const handleDeleteReport = async () => {
+    if (!reportToDelete || !reportToDelete.reportId) return;
+
+    setDeletingReport(true);
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/tasksReports/${reportToDelete.reportId}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to delete report");
+      }
+
+      notify({
+        title: "Success",
+        message: "Report deleted successfully",
+      });
+
+      setReports((prev) =>
+        prev.filter((r) => r.reportId !== reportToDelete.reportId)
+      );
+
+      if (onTaskUpdate) {
+        onTaskUpdate();
+      }
+      if (selectedTask) {
+        fetchReports(selectedTask);
+      }
+    } catch (error) {
+      console.error("handleDeleteReport error:", error);
+      notify({
+        title: "Error",
+        message: error.message || "Failed to delete report",
+      });
+    } finally {
+      setDeletingReport(false);
+      setShowDeleteReportConfirm(false);
+      setReportToDelete(null);
     }
   };
 
@@ -1302,6 +1473,17 @@ export default function AdminReportsTable({
 
     return () => clearInterval(timer);
   }, []);
+
+  const handleToggle = (i) => {
+    if (!selectedTask || !selectedTask.points) return;
+    const updated = [...selectedTask.points];
+    updated[i].completed = !updated[i].completed;
+
+    setSelectedTask((prev) => ({
+      ...prev,
+      points: updated,
+    }));
+  };
 
   return (
     <>
@@ -1969,6 +2151,29 @@ export default function AdminReportsTable({
                     </span>
                   )}
                 </button>
+
+                <button
+                  onClick={() => setCommunicateTab("missedReport")}
+                  className={`flex-1 flex items-center justify-center gap-[0.4vw] px-[1vw] py-[0.5vw] text-[0.8vw] font-medium cursor-pointer transition-all relative ${
+                    communicateTab === "missedReport"
+                      ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <FileClock
+                    className={`w-[1vw] h-[1vw] ${
+                      communicateTab === "missedReport"
+                        ? "text-blue-600"
+                        : "text-gray-500"
+                    }`}
+                  />
+                  Request Missed Report
+                  {pendingMissedReportsCount > 0 && (
+                    <span className="ml-[0.1vw] bg-blue-600 text-white text-[0.6vw] rounded-full min-w-[1.1vw] h-[1.1vw] flex items-center justify-center font-semibold px-[0.2vw]">
+                      {pendingMissedReportsCount > 99 ? "99+" : pendingMissedReportsCount}
+                    </span>
+                  )}
+                </button>
               </div>
 
               <div className="flex-1 overflow-hidden">
@@ -2522,6 +2727,197 @@ export default function AdminReportsTable({
                               )}
                             </div>
                           </div>
+                        ) : communicateTab === "missedReport" ? (
+                          <div className="h-full flex flex-col">
+                            {/* Subtabs: Requested | Approved | Rejected */}
+                            <div className="flex border-b border-gray-200 bg-gray-50">
+                              <button
+                                onClick={() => setMissedReportSubTab("requested")}
+                                className={`flex-1 flex items-center justify-center gap-[0.3vw] px-[0.8vw] py-[0.4vw] text-[0.75vw] font-medium cursor-pointer transition-all ${
+                                  missedReportSubTab === "requested"
+                                    ? "text-yellow-600 border-b-2 border-yellow-500 bg-white"
+                                    : "text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                Requested
+                                {pendingMissedReportsCount > 0 && (
+                                  <span className="bg-yellow-500 text-white text-[0.58vw] rounded-full min-w-[1vw] h-[1vw] flex items-center justify-center font-semibold px-[0.15vw]">
+                                    {pendingMissedReportsCount}
+                                  </span>
+                                )}
+                              </button>
+
+                              <button
+                                onClick={() => setMissedReportSubTab("approved")}
+                                className={`flex-1 flex items-center justify-center gap-[0.3vw] px-[0.8vw] py-[0.4vw] text-[0.75vw] font-medium cursor-pointer transition-all ${
+                                  missedReportSubTab === "approved"
+                                    ? "text-green-600 border-b-2 border-green-600 bg-white"
+                                    : "text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                Approved
+                                {approvedMissedReportsCount > 0 && (
+                                  <span className="bg-green-600 text-white text-[0.58vw] rounded-full min-w-[1vw] h-[1vw] flex items-center justify-center font-semibold px-[0.15vw]">
+                                    {approvedMissedReportsCount}
+                                  </span>
+                                )}
+                              </button>
+
+                              <button
+                                onClick={() => setMissedReportSubTab("rejected")}
+                                className={`flex-1 flex items-center justify-center gap-[0.3vw] px-[0.8vw] py-[0.4vw] text-[0.75vw] font-medium cursor-pointer transition-all ${
+                                  missedReportSubTab === "rejected"
+                                    ? "text-red-600 border-b-2 border-red-600 bg-white"
+                                    : "text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                Rejected
+                                {rejectedMissedReportsCount > 0 && (
+                                  <span className="bg-red-600 text-white text-[0.58vw] rounded-full min-w-[1vw] h-[1vw] flex items-center justify-center font-semibold px-[0.15vw]">
+                                    {rejectedMissedReportsCount}
+                                  </span>
+                                )}
+                              </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto px-[1vw] py-[0.7vw]">
+                              {filteredMissedReportRequests.length === 0 ? (
+                                <div className="text-gray-400 text-[0.75vw] text-center py-[2.5vw]">
+                                  No {missedReportSubTab} missed report requests.
+                                </div>
+                              ) : (
+                                <div className="space-y-[0.8vw]">
+                                  {filteredMissedReportRequests.map((req) => (
+                                    <div
+                                      key={req._id}
+                                      className="bg-gray-50 rounded-lg p-[0.6vw] border border-gray-200 text-left"
+                                    >
+                                      <div className="flex justify-between items-start mb-[0.3vw]">
+                                        <div className="flex items-center gap-[0.6vw]">
+                                          {req.employeeDetails && (
+                                            <div className="relative w-[1.7vw] h-[1.7vw] flex-shrink-0">
+                                              <img
+                                                src={`${import.meta.env.VITE_API_BASE_URL1}${req.employeeDetails.profile}`}
+                                                alt={req.employeeDetails.name}
+                                                className="w-full h-full rounded-full object-cover border border-gray-200 shadow-sm"
+                                                onError={(e) => {
+                                                  e.target.style.display = "none";
+                                                  e.target.nextSibling.style.display = "flex";
+                                                }}
+                                              />
+                                              <div className="hidden absolute inset-0 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium text-[0.85vw]">
+                                                {req.employeeDetails.name?.[0]?.toUpperCase() || "?"}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div>
+                                            <p className="text-[0.8vw] font-semibold text-gray-900 leading-tight">
+                                              {req.employeeDetails?.name || req.employeeID || "Employee"}
+                                            </p>
+                                            <p className="text-[0.7vw] text-gray-500">
+                                              Requested on: {new Date(req.createdAt).toLocaleDateString("en-GB")}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-[1vw]">
+                                          <div className="text-right">
+                                            <span className="text-[0.75vw] text-gray-700 block">
+                                              <span className="font-semibold">Missed Date:</span>{" "}
+                                              {new Date(req.missedDate).toLocaleDateString("en-GB")}
+                                            </span>
+                                            <span className="text-[0.72vw] text-gray-600">
+                                              Progress: <span className="font-semibold text-blue-600">{req.percentage}%</span> • Status: <span className="font-medium text-gray-800">{req.taskStatus}</span>
+                                            </span>
+                                          </div>
+
+                                          <span
+                                            className={`px-[0.7vw] py-[0.15vw] rounded-2xl text-[0.7vw] font-medium capitalize ${
+                                              req.status === "approved"
+                                                ? "bg-green-100 text-green-700"
+                                                : req.status === "rejected"
+                                                ? "bg-red-100 text-red-700"
+                                                : "bg-yellow-100 text-yellow-700"
+                                            }`}
+                                          >
+                                            {req.status}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Report Work Content */}
+                                      <div className="text-[0.78vw] text-gray-800 bg-white p-[0.5vw] rounded border border-gray-200 mt-[0.3vw]">
+                                        <span className="font-semibold text-gray-700 block text-[0.72vw] mb-[0.1vw]">
+                                          Work Report / Outcome on Missed Date:
+                                        </span>
+                                        <p className="whitespace-pre-wrap">{req.outcome}</p>
+                                      </div>
+
+                                      {req.empRemarks && (
+                                        <p className="text-[0.74vw] text-gray-600 mt-[0.3vw]">
+                                          <span className="font-medium text-gray-700">Reason for Missing:</span> {req.empRemarks}
+                                        </p>
+                                      )}
+
+                                      {/* Admin action section if requested */}
+                                      {req.status === "requested" ? (
+                                        <div className="mt-[0.5vw] space-y-[0.3vw] bg-white p-[0.5vw] rounded border border-gray-200">
+                                          <div>
+                                            <label className="text-[0.72vw] font-medium text-gray-700 block mb-[0.2vw]">
+                                              Team Head / Project Head Remarks
+                                            </label>
+                                            <textarea
+                                              value={missedReportAdminRemarks[req._id] || ""}
+                                              onChange={(e) =>
+                                                setMissedReportAdminRemarks((prev) => ({
+                                                  ...prev,
+                                                  [req._id]: e.target.value,
+                                                }))
+                                              }
+                                              placeholder="Provide any feedback or approval remarks..."
+                                              className="w-full px-[0.5vw] py-[0.3vw] border border-gray-300 rounded text-[0.72vw] focus:outline-none focus:border-blue-500"
+                                              rows="2"
+                                            />
+                                          </div>
+
+                                          <div className="flex justify-end gap-[0.4vw] pt-[0.2vw]">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMissedReportAction(req._id, "rejected")}
+                                              disabled={updatingMissedReport === req._id}
+                                              className="bg-red-600 hover:bg-red-700 text-white px-[0.8vw] py-[0.3vw] rounded text-[0.7vw] font-medium transition cursor-pointer"
+                                            >
+                                              Reject
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMissedReportAction(req._id, "approved")}
+                                              disabled={updatingMissedReport === req._id}
+                                              className="bg-green-600 hover:bg-green-700 text-white px-[0.8vw] py-[0.3vw] rounded text-[0.7vw] font-medium transition cursor-pointer flex items-center gap-[0.2vw]"
+                                            >
+                                              {updatingMissedReport === req._id && (
+                                                <Loader2 className="w-[0.8vw] h-[0.8vw] animate-spin" />
+                                              )}
+                                              Approve & Publish to Date
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        req.adminRemarks && (
+                                          <div className="text-[0.75vw] text-gray-700 mt-[0.3vw] bg-blue-50/70 p-[0.35vw] rounded border border-blue-200">
+                                            <span className="font-semibold text-blue-900">
+                                              Review Remarks ({req.reviewedByDetails?.name || req.reviewedBy || "Team Head"}):
+                                            </span>{" "}
+                                            {req.adminRemarks}
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         ) : null}
                       </>
                     )}
@@ -2675,24 +3071,36 @@ export default function AdminReportsTable({
                                 </p>
                               </td>
                               <td className="px-[0.5vw] py-[0.3vw] border-b border-gray-200">
-                                {report.status === "underReview" &&
-                                !["Hold", "Canceled"].includes(projectTab) ? (
+                                <div className="flex items-center gap-[0.4vw]">
+                                  {report.status === "underReview" &&
+                                  !["Hold", "Canceled"].includes(projectTab) ? (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedReport(report);
+                                        setShowVerifyModal(true);
+                                      }}
+                                      className="bg-blue-600 hover:bg-blue-500 text-white px-[0.6vw] py-[0.25vw] rounded-full text-[0.68vw] cursor-pointer"
+                                    >
+                                      Verify
+                                    </button>
+                                  ) : report.status === "declined" ? (
+                                    <span className="text-red-600 text-[0.7vw]">
+                                      Declined
+                                    </span>
+                                  ) : null}
+
                                   <button
+                                    type="button"
                                     onClick={() => {
-                                      setSelectedReport(report);
-                                      setShowVerifyModal(true);
+                                      setReportToDelete(report);
+                                      setShowDeleteReportConfirm(true);
                                     }}
-                                    className="bg-blue-600 hover:bg-blue-500 text-white px-[0.6vw] py-[0.25vw] rounded-full text-[0.68vw] cursor-pointer"
+                                    className="p-[0.3vw] text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                    title="Delete Report"
                                   >
-                                    Verify
+                                    <Trash2 className="w-[0.9vw] h-[0.9vw]" />
                                   </button>
-                                ) : report.status === "declined" ? (
-                                  <span className="text-red-600 text-[0.7vw]">
-                                    Declined
-                                  </span>
-                                ) : (
-                                  "-"
-                                )}
+                                </div>
                               </td>
 
                               <td className="px-[0.5vw] py-[0.3vw] whitespace-nowrap border-b border-gray-200">
@@ -2808,6 +3216,91 @@ export default function AdminReportsTable({
             </div>
           </div>
         )}
+
+        {showDeleteReportConfirm && reportToDelete && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70]"
+            onClick={() => {
+              if (deletingReport) return;
+              setShowDeleteReportConfirm(false);
+              setReportToDelete(null);
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl w-[26vw] px-[1.2vw] py-[1.2vw] text-left"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-[0.6vw] mb-[0.8vw]">
+                <div className="w-[2.4vw] h-[2.4vw] rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-[1.2vw] h-[1.2vw] text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-[0.95vw] font-bold text-gray-900 leading-tight">
+                    Delete Task Report
+                  </h3>
+                  <p className="text-[0.72vw] text-gray-500">
+                    Are you sure you want to permanently delete this report?
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-[0.6vw] mb-[1vw] border border-gray-200 text-[0.75vw] space-y-[0.2vw]">
+                <p className="text-gray-700">
+                  <span className="font-semibold text-gray-900">Task:</span>{" "}
+                  {reportToDelete.activityName || reportToDelete.taskName}
+                </p>
+                <p className="text-gray-700">
+                  <span className="font-semibold text-gray-900">Date & Time:</span>{" "}
+                  {reportToDelete.date} {reportToDelete.time}
+                </p>
+                <p className="text-gray-700">
+                  <span className="font-semibold text-gray-900">Progress:</span>{" "}
+                  {reportToDelete.progress}%
+                </p>
+                <p className="text-gray-700">
+                  <span className="font-semibold text-gray-900">Outcome:</span>{" "}
+                  <span className="italic">"{reportToDelete.outcome || "N/A"}"</span>
+                </p>
+              </div>
+
+              <p className="text-[0.7vw] text-red-600 font-medium mb-[1vw]">
+                ⚠️ Warning: The task percentage and status will automatically recalculate to the latest remaining report.
+              </p>
+
+              <div className="flex gap-[0.5vw] justify-end">
+                <button
+                  type="button"
+                  disabled={deletingReport}
+                  onClick={() => {
+                    setShowDeleteReportConfirm(false);
+                    setReportToDelete(null);
+                  }}
+                  className="px-[1vw] py-[0.35vw] bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-[0.75vw] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingReport}
+                  onClick={handleDeleteReport}
+                  className="px-[1.1vw] py-[0.35vw] bg-red-600 hover:bg-red-700 text-white rounded-lg text-[0.75vw] font-medium transition-colors flex items-center gap-[0.3vw] cursor-pointer"
+                >
+                  {deletingReport ? (
+                    <>
+                      <Loader2 className="w-[0.9vw] h-[0.9vw] animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-[0.85vw] h-[0.85vw]" />
+                      Delete Report
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {showVerifyModal && selectedReport && (
@@ -2877,7 +3370,7 @@ export default function AdminReportsTable({
 
               
 
-              {selectedTask.points?.length > 0 && (
+              {selectedTask?.points?.length > 0 && (
                 <>
                   <label className="text-[0.85vw] text-gray-700 block mb-[0.5vw]">
                     Point's to verify completions

@@ -7,6 +7,7 @@ import {
   Send,
   MessageSquareMore,
   CalendarRange,
+  FileClock,
   Trash2,
   Plus,
   X,
@@ -87,6 +88,16 @@ export default function EmployeeTaskTable({
   const [messageText, setMessageText] = useState("");
   const [messages, setMessages] = useState([]);
   const [dateChangeRequests, setDateChangeRequests] = useState([]);
+  const [missedReportRequests, setMissedReportRequests] = useState([]);
+  const [missedReportViewMode, setMissedReportViewMode] = useState("new"); // "new" | "previous"
+  const [unreadMissedReportCount, setUnreadMissedReportCount] = useState(0);
+  const [missedReportData, setMissedReportData] = useState({
+    missedDate: "",
+    percentage: "",
+    taskStatus: "In Progress",
+    outcome: "",
+    empRemarks: "",
+  });
   const [loadingCommunicate, setLoadingCommunicate] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [dateChangeData, setDateChangeData] = useState({
@@ -482,6 +493,42 @@ export default function EmployeeTaskTable({
       }
     };
 
+    const handleMissedReportRequest = (data) => {
+      if (
+        selectedTask &&
+        data.projectId === selectedTask.projectId &&
+        data.taskId ===
+          (selectedTask.isActivityReport
+            ? selectedTask.taskId
+            : selectedTask._id)
+      ) {
+        setMissedReportRequests((prev) => [data.request, ...prev]);
+      }
+    };
+
+    const handleMissedReportResponse = (data) => {
+      if (
+        selectedTask &&
+        data.projectId === selectedTask.projectId &&
+        data.taskId ===
+          (selectedTask.isActivityReport
+            ? selectedTask.taskId
+            : selectedTask._id)
+      ) {
+        setMissedReportRequests((prev) =>
+          prev.map((req) =>
+            req._id === data.requestId
+              ? { ...req, status: data.status, adminRemarks: data.adminRemarks }
+              : req
+          )
+        );
+      }
+
+      if (data.status === "approved" && onTaskUpdate) {
+        onTaskUpdate();
+      }
+    };
+
     const handleMessageDeleted = (data) => {
       const currentTask = selectedTaskRef.current;
       if (
@@ -497,6 +544,8 @@ export default function EmployeeTaskTable({
     sock.on("new_message", handleNewMessage);
     sock.on("date_change_request", handleDateChangeRequest);
     sock.on("date_change_response", handleDateChangeResponse);
+    sock.on("missed_report_request", handleMissedReportRequest);
+    sock.on("missed_report_response", handleMissedReportResponse);
     sock.on("message_deleted", handleMessageDeleted);
     sock.on("unread_count_update", handleUnreadUpdate);
     sock.on("request_status_update", handleRequestStatusUpdate);
@@ -505,6 +554,8 @@ export default function EmployeeTaskTable({
       sock.off("new_message", handleNewMessage);
       sock.off("date_change_request", handleDateChangeRequest);
       sock.off("date_change_response", handleDateChangeResponse);
+      sock.off("missed_report_request", handleMissedReportRequest);
+      sock.off("missed_report_response", handleMissedReportResponse);
       sock.off("message_deleted", handleMessageDeleted);
       sock.off("unread_count_update", handleUnreadUpdate);
       sock.off("request_status_update", handleRequestStatusUpdate);
@@ -738,21 +789,31 @@ export default function EmployeeTaskTable({
         );
         setDateChangeRequests(sortedRequests);
 
-        if (data.dateChangeRequests.length < 1) return;
+        const sortedMissedReports = (data.missedReportRequests || []).sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+        );
+        setMissedReportRequests(sortedMissedReports);
 
-        const employeeReadTime = data.data.readReceipts?.employee?.lastReadTime;
+        const employeeReadTime = data.data?.readReceipts?.employee?.lastReadTime;
 
         if (employeeReadTime) {
+          const readTime = new Date(employeeReadTime);
           const unreadCount = sortedRequests.filter((req) => {
             if (req.status === "requested") return false;
-            const updatedTime = new Date(req.updatedTime);
-            const readTime = new Date(employeeReadTime);
+            const updatedTime = new Date(req.updatedTime || req.updatedAt);
             return updatedTime > readTime;
           }).length;
-
           setUnreadDateChangeCount(unreadCount);
+
+          const unreadMissed = sortedMissedReports.filter((req) => {
+            if (req.status === "requested") return false;
+            const updatedTime = new Date(req.updatedAt || req.reviewedAt);
+            return updatedTime > readTime;
+          }).length;
+          setUnreadMissedReportCount(unreadMissed);
         } else {
           setUnreadDateChangeCount(0);
+          setUnreadMissedReportCount(0);
         }
       }
     } catch (error) {
@@ -862,6 +923,91 @@ export default function EmployeeTaskTable({
     }
   };
 
+  const handleMissedReportSubmit = async () => {
+    if (!missedReportData.missedDate) {
+      notify({
+        title: "Error",
+        message: "Please select the date on which report was missed",
+      });
+      return;
+    }
+
+    if (missedReportData.percentage === "" || missedReportData.percentage === null) {
+      notify({
+        title: "Error",
+        message: "Please enter the percentage",
+      });
+      return;
+    }
+
+    if (!missedReportData.outcome.trim()) {
+      notify({
+        title: "Error",
+        message: "Please describe what work was completed on that date",
+      });
+      return;
+    }
+
+    if (!missedReportData.empRemarks || !missedReportData.empRemarks.trim()) {
+      notify({
+        title: "Error",
+        message: "Please enter the reason for missing report",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const isActivityReport = selectedTask.isActivityReport || false;
+      const payload = {
+        projectId: selectedTask.projectId,
+        taskId: isActivityReport ? selectedTask.taskId : selectedTask._id,
+        activityId: isActivityReport ? selectedTask.activityId : null,
+        employeeID: currentEmployeeId,
+        missedDate: missedReportData.missedDate,
+        percentage: Number(missedReportData.percentage),
+        taskStatus: missedReportData.taskStatus,
+        outcome: missedReportData.outcome,
+        empRemarks: missedReportData.empRemarks,
+      };
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/taskCommunicate/missed-report`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to submit missed report request");
+      }
+
+      notify({
+        title: "Success",
+        message: "Missed report request submitted successfully",
+      });
+
+      setMissedReportData({
+        missedDate: "",
+        percentage: "",
+        taskStatus: "In Progress",
+        outcome: "",
+        empRemarks: "",
+      });
+      setMissedReportViewMode("previous");
+    } catch (error) {
+      notify({
+        title: "Error",
+        message: error.message,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleDateChangeRequest = async () => {
     if (
       !dateChangeData.startDate ||
@@ -871,6 +1017,14 @@ export default function EmployeeTaskTable({
       notify({
         title: "Error",
         message: "Please fill all required fields",
+      });
+      return;
+    }
+
+    if (!missedReportData.empRemarks || !missedReportData.empRemarks.trim()) {
+      notify({
+        title: "Error",
+        message: "Please enter the reason for missing report",
       });
       return;
     }
@@ -1104,7 +1258,15 @@ export default function EmployeeTaskTable({
     };
 
     try {
-      setIsSubmitting(true);
+      if (!missedReportData.empRemarks || !missedReportData.empRemarks.trim()) {
+      notify({
+        title: "Error",
+        message: "Please enter the reason for missing report",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
       const response = await fetch(
         `${import.meta.env.VITE_API_BASE_URL}/tasksReports`,
         {
@@ -1877,6 +2039,31 @@ export default function EmployeeTaskTable({
                     </span>
                   )}
                 </button>
+
+                <button
+                  onClick={() => setCommunicateTab("missedReport")}
+                  className={`flex-1 flex items-center justify-center gap-[0.4vw] px-[1vw] py-[0.5vw] text-[0.8vw] font-medium cursor-pointer transition-all ${
+                    communicateTab === "missedReport"
+                      ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <FileClock
+                    className={`w-[1vw] h-[1vw] ${
+                      communicateTab === "missedReport"
+                        ? "text-blue-600"
+                        : "text-gray-500"
+                    }`}
+                  />
+                  Request Missed Report
+                  {unreadMissedReportCount > 0 && (
+                    <span className=" bg-red-600 text-white text-[0.55vw] rounded-full min-w-[1.1vw] h-[1.1vw] flex items-center justify-center font-semibold px-[0.15vw] shadow-md">
+                      {unreadMissedReportCount > 99
+                        ? "99+"
+                        : unreadMissedReportCount}
+                    </span>
+                  )}
+                </button>
               </div>
 
               <div className="flex-1 overflow-hidden">
@@ -2040,7 +2227,7 @@ export default function EmployeeTaskTable({
                       </>
                     )}
                   </div>
-                ) : (
+                ) : communicateTab === "dateChange" ? (
                   <div className="h-full overflow-y-auto px-[1vw] py-[0.7vw]">
                     {loadingCommunicate ? (
                       <div className="flex items-center justify-center h-full">
@@ -2415,7 +2602,217 @@ export default function EmployeeTaskTable({
                       </div>
                     )}
                   </div>
-                )}
+                ) : communicateTab === "missedReport" ? (
+                  <div className="h-full overflow-y-auto px-[1vw] py-[0.7vw]">
+                    {loadingCommunicate ? (
+                      <div className="flex items-center justify-center h-full">
+                        <Loader2 className="w-[1.5vw] h-[1.5vw] animate-spin text-blue-600" />
+                      </div>
+                    ) : (
+                      <div className="space-y-[0.8vw]">
+                        {missedReportViewMode === "previous" ? (
+                          <>
+                            {missedReportRequests.length > 0 ? (
+                              <div className="mb-[1vw]">
+                                <h4 className="text-[0.8vw] font-medium text-gray-900 mb-[0.5vw]">
+                                  Previous Missed Report Requests
+                                </h4>
+                                <div className="space-y-[0.5vw] max-h-[17.5vw] overflow-y-auto">
+                                  {missedReportRequests.map((req, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="bg-gray-50 rounded-lg p-[0.6vw] border border-gray-200 text-left"
+                                    >
+                                      <div className="flex justify-between items-start mb-[0.3vw]">
+                                        <div className="flex gap-[1.5vw]">
+                                          <p className="text-[0.8vw] text-gray-700">
+                                            <span className="font-semibold">Missed Date:</span>{" "}
+                                            {new Date(req.missedDate).toLocaleDateString("en-GB")}
+                                          </p>
+                                          <p className="text-[0.8vw] text-gray-700">
+                                            <span className="font-semibold">Progress:</span>{" "}
+                                            {req.percentage}%
+                                          </p>
+                                          <p className="text-[0.8vw] text-gray-700">
+                                            <span className="font-semibold">Status:</span>{" "}
+                                            {req.taskStatus}
+                                          </p>
+                                        </div>
+
+                                        <div className="flex flex-col items-end gap-[0.2vw]">
+                                          <span
+                                            className={`px-[0.8vw] py-[0.15vw] rounded-2xl min-w-[5.5vw] flex items-center justify-center text-[0.72vw] font-medium ${
+                                              req.status === "approved"
+                                                ? "bg-green-100 text-green-700"
+                                                : req.status === "rejected"
+                                                ? "bg-red-100 text-red-700"
+                                                : "bg-yellow-100 text-yellow-700"
+                                            }`}
+                                          >
+                                            {req.status === "approved"
+                                              ? "Approved"
+                                              : req.status === "rejected"
+                                              ? "Rejected"
+                                              : "Requested"}
+                                          </span>
+                                          <span className="text-[0.7vw] text-gray-500">
+                                            {new Date(req.createdAt).toLocaleDateString("en-GB")}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="text-[0.78vw] text-gray-800 bg-white p-[0.4vw] rounded border border-gray-200 mt-[0.2vw]">
+                                        <span className="font-semibold text-gray-700 block text-[0.72vw]">
+                                          Report / Outcome:
+                                        </span>
+                                        <p className="whitespace-pre-wrap">{req.outcome}</p>
+                                      </div>
+
+                                      {req.empRemarks && (
+                                        <p className="text-[0.75vw] text-gray-600 mt-[0.3vw]">
+                                          <span className="font-medium">Your Reason:</span> {req.empRemarks}
+                                        </p>
+                                      )}
+
+                                      {req.adminRemarks && (
+                                        <p className="text-[0.75vw] text-gray-700 mt-[0.2vw] bg-blue-50/70 p-[0.3vw] rounded border border-blue-200">
+                                          <span className="font-medium text-blue-900">Team Head Remarks:</span> {req.adminRemarks}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-gray-500 text-[0.75vw] text-center py-[2vw]">
+                                No previous missed report requests.
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="pt-[0.1vw] text-left">
+                            <h4 className="text-[0.84vw] font-semibold text-gray-900 mb-[0.6vw]">
+                              Request to Submit Missed Report
+                            </h4>
+
+                            <div className="grid grid-cols-3 gap-[0.6vw] mb-[0.6vw]">
+                              <div>
+                                <label className="block text-[0.8vw] font-medium text-gray-700 mb-[0.2vw]">
+                                  Missed Date <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="date"
+                                  value={missedReportData.missedDate}
+                                  max={new Date().toISOString().split("T")[0]}
+                                  onChange={(e) =>
+                                    setMissedReportData((prev) => ({
+                                      ...prev,
+                                      missedDate: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full border border-gray-300 rounded-lg px-[0.7vw] py-[0.35vw] text-[0.8vw] outline-none focus:border-blue-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[0.8vw] font-medium text-gray-700 mb-[0.2vw]">
+                                  Progress (%) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  placeholder="e.g. 75"
+                                  value={missedReportData.percentage}
+                                  onChange={(e) =>
+                                    setMissedReportData((prev) => ({
+                                      ...prev,
+                                      percentage: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full border border-gray-300 rounded-lg px-[0.7vw] py-[0.35vw] text-[0.8vw] outline-none focus:border-blue-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[0.8vw] font-medium text-gray-700 mb-[0.2vw]">
+                                  Status
+                                </label>
+                                <select
+                                  value={missedReportData.taskStatus}
+                                  onChange={(e) =>
+                                    setMissedReportData((prev) => ({
+                                      ...prev,
+                                      taskStatus: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full border border-gray-300 rounded-lg px-[0.7vw] py-[0.35vw] text-[0.8vw] outline-none focus:border-blue-500 bg-white"
+                                >
+                                  <option value="In Progress">In Progress</option>
+                                  <option value="Completed">Completed</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="mb-[0.6vw]">
+                              <label className="block text-[0.8vw] font-medium text-gray-700 mb-[0.2vw]">
+                                Report / Outcome on Missed Date <span className="text-red-500">*</span>
+                              </label>
+                              <textarea
+                                value={missedReportData.outcome}
+                                onChange={(e) =>
+                                  setMissedReportData((prev) => ({
+                                    ...prev,
+                                    outcome: e.target.value,
+                                  }))
+                                }
+                                placeholder="Detail the work done and outcomes achieved on that missed date..."
+                                className="w-full border border-gray-300 rounded-lg px-[0.7vw] py-[0.4vw] text-[0.75vw] outline-none focus:border-blue-500"
+                                rows="3"
+                              />
+                            </div>
+
+                            <div className="mb-[0.6vw]">
+                              <label className="block text-[0.8vw] font-medium text-gray-700 mb-[0.2vw]">
+                                Reason for Missing Report <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={missedReportData.empRemarks}
+                                onChange={(e) =>
+                                  setMissedReportData((prev) => ({
+                                    ...prev,
+                                    empRemarks: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. On-site client visit, internet downtime, etc."
+                                className="w-full border border-gray-300 rounded-lg px-[0.7vw] py-[0.35vw] text-[0.75vw] outline-none focus:border-blue-500"
+                              />
+                            </div>
+
+                            <div className="flex justify-end pt-[0.2vw]">
+                              <button
+                                type="button"
+                                onClick={handleMissedReportSubmit}
+                                disabled={isSubmitting}
+                                className={`${
+                                  isSubmitting
+                                    ? "bg-blue-400 cursor-not-allowed"
+                                    : "bg-blue-600 hover:bg-blue-500 cursor-pointer"
+                                } text-white px-[1vw] py-[0.4vw] rounded-xl text-[0.75vw] flex items-center gap-[0.3vw]`}
+                              >
+                                {isSubmitting && (
+                                  <Loader2 className="w-[1vw] h-[1vw] animate-spin" />
+                                )}
+                                {isSubmitting ? "Submitting..." : "Submit Missed Report"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               <div
@@ -2425,7 +2822,7 @@ export default function EmployeeTaskTable({
                     : " justify-end"
                 } items-center`}
               >
-                {communicateTab != "message" && (
+                {communicateTab === "dateChange" && (
                   <button
                     className="flex items-center text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer relative"
                     style={{
@@ -2443,19 +2840,7 @@ export default function EmployeeTaskTable({
                   >
                     {dateChangeDataPrevious ? (
                       <>
-                        <svg
-                          style={{ width: "1.3vw", height: "1.3vw" }}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                          />
-                        </svg>
+                        <ChevronLeft style={{ width: "1.3vw", height: "1.3vw" }} />
                         Back to Form
                       </>
                     ) : (
@@ -2479,6 +2864,55 @@ export default function EmployeeTaskTable({
                             {unreadDateChangeCount > 99
                               ? "99+"
                               : unreadDateChangeCount}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {communicateTab === "missedReport" && (
+                  <button
+                    className="flex items-center text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer relative"
+                    style={{
+                      gap: "0.4vw",
+                      padding: "0.5vw 0.5vw",
+                      fontSize: "0.9vw",
+                    }}
+                    onClick={() => {
+                      setMissedReportViewMode(missedReportViewMode === "new" ? "previous" : "new");
+                      if (missedReportViewMode === "new") {
+                        setUnreadMissedReportCount(0);
+                        updateReadTimestamp(selectedTask);
+                      }
+                    }}
+                  >
+                    {missedReportViewMode === "previous" ? (
+                      <>
+                        <ChevronLeft style={{ width: "1.3vw", height: "1.3vw" }} />
+                        Back to Request Form
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          style={{ width: "1.3vw", height: "1.3vw" }}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                        View Previous
+                        {unreadMissedReportCount > 0 && (
+                          <span className=" bg-red-600 text-white text-[0.55vw] rounded-full min-w-[1.1vw] h-[1.1vw] flex items-center justify-center font-semibold px-[0.15vw] shadow-md">
+                            {unreadMissedReportCount > 99
+                              ? "99+"
+                              : unreadMissedReportCount}
                           </span>
                         )}
                       </>

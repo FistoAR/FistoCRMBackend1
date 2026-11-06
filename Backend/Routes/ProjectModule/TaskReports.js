@@ -375,4 +375,93 @@ router.put("/verify/:reportId", async (req, res) => {
     });
   }
 });
+
+// Delete a specific task report (temporary provision for team heads / admins)
+router.delete("/:reportId", async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    // Check TaskReports first
+    let deletedReport = await TaskReports.findByIdAndDelete(reportId);
+
+    // If not in TaskReports, check TaskReportsReview
+    if (!deletedReport) {
+      deletedReport = await TaskReportsReview.findByIdAndDelete(reportId);
+    }
+
+    if (!deletedReport) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    const { projectId, taskId, activityId } = deletedReport;
+
+    // Find the latest remaining report to recalculate progress
+    const remainingReports = await TaskReports.find({
+      projectId,
+      taskId,
+      ...(activityId ? { activityId } : {}),
+    }).sort({ createdAt: -1 });
+
+    const newPercentage =
+      remainingReports.length > 0 ? remainingReports[0].percentage || 0 : 0;
+    const newStatus =
+      remainingReports.length > 0
+        ? remainingReports[0].status || "In Progress"
+        : "In Progress";
+
+    let updateData = {};
+    if (activityId) {
+      updateData = {
+        "activities.$[elem].percentage": Number(newPercentage),
+        "activities.$[elem].status": newStatus,
+      };
+    } else {
+      updateData = {
+        percentage: Number(newPercentage),
+        status: newStatus,
+      };
+    }
+
+    await Tasks.findOneAndUpdate(
+      { _id: taskId },
+      { $set: updateData },
+      {
+        new: true,
+        ...(activityId ? { arrayFilters: [{ "elem._id": activityId }] } : {}),
+      }
+    );
+
+    // Recalculate parent task percentage if it has activities
+    const task = await Tasks.findById(taskId);
+    if (task && task.activities && task.activities.length > 0) {
+      const activeActivities = task.activities.filter(
+        (act) => act.status !== "Cancelled"
+      );
+      if (activeActivities.length > 0) {
+        const activitiesSum = activeActivities.reduce(
+          (sum, act) => sum + (act.percentage || 0),
+          0
+        );
+        const taskPercentage = Math.round(
+          activitiesSum / activeActivities.length
+        );
+        await Tasks.findByIdAndUpdate(taskId, {
+          $set: { percentage: taskPercentage },
+        });
+      }
+    }
+
+    return res.status(200).json({
+      message: "Report deleted successfully",
+      reportId,
+    });
+  } catch (error) {
+    console.error("Error deleting report:", error);
+    res.status(500).json({
+      message: "Server error deleting report",
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
