@@ -142,6 +142,7 @@ const DayTask = () => {
 
         if (data.success) {
           refetchDayReports();
+          window.dispatchEvent(new CustomEvent("day-task-started"));
           notify({
             title: "Success",
             message: "Day report created successfully",

@@ -702,6 +702,16 @@ const Attendance = ({ onClose }) => {
         // Invalidate React Query to refresh timeline and status immediately
         await queryClient.invalidateQueries({ queryKey: ["todayAttendance"] });
         showToast("Success", data.message || "Attendance recorded successfully");
+
+        // If user recorded In attendance (Morning In or Afternoon In), trigger immediate today task check
+        if (actionField.includes("_in")) {
+          window.dispatchEvent(
+            new CustomEvent("attendance-in-recorded", {
+              detail: { action: actionField, employeeId },
+            })
+          );
+        }
+
         setFormData({ attendanceType: "", action: "" });
         setTimeout(() => onClose?.(), 1500);
       } else {

@@ -11,10 +11,12 @@ import React, { lazy, Suspense } from "react";
 import Worker from "./Service/useWorker";
 import useSocketNotifications from "./Service/useSocketNotifications";
 import useAttendanceWorker from "./Service/Attendance/useAttendanceWorker";
+import useDayTaskWorker from "./Service/DayTask/useDayTaskWorker";
+import NoTasksAssignedModal from "./components/ProjectModule/NoTasksAssignedModal";
 
 // Error Boundary & Context
 import ErrorBoundary from "./components/ErrorBoundary";
-import { NotificationProvider } from "./components/NotificationContext";
+import { NotificationProvider, useNotification } from "./components/NotificationContext";
 import { ConfirmProvider } from "./components/ConfirmContext";
 import { usePageTitle } from "./components/PageTitleNav";
 
@@ -92,6 +94,8 @@ function MainLayout({ children }) {
   Worker();
   useAttendanceWorker();
   const socketData = useSocketNotifications();
+  const { notify } = useNotification();
+  const { noTaskModalOpen, setNoTaskModalOpen } = useDayTaskWorker(notify);
 
   return (
     <div className="flex w-screen h-screen overflow-hidden">
@@ -100,6 +104,10 @@ function MainLayout({ children }) {
         <NavBarWithTitle socketData={socketData} />
         <div className="flex-1 min-h-0 flex flex-col mt-[1vh] pr-[0.3vw]">{children}</div>
       </main>
+      <NoTasksAssignedModal
+        isOpen={noTaskModalOpen}
+        onClose={() => setNoTaskModalOpen(false)}
+      />
     </div>
   );
 }

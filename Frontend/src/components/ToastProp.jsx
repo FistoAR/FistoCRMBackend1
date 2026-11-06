@@ -43,6 +43,7 @@ const Notification = ({
   title,
   message,
   duration = 5000,
+  actionButton,
   onClose,
 }) => {
   const [progress, setProgress] = useState(100);
@@ -82,6 +83,20 @@ const Notification = ({
               : String(message ?? "")}
           </p>
         </div>
+
+        {actionButton && (
+          <button
+            type="button"
+            onClick={() => {
+              if (actionButton.onClick) actionButton.onClick();
+              onClose?.();
+            }}
+            title={actionButton.title || "Go to Day Task"}
+            className="flex items-center justify-center w-[1.8vw] h-[1.8vw] rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-transform active:scale-95 cursor-pointer flex-shrink-0"
+          >
+            <span className="text-[0.9vw] font-bold">→</span>
+          </button>
+        )}
 
         <button className="text-[0.95vw] font-bold px-[0.4vw] text-gray-600 cursor-pointer" onClick={onClose}>
           ✕

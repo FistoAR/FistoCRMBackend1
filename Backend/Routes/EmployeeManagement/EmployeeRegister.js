@@ -248,6 +248,17 @@ router.post("/", uploadFields, async (req, res) => {
       return docs;
     }
 
+    if (fileType === "officialLetters" && files.officialLetters) {
+      const letters = [];
+      for (const file of files.officialLetters) {
+        letters.push({
+          originalName: file.originalname,
+          path: await uploadSingleFileToDrive(file, "offer_letters", "offer_letters"),
+        });
+      }
+      return letters;
+    }
+
     if (fileType === "exit") {
       if (files.paySlip) {
         fileData.paySlip = {
@@ -281,6 +292,7 @@ router.post("/", uploadFields, async (req, res) => {
   const idsData = await processFiles("ids");
   const certificatesData = await processFiles("certificates");
   const otherDocsData = await processFiles("others");
+  const officialLettersData = await processFiles("officialLetters");
   const exitDocsData = await processFiles("exit");
 
   const profileUrl = req.files?.profile
@@ -351,6 +363,7 @@ router.post("/", uploadFields, async (req, res) => {
       JSON.stringify(idsData),
       JSON.stringify(certificatesData),
       JSON.stringify(otherDocsData),
+      JSON.stringify(officialLettersData),
       JSON.stringify(exitDocsData),
     ],
     (err, result) => {

@@ -146,6 +146,31 @@ const Projects = () => {
   const [filterInProgressStatus, setFilterInProgressStatus] = useState("");
 
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [hasStartedDayTask, setHasStartedDayTask] = useState(true);
+
+  useEffect(() => {
+    const isExcluded = ["Admin", "SBU", "Project Head", "Management", "MD"].some(
+      (r) => loggedEmpDetails.role?.toLowerCase() === r.toLowerCase()
+    );
+    if (isExcluded || !loggedEmpDetails.id) return;
+
+    const checkTodayStarted = async () => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE_URL}/dayReport/employee/${loggedEmpDetails.id}`
+        );
+        const data = await res.json();
+        const reports = Array.isArray(data?.data) ? data.data : [];
+        setHasStartedDayTask(reports.length > 0);
+      } catch (_) {}
+    };
+
+    checkTodayStarted();
+
+    const onStarted = () => setHasStartedDayTask(true);
+    window.addEventListener("day-task-started", onStarted);
+    return () => window.removeEventListener("day-task-started", onStarted);
+  }, [loggedEmpDetails.id, loggedEmpDetails.role]);
   const [workingProjects, setWorkingProjects] = useState(new Set());
   const [showWorkingOnly, setShowWorkingOnly] = useState(false);
 
@@ -901,13 +926,23 @@ const Projects = () => {
                         </button>
                       </div>
                     )}
-                    <div className="flex justify-end items-center">
+                    <div className="flex justify-end items-center relative">
                       <button
                         type="button"
                         onClick={() => navigate("dayTask")}
-                        className="px-[1vw] py-[0.4vw] bg-black text-white rounded-full hover:bg-gray-700 font-semibold cursor-pointer min-w-[7vw] text-[0.8vw] hover:bg-gray-900 transition-colors duration-200"
+                        className={`px-[1vw] py-[0.4vw] rounded-full font-semibold cursor-pointer min-w-[7vw] text-[0.8vw] transition-all duration-200 relative ${
+                          !hasStartedDayTask
+                            ? "bg-blue-600 hover:bg-blue-700 text-white ring-4 ring-blue-300 ring-offset-1 animate-pulse shadow-lg"
+                            : "bg-black text-white hover:bg-gray-700"
+                        }`}
                       >
                         Day Task
+                        {!hasStartedDayTask && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                          </span>
+                        )}
                       </button>
                     </div>
                   </div>

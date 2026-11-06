@@ -277,6 +277,41 @@ router.get("/employee/:employeeID", async (req, res) => {
   }
 });
 
+// Alias for employee today check
+router.get("/employee-today/:employeeID", async (req, res) => {
+  try {
+    const { employeeID } = req.params;
+    if (!employeeID) {
+      return res.status(400).json({
+        success: false,
+        message: "employeeID is required",
+      });
+    }
+
+    const { start: startOfToday, end: endOfToday } = getTodayRangeIST();
+    const dayReports = await DayReport.find({
+      employeeID,
+      createdAt: {
+        $gte: startOfToday,
+        $lte: endOfToday,
+      },
+    }).lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Today's day reports fetched",
+      data: dayReports || [],
+    });
+  } catch (error) {
+    console.error("Error fetching today's day reports:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch today's day reports",
+      error: error.message,
+    });
+  }
+});
+
 router.get("/", async (req, res) => {
   try {
     const dayReports = await DayReport.find();

@@ -768,6 +768,7 @@ const TodayTasksCard = ({
   employees = [],
   allEmployees = [],
   approvedLeaves = [],
+  assignedEmployeeIds = [],
 }) => {
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
   const [employeeCache, setEmployeeCache] = useState({});
@@ -843,7 +844,9 @@ const TodayTasksCard = ({
       case "leave":
         return "Leave";
       case "noTask":
-        return "No Task";
+        return "No Task Available";
+      case "notStarted":
+        return "Not Started";
       default:
         return "Task";
     }
@@ -920,6 +923,10 @@ const TodayTasksCard = ({
         }
       });
 
+      const assignedSet = new Set(
+        (assignedEmployeeIds || []).map((id) => (id ? id.toString().trim() : ""))
+      );
+
       (employees || []).forEach((emp) => {
         const empId =
           emp.employee_id?.toString() || emp._id?.$oid || emp._id?.toString();
@@ -947,21 +954,43 @@ const TodayTasksCard = ({
               status: "Leave",
             });
           } else {
-            items.push({
-              id: `no-task-${empId}`,
-              type: "noTask",
-              priority: 0,
-              taskName: "Not started yet !",
-              activityName: null,
-              description: "No report submitted today",
-              employeeId: empId,
-              projectName: "",
-              startDate: "",
-              startTime: "",
-              endDate: new Date().toISOString().split("T")[0],
-              endTime: "",
-              status: "No Task",
-            });
+            const hasAssignedTask =
+              (empId && assignedSet.has(empId.trim())) ||
+              (internId && assignedSet.has(internId.trim()));
+
+            if (hasAssignedTask) {
+              items.push({
+                id: `not-started-${empId}`,
+                type: "notStarted",
+                priority: 1,
+                taskName: "Not started yet !",
+                activityName: null,
+                description: "Task assigned but not started today",
+                employeeId: empId,
+                projectName: "",
+                startDate: "",
+                startTime: "",
+                endDate: new Date().toISOString().split("T")[0],
+                endTime: "",
+                status: "Not Started",
+              });
+            } else {
+              items.push({
+                id: `no-task-${empId}`,
+                type: "noTask",
+                priority: 0,
+                taskName: "No Task Available",
+                activityName: null,
+                description: "No tasks allocated for this employee",
+                employeeId: empId,
+                projectName: "",
+                startDate: "",
+                startTime: "",
+                endDate: new Date().toISOString().split("T")[0],
+                endTime: "",
+                status: "No Task",
+              });
+            }
           }
         }
       });
@@ -1253,7 +1282,7 @@ const TodayTasksCard = ({
       const showAvatar = item.avatar && !imageErrors[item.id];
       const isHov = tooltipItem?.id === item.id;
       const isLeave = item.type === "leave";
-      const isNone = item.type === "noTask" || isLeave;
+      const isNone = item.type === "noTask" || item.type === "notStarted" || isLeave;
       return (
         <div
           key={item.id}
@@ -1332,8 +1361,20 @@ const TodayTasksCard = ({
                   fontSize: "0.6vw",
                   padding: "0.1vw 0.42vw",
                   borderRadius: "0.21vw",
-                  backgroundColor: isLeave ? "#FEF3C7" : item.type === "noTask" ? "#FEE2E2" : "#F3F4F6",
-                  color: isLeave ? "#D97706" : item.type === "noTask" ? "#DC2626" : "#6B7280",
+                  backgroundColor: isLeave
+                    ? "#FEF3C7"
+                    : item.type === "noTask"
+                    ? "#F3F4F6"
+                    : item.type === "notStarted"
+                    ? "#FEE2E2"
+                    : "#E0E7FF",
+                  color: isLeave
+                    ? "#D97706"
+                    : item.type === "noTask"
+                    ? "#6B7280"
+                    : item.type === "notStarted"
+                    ? "#DC2626"
+                    : "#4338CA",
                   fontWeight: "500",
                 }}
               >
@@ -3282,6 +3323,7 @@ const Personal = () => {
   const [dayTask, setDayTask] = useState(() => cachedDashboard?.dayTask || []);
   const [taskEmployees, setTaskEmployees] = useState(() => cachedDashboard?.taskEmployees || []);
   const [approvedLeaves, setApprovedLeaves] = useState(() => cachedDashboard?.approvedLeaves || []);
+  const [assignedEmployeeIds, setAssignedEmployeeIds] = useState(() => cachedDashboard?.assignedEmployeeIds || []);
   const [loadingTasks, setLoadingTasks] = useState(() => !cachedDashboard?.hasTasks);
   const [loadingStats, setLoadingStats] = useState(() => !cachedDashboard?.hasStats);
   const [error, setError] = useState(null);
@@ -3329,6 +3371,7 @@ const Personal = () => {
         setTaskEmployees(tasksData.employees || []);
         setAllEmployees(tasksData.allEmployees || tasksData.employees || []);
         setApprovedLeaves(tasksData.approvedLeaves || []);
+        setAssignedEmployeeIds(tasksData.assignedEmployeeIds || []);
 
         if (tasksData.activeEmployeeCount !== undefined) {
           setStats((prev) => ({
@@ -3345,6 +3388,7 @@ const Personal = () => {
           taskEmployees: tasksData.employees || [],
           allEmployees: tasksData.allEmployees || tasksData.employees || [],
           approvedLeaves: tasksData.approvedLeaves || [],
+          assignedEmployeeIds: tasksData.assignedEmployeeIds || [],
           stats: {
             ...(prev.stats || {}),
             ...(tasksData.activeEmployeeCount !== undefined ? { employees: tasksData.activeEmployeeCount } : {}),
@@ -3451,6 +3495,7 @@ const Personal = () => {
             employees={memoizedEmployees}
             allEmployees={allEmployees}
             approvedLeaves={approvedLeaves}
+            assignedEmployeeIds={assignedEmployeeIds}
           />
         </div>
 

@@ -484,7 +484,7 @@ router.get("/dashboard", async (req, res) => {
       WHERE working_status = 'Active'
     `;
 
-    const [unscheduledTask, dayTask, allActiveEmployees, approvedLeaves] =
+    const [unscheduledTask, dayTask, allActiveEmployees, approvedLeaves, activeAssignedTasks] =
       await Promise.all([
         UnscheduledTask.find({
           createdAt: { $gte: todayStart, $lte: todayEnd },
@@ -497,7 +497,38 @@ router.get("/dashboard", async (req, res) => {
           console.error("Error fetching approved leaves for dashboard:", lErr);
           return [];
         }),
+        Tasks.find(
+          {
+            status: { $nin: ["Completed", "Cancelled"] },
+          },
+          {
+            employee: 1,
+            supportingPersons: 1,
+            "activities.employee": 1,
+            "activities.supportingPersons": 1,
+            "activities.status": 1,
+          }
+        ).lean(),
       ]);
+
+    // Extract all employee IDs who currently have active assigned tasks/activities
+    const assignedEmployeeIdsSet = new Set();
+    (activeAssignedTasks || []).forEach((t) => {
+      if (Array.isArray(t.employee)) {
+        t.employee.forEach((emp) => emp && assignedEmployeeIdsSet.add(emp.toString().trim()));
+      } else if (t.employee) {
+        assignedEmployeeIdsSet.add(t.employee.toString().trim());
+      }
+      (t.supportingPersons || []).forEach((sp) => sp && assignedEmployeeIdsSet.add(sp.toString().trim()));
+
+      (t.activities || []).forEach((act) => {
+        if (act.status !== "Completed" && act.status !== "Cancelled") {
+          if (act.employee) assignedEmployeeIdsSet.add(act.employee.toString().trim());
+          (act.supportingPersons || []).forEach((sp) => sp && assignedEmployeeIdsSet.add(sp.toString().trim()));
+        }
+      });
+    });
+    const assignedEmployeeIds = Array.from(assignedEmployeeIdsSet);
 
     // 2. Batch fetch ONLY tasks referenced in today's day reports (avoid N+1 and full collection dump)
     const taskIds = [
@@ -640,6 +671,7 @@ router.get("/dashboard", async (req, res) => {
       employees: filteredEmployees,
       allEmployees: allActiveEmployees,
       approvedLeaves: approvedLeaves || [],
+      assignedEmployeeIds: assignedEmployeeIds || [],
       activeEmployeeCount: (allActiveEmployees || []).length,
     };
 

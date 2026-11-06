@@ -193,6 +193,7 @@ function CategoryHeader({
   onClick,
   isCollapsed,
   onHover,
+  hasAlert = false,
 }) {
   const handleMouseEnter = (e) => {
     if (isCollapsed && onHover) {
@@ -246,6 +247,12 @@ function CategoryHeader({
         )}
         {!isCollapsed && (
           <span className="truncate min-w-0 font-semibold">{label}</span>
+        )}
+        {hasAlert && (
+          <span className="flex h-2.5 w-2.5 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+          </span>
         )}
       </div>
 
@@ -361,6 +368,16 @@ export default function Sidebar() {
     hr: false,
     management: false,
   });
+
+  const [hasUnstartedDayTask, setHasUnstartedDayTask] = useState(false);
+
+  useEffect(() => {
+    const handleDayTaskStatus = (e) => {
+      setHasUnstartedDayTask(Boolean(e.detail?.hasUnstarted));
+    };
+    window.addEventListener("day-task-status-changed", handleDayTaskStatus);
+    return () => window.removeEventListener("day-task-status-changed", handleDayTaskStatus);
+  }, []);
 
   const toggleGroup = (group) => {
     const isOpening = isCollapsed || !openGroups[group];
@@ -859,6 +876,7 @@ export default function Sidebar() {
               onClick={() => toggleGroup("projects")}
               isCollapsed={isCollapsed}
               onHover={handleLinkHover}
+              hasAlert={hasUnstartedDayTask}
             />
 
             {openGroups.projects && !isCollapsed && (

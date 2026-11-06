@@ -8,10 +8,12 @@ export const useNotification = () => useContext(NotificationContext);
 export const NotificationProvider = ({ children }) => {
   const [notifProps, setNotifProps] = useState(null);
 
-  const notify = useCallback(({ title, message}) => {
+  const notify = useCallback(({ title, message, actionButton, duration }) => {
     setNotifProps({
       title,
       message,
+      actionButton,
+      duration,
       onClose: () => setNotifProps(null),
     });
   }, []);

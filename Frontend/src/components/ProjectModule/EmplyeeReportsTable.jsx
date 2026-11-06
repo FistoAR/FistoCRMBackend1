@@ -1021,14 +1021,6 @@ export default function EmployeeTaskTable({
       return;
     }
 
-    if (!missedReportData.empRemarks || !missedReportData.empRemarks.trim()) {
-      notify({
-        title: "Error",
-        message: "Please enter the reason for missing report",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
     try {
       const isActivityReport = selectedTask.isActivityReport || false;
@@ -1258,15 +1250,7 @@ export default function EmployeeTaskTable({
     };
 
     try {
-      if (!missedReportData.empRemarks || !missedReportData.empRemarks.trim()) {
-      notify({
-        title: "Error",
-        message: "Please enter the reason for missing report",
-      });
-      return;
-    }
-
-    setIsSubmitting(true);
+      setIsSubmitting(true);
       const response = await fetch(
         `${import.meta.env.VITE_API_BASE_URL}/tasksReports`,
         {
