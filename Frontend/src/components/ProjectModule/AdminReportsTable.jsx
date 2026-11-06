@@ -3089,7 +3089,8 @@ export default function AdminReportsTable({
                                     </span>
                                   ) : null}
 
-                                  <button
+                                  {import.meta.env.DEV && (
+<button
                                     type="button"
                                     onClick={() => {
                                       setReportToDelete(report);
@@ -3100,6 +3101,7 @@ export default function AdminReportsTable({
                                   >
                                     <Trash2 className="w-[0.9vw] h-[0.9vw]" />
                                   </button>
+)}
                                 </div>
                               </td>
 
@@ -3217,7 +3219,7 @@ export default function AdminReportsTable({
           </div>
         )}
 
-        {showDeleteReportConfirm && reportToDelete && (
+        {import.meta.env.DEV && showDeleteReportConfirm && reportToDelete && (
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70]"
             onClick={() => {
