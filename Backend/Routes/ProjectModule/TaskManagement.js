@@ -472,7 +472,7 @@ router.get("/dashboard", async (req, res) => {
     // 1. Fetch only today's unscheduled tasks, day reports, and active employees concurrently
     const todayDateStr = new Date().toLocaleDateString("en-CA");
     const leaveQuery = `
-      SELECT employee_id, leave_type, from_date, to_date, reason, status, management_status, team_head_status
+      SELECT id, employee_id, leave_type, from_date, to_date, reason, status, management_status, team_head_status, management_remark, team_head_remark
       FROM leave_requests
       WHERE (status = 'approved' OR management_status = 'approved' OR team_head_status = 'approved')
         AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))
@@ -686,6 +686,110 @@ router.get("/dashboard", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch tasks",
+      error: error.message,
+    });
+  }
+});
+
+// Mark single-date leave directly from dashboard (for Team Head & Project Head)
+router.post("/dashboard/mark-leave", async (req, res) => {
+  try {
+    const { employeeId, date, reason, updatedBy } = req.body;
+
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: "employeeId is required" });
+    }
+
+    const targetDate = date ? new Date(date).toLocaleDateString("en-CA") : new Date().toLocaleDateString("en-CA");
+
+    // 1. Check if employee already has an active or approved leave for this date
+    const checkQuery = `
+      SELECT id, status, management_status, team_head_status
+      FROM leave_requests
+      WHERE employee_id = ?
+        AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))
+      LIMIT 1
+    `;
+    const existing = await queryWithRetry(checkQuery, [employeeId, targetDate]);
+
+    if (existing && existing.length > 0) {
+      // If already exists, update to keep it marked
+      const leaveId = existing[0].id;
+      await queryWithRetry(
+        `UPDATE leave_requests
+         SET status = 'approved',
+             team_head_status = 'approved',
+             management_status = 'approved',
+             team_head_updated_by = ?,
+             team_head_updated_at = NOW(),
+             team_head_remark = 'DASHBOARD_HEAD_MARK',
+             reason = COALESCE(?, reason)
+         WHERE id = ?`,
+        [updatedBy || "Team/Project Head", reason || "Marked on dashboard", leaveId]
+      );
+    } else {
+      // 2. Insert new 1-day approved leave request marked with DASHBOARD_HEAD_MARK
+      await queryWithRetry(
+        `INSERT INTO leave_requests
+         (employee_id, leave_type, from_date, to_date, number_of_days, duration_type, reason, status, team_head_status, management_status, team_head_updated_by, team_head_updated_at, team_head_remark)
+         VALUES (?, 'Casual Leave', ?, ?, 1.0, 'full_day', ?, 'approved', 'approved', 'approved', ?, NOW(), 'DASHBOARD_HEAD_MARK')`,
+        [employeeId, targetDate, targetDate, reason || "Marked as Leave by Team/Project Head", updatedBy || "Team/Project Head"]
+      );
+    }
+
+    // Invalidate dashboard cache
+    dashboardCache.timestamp = 0;
+    dashboardCache.data = null;
+
+    return res.status(200).json({
+      success: true,
+      message: `Employee marked as on leave for ${targetDate}`,
+    });
+  } catch (error) {
+    console.error("Error marking leave from dashboard:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to mark leave",
+      error: error.message,
+    });
+  }
+});
+
+// Remove leave for a single date directly from dashboard
+router.post("/dashboard/remove-leave", async (req, res) => {
+  try {
+    const { employeeId, date, leaveId } = req.body;
+
+    if (!employeeId && !leaveId) {
+      return res.status(400).json({ success: false, message: "employeeId or leaveId is required" });
+    }
+
+    const targetDate = date ? new Date(date).toLocaleDateString("en-CA") : new Date().toLocaleDateString("en-CA");
+
+    if (leaveId) {
+      await queryWithRetry(`DELETE FROM leave_requests WHERE id = ?`, [leaveId]);
+    } else {
+      await queryWithRetry(
+        `DELETE FROM leave_requests
+         WHERE employee_id = ?
+           AND ? BETWEEN DATE(from_date) AND COALESCE(DATE(to_date), DATE(from_date))`,
+        [employeeId, targetDate]
+      );
+    }
+
+    // Invalidate dashboard cache
+    dashboardCache.timestamp = 0;
+    dashboardCache.data = null;
+
+    return res.status(200).json({
+      success: true,
+      message: `Leave removed successfully for ${targetDate}`,
+    });
+  } catch (error) {
+    console.error("Error removing leave from dashboard:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to remove leave",
       error: error.message,
     });
   }

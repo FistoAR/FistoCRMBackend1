@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useConfirm } from "../ConfirmContext";
+import { useNotification } from "../NotificationContext";
 
 import AssEmp from "../../assets/ProjectPages/overview/assEmp.webp";
 import TotalTask from "../../assets/ProjectPages/overview/totalTask.webp";
@@ -769,7 +771,10 @@ const TodayTasksCard = ({
   allEmployees = [],
   approvedLeaves = [],
   assignedEmployeeIds = [],
+  onRefreshTasks,
 }) => {
+  const confirm = useConfirm();
+  const { notify } = useNotification();
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
   const [employeeCache, setEmployeeCache] = useState({});
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -777,6 +782,141 @@ const TodayTasksCard = ({
   const tooltipRef = useRef(null);
   const [tooltipItem, setTooltipItem] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [hoveredCardId, setHoveredCardId] = useState(null);
+  const [processingLeaveEmpId, setProcessingLeaveEmpId] = useState(null);
+
+  // Check if current user is Team Head or Project Head (or Admin/Management)
+  const canManageLeave = useMemo(() => {
+    try {
+      const stored = sessionStorage.getItem("user") || localStorage.getItem("user");
+      if (!stored) return false;
+      const user = JSON.parse(stored);
+      const designation = (user.designation || "").trim().toLowerCase();
+      const isTeamHead = Boolean(user.teamHead || user.team_head || user.isTeamHead);
+      const isProjectHead = designation === "project head" || designation.includes("project head");
+      const isAdminOrMgmt = designation === "admin" || designation === "management";
+      return isTeamHead || isProjectHead || isAdminOrMgmt;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const handleMarkAsLeave = async (item, e) => {
+    e.stopPropagation();
+    const empId = item.employeeId;
+    const empName = item.employeeName || empId;
+    const today = new Date().toLocaleDateString("en-GB");
+
+    const confirmed = await confirm({
+      type: "warning",
+      title: "Mark as Leave",
+      message: `Are you sure you want to mark ${empName} (${empId}) as on leave for today (${today})?`,
+      confirmText: "Yes, Mark Leave",
+      cancelText: "Cancel",
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setProcessingLeaveEmpId(empId);
+      const stored = sessionStorage.getItem("user") || localStorage.getItem("user");
+      const user = stored ? JSON.parse(stored) : {};
+      const updatedBy = user.employeeName || user.name || user.userName || "Team/Project Head";
+
+      const res = await fetch(`${apiBaseUrl}/tasks/dashboard/mark-leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: empId,
+          reason: "Marked as Leave by Team/Project Head from Dashboard",
+          updatedBy,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        if (notify) {
+          notify({
+            title: "Success",
+            message: `${empName} marked as on leave for today`,
+          });
+        }
+        if (onRefreshTasks) onRefreshTasks();
+      } else {
+        if (notify) {
+          notify({
+            title: "Error",
+            message: data.message || "Failed to mark as leave",
+          });
+        }
+      }
+    } catch (err) {
+      if (notify) {
+        notify({
+          title: "Error",
+          message: "Network error while marking leave",
+        });
+      }
+    } finally {
+      setProcessingLeaveEmpId(null);
+    }
+  };
+
+  const handleRemoveLeave = async (item, e) => {
+    e.stopPropagation();
+    const empId = item.employeeId;
+    const empName = item.employeeName || empId;
+    const today = new Date().toLocaleDateString("en-GB");
+
+    const confirmed = await confirm({
+      type: "danger",
+      title: "Remove Leave",
+      message: `Are you sure you want to remove leave for ${empName} (${empId}) for today (${today})?`,
+      confirmText: "Yes, Remove Leave",
+      cancelText: "Cancel",
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setProcessingLeaveEmpId(empId);
+      const res = await fetch(`${apiBaseUrl}/tasks/dashboard/remove-leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: empId,
+          leaveId: item.leaveId || null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        if (notify) {
+          notify({
+            title: "Success",
+            message: `Leave removed for ${empName}`,
+          });
+        }
+        if (onRefreshTasks) onRefreshTasks();
+      } else {
+        if (notify) {
+          notify({
+            title: "Error",
+            message: data.message || "Failed to remove leave",
+          });
+        }
+      }
+    } catch (err) {
+      if (notify) {
+        notify({
+          title: "Error",
+          message: "Network error while removing leave",
+        });
+      }
+    } finally {
+      setProcessingLeaveEmpId(null);
+    }
+  };
 
   const allEmpMap = useMemo(() => {
     const map = new Map();
@@ -936,6 +1076,11 @@ const TodayTasksCard = ({
         if (!hasReport) {
           const leaveInfo = approvedLeaveMap.get(empId) || (internId ? approvedLeaveMap.get(internId) : null);
           if (leaveInfo) {
+            const isDashboardMarked =
+              leaveInfo.team_head_remark === "DASHBOARD_HEAD_MARK" ||
+              leaveInfo.management_remark === "DASHBOARD_HEAD_MARK" ||
+              (leaveInfo.reason && leaveInfo.reason.includes("Marked as Leave by Team/Project Head"));
+
             items.push({
               id: `leave-${empId}`,
               type: "leave",
@@ -952,6 +1097,8 @@ const TodayTasksCard = ({
               endDate: leaveInfo.to_date || new Date().toISOString().split("T")[0],
               endTime: "",
               status: "Leave",
+              leaveId: leaveInfo.id || null,
+              isDashboardMarked: Boolean(isDashboardMarked),
             });
           } else {
             const hasAssignedTask =
@@ -1102,32 +1249,47 @@ const TodayTasksCard = ({
         });
       });
 
-      // Sort employee groups by their latest task timestamp (newest task on top, earliest at the bottom)
+      const getCategoryRank = (items) => {
+        if (!items || !items.length) return 4;
+        // Priority order:
+        // 1st: leave (rank 1)
+        // 2nd: noTask (rank 2)
+        // 3rd: notStarted (rank 3)
+        // 4th: task started (rank 4)
+        if (items.some((it) => it.type === "leave")) return 1;
+        if (items.some((it) => it.type === "noTask")) return 2;
+        if (items.some((it) => it.type === "notStarted")) return 3;
+        return 4;
+      };
+
+      // Sort employee groups by:
+      // 1st: leave, 2nd: no task available, 3rd: not started, 4th: task started (newest first)
       empOrder.sort((empIdA, empIdB) => {
         const itemsA = groupedByEmp[empIdA];
         const itemsB = groupedByEmp[empIdB];
 
-        const hasTasksA = itemsA.some((it) => it.type !== "noTask" && it.type !== "leave");
-        const hasTasksB = itemsB.some((it) => it.type !== "noTask" && it.type !== "leave");
+        const rankA = getCategoryRank(itemsA);
+        const rankB = getCategoryRank(itemsB);
 
-        // Employees who have not added a task (noTask) or are on leave display at the top
-        if (!hasTasksA && hasTasksB) return -1;
-        if (hasTasksA && !hasTasksB) return 1;
-        if (!hasTasksA && !hasTasksB) return 0;
+        if (rankA !== rankB) {
+          return rankA - rankB;
+        }
 
-        const timestampsA = itemsA
-          .filter((it) => it.type !== "noTask" && it.type !== "leave")
-          .map((it) => getItemTimestamp(it))
-          .filter((t) => t > 0);
-        const timestampsB = itemsB
-          .filter((it) => it.type !== "noTask" && it.type !== "leave")
-          .map((it) => getItemTimestamp(it))
-          .filter((t) => t > 0);
+        // For task started (rank 4), sort by newest task timestamp on top
+        if (rankA === 4) {
+          const timestampsA = itemsA
+            .map((it) => getItemTimestamp(it))
+            .filter((t) => t > 0);
+          const timestampsB = itemsB
+            .map((it) => getItemTimestamp(it))
+            .filter((t) => t > 0);
 
-        const maxA = timestampsA.length ? Math.max(...timestampsA) : 0;
-        const maxB = timestampsB.length ? Math.max(...timestampsB) : 0;
+          const maxA = timestampsA.length ? Math.max(...timestampsA) : 0;
+          const maxB = timestampsB.length ? Math.max(...timestampsB) : 0;
 
-        if (maxA !== maxB) return maxB - maxA;
+          if (maxA !== maxB) return maxB - maxA;
+        }
+
         return 0;
       });
 
@@ -1283,6 +1445,12 @@ const TodayTasksCard = ({
       const isHov = tooltipItem?.id === item.id;
       const isLeave = item.type === "leave";
       const isNone = item.type === "noTask" || item.type === "notStarted" || isLeave;
+      const isLowerOpacity = item.type === "notStarted";
+      const isCardHovered = hoveredCardId === item.id;
+      const showMarkLeaveBtn = canManageLeave && (item.type === "notStarted" || item.type === "noTask");
+      const showRemoveLeaveBtn = canManageLeave && isLeave && item.isDashboardMarked;
+      const isBusy = processingLeaveEmpId === item.employeeId;
+
       return (
         <div
           key={item.id}
@@ -1293,15 +1461,19 @@ const TodayTasksCard = ({
             borderBottom: "0.05vw solid #E5E7EB",
             gap: "0.625vw",
             position: "relative",
-            backgroundColor: isHov ? "#F9FAFB" : "transparent",
+            backgroundColor: isCardHovered ? "#F9FAFB" : isHov ? "#F9FAFB" : "transparent",
             transition: "background-color 0.2s ease",
             opacity: item.type === "noTask" ? 0.6 : 1,
           }}
-          onMouseEnter={() => !isNone && setTooltipItem(item)}
-          onMouseMove={(e) =>
-            !isNone && setMousePos({ x: e.clientX, y: e.clientY })
-          }
+          onMouseEnter={() => {
+            setHoveredCardId(item.id);
+            if (!isNone) setTooltipItem(item);
+          }}
+          onMouseMove={(e) => {
+            if (!isNone) setMousePos({ x: e.clientX, y: e.clientY });
+          }}
           onMouseLeave={() => {
+            setHoveredCardId(null);
             setTooltipItem(null);
           }}
         >
@@ -1315,6 +1487,7 @@ const TodayTasksCard = ({
                 borderRadius: "50%",
                 objectFit: "cover",
                 flexShrink: 0,
+                opacity: isLowerOpacity ? 0.6 : 1,
               }}
               onError={() => setImageErrors((p) => ({ ...p, [item.id]: true }))}
             />
@@ -1331,6 +1504,7 @@ const TodayTasksCard = ({
                 fontWeight: "600",
                 fontSize: "0.73vw",
                 flexShrink: 0,
+                opacity: isLowerOpacity ? 0.6 : 1,
               }}
               className="bg-blue-500"
             >
@@ -1380,7 +1554,33 @@ const TodayTasksCard = ({
               >
                 {getTypeLabel(item.type)}
               </span>
-              {!isNone && item.reportedAt && (
+
+              {/* Action buttons visible on hover for Team Head & Project Head */}
+              {isCardHovered && showMarkLeaveBtn && (
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={(e) => handleMarkAsLeave(item, e)}
+                  className="ml-auto text-[0.62vw] px-[0.45vw] py-[0.12vw] rounded font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                  title="Mark this employee on leave for today"
+                >
+                  {isBusy ? "Saving..." : "Mark as Leave"}
+                </button>
+              )}
+
+              {isCardHovered && showRemoveLeaveBtn && (
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={(e) => handleRemoveLeave(item, e)}
+                  className="ml-auto text-[0.62vw] px-[0.45vw] py-[0.12vw] rounded font-medium bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                  title="Remove leave for today"
+                >
+                  {isBusy ? "Removing..." : "Remove Leave"}
+                </button>
+              )}
+
+              {!isCardHovered && !isNone && item.reportedAt && (
                 <span
                   style={{
                     marginLeft: "auto",
@@ -3447,6 +3647,11 @@ const Personal = () => {
     fetchTasksData();
     fetchStatsData();
 
+    // Attach trigger to re-fetch when leave is marked/removed
+    window.refreshDashboardTasks = () => {
+      fetchTasksData();
+    };
+
     const interval = setInterval(() => {
       fetchTasksData();
       fetchStatsData();
@@ -3454,6 +3659,7 @@ const Personal = () => {
 
     return () => {
       active = false;
+      delete window.refreshDashboardTasks;
       clearInterval(interval);
     };
   }, [API_BASE_URL]);
@@ -3496,6 +3702,9 @@ const Personal = () => {
             allEmployees={allEmployees}
             approvedLeaves={approvedLeaves}
             assignedEmployeeIds={assignedEmployeeIds}
+            onRefreshTasks={() => {
+              if (window.refreshDashboardTasks) window.refreshDashboardTasks();
+            }}
           />
         </div>
 
