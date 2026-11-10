@@ -785,16 +785,27 @@ const TodayTasksCard = ({
   const [hoveredCardId, setHoveredCardId] = useState(null);
   const [processingLeaveEmpId, setProcessingLeaveEmpId] = useState(null);
 
-  // Check if current user is Team Head or Project Head (or Admin/Management)
+  // Check if current user is Team Head or Project Head (or Admin/Management/SBU/MD)
   const canManageLeave = useMemo(() => {
     try {
       const stored = sessionStorage.getItem("user") || localStorage.getItem("user");
       if (!stored) return false;
       const user = JSON.parse(stored);
-      const designation = (user.designation || "").trim().toLowerCase();
-      const isTeamHead = Boolean(user.teamHead || user.team_head || user.isTeamHead);
+      const designation = (user.designation || user.role || user.userRole || "").trim().toLowerCase();
+      const teamHeadVal = user.teamHead ?? user.team_head ?? user.isTeamHead ?? user.teamhead;
+      const isTeamHead =
+        teamHeadVal === true ||
+        teamHeadVal === 1 ||
+        teamHeadVal === "1" ||
+        teamHeadVal === "true";
       const isProjectHead = designation === "project head" || designation.includes("project head");
-      const isAdminOrMgmt = designation === "admin" || designation === "management";
+      const isAdminOrMgmt =
+        designation === "admin" ||
+        designation === "management" ||
+        designation === "sbu" ||
+        designation === "md" ||
+        designation.includes("admin") ||
+        designation.includes("management");
       return isTeamHead || isProjectHead || isAdminOrMgmt;
     } catch {
       return false;
