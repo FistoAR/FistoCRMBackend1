@@ -1,5 +1,6 @@
 // useDayTaskWorker.js - Hook managing Day Task reminders and first-time-in modal
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Logo from "../../assets/NotificationLogo.png";
 import LargeLogo from "../../assets/NotificationLargeLogo.png";
 
@@ -14,6 +15,7 @@ const EXCLUDED_DESIGNATIONS = new Set([
 ]);
 
 export default function useDayTaskWorker(notify) {
+  const navigate = useNavigate();
   const workerRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioBufferRef = useRef(null);
@@ -22,6 +24,10 @@ export default function useDayTaskWorker(notify) {
   const [hasUnstartedTask, setHasUnstartedTask] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_BASE_URL;
+
+  const navigateToDayTask = useCallback(() => {
+    navigate("/projects/dayTask");
+  }, [navigate]);
 
   // Read logged in user details
   const getUserData = useCallback(() => {
@@ -108,11 +114,11 @@ export default function useDayTaskWorker(notify) {
 
         notif.onclick = () => {
           window.focus();
-          window.location.hash = "/projects/dayTask";
+          navigateToDayTask();
         };
       } catch (_) {}
     }
-  }, []);
+  }, [navigateToDayTask]);
 
   // Helper to check if employee has recorded any "In" attendance today
   const hasAttendanceInToday = useCallback(async (employeeId) => {
@@ -185,7 +191,7 @@ export default function useDayTaskWorker(notify) {
             actionButton: {
               title: "Go to Day Task",
               onClick: () => {
-                window.location.hash = "/projects/dayTask";
+                navigateToDayTask();
               },
             },
             duration: 8000,
@@ -198,7 +204,7 @@ export default function useDayTaskWorker(notify) {
     } catch (err) {
       console.error("useDayTaskWorker: first time check failed:", err);
     }
-  }, [API_URL, hasAttendanceInToday, notify, playSound, triggerDesktopNotification]);
+  }, [API_URL, hasAttendanceInToday, navigateToDayTask, notify, playSound, triggerDesktopNotification]);
 
   // Initial setup & Worker lifecycle
   useEffect(() => {
@@ -248,7 +254,7 @@ export default function useDayTaskWorker(notify) {
               actionButton: {
                 title: "Go to Day Task",
                 onClick: () => {
-                  window.location.hash = "/projects/dayTask";
+                  navigateToDayTask();
                 },
               },
               duration: 8000,
@@ -274,6 +280,7 @@ export default function useDayTaskWorker(notify) {
     // Global listener for when user starts a task in DayTask.jsx
     const handleTaskStarted = () => {
       setHasUnstartedTask(false);
+      window.dispatchEvent(new CustomEvent("day-task-status-changed", { detail: { hasUnstarted: false } }));
       if (workerRef.current) {
         workerRef.current.postMessage({ type: "TASK_STARTED" });
       }
@@ -289,7 +296,7 @@ export default function useDayTaskWorker(notify) {
         workerRef.current = null;
       }
     };
-  }, [API_URL, getUserData, isExcludedRole, notify, playSound, runFirstTimeCheck, triggerDesktopNotification]);
+  }, [API_URL, getUserData, isExcludedRole, navigateToDayTask, notify, playSound, runFirstTimeCheck, triggerDesktopNotification]);
 
   return {
     noTaskModalOpen,
