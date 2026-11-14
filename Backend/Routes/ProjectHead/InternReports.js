@@ -403,9 +403,29 @@ async function processAttendanceRecord(attendance) {
   return res;
 }
 
+// ✅ Helper: Check if a leave was marked directly by team head / project head from dashboard
+function isDashboardMarkedLeave(leave) {
+  if (!leave) return false;
+  const teamRemark = (leave.team_head_remark || "").trim();
+  const mgmtRemark = (leave.management_remark || "").trim();
+  const reason = (leave.reason || "").trim();
+
+  return (
+    teamRemark === "DASHBOARD_HEAD_MARK" ||
+    mgmtRemark === "DASHBOARD_HEAD_MARK" ||
+    reason.includes("Marked as Leave by Team/Project Head") ||
+    reason.includes("Marked on dashboard")
+  );
+}
+
 // ✅ Helper: Expand a leave request into daily records
 function expandLeaveToDays(leave, startDate, endDate) {
   const days = [];
+
+  // Exclude leaves marked directly by team head / project head from dashboard
+  if (isDashboardMarkedLeave(leave)) {
+    return days;
+  }
 
   const leaveStartStr = getISTDateString(leave.from_date);
   // Fall back to from_date if to_date is null/empty (e.g. single day leave)
@@ -549,6 +569,9 @@ router.get("/all-reports", async (req, res) => {
       FROM leave_requests lr
       JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       WHERE 1=1
+        AND (lr.team_head_remark IS NULL OR lr.team_head_remark != 'DASHBOARD_HEAD_MARK')
+        AND (lr.management_remark IS NULL OR lr.management_remark != 'DASHBOARD_HEAD_MARK')
+        AND (lr.reason IS NULL OR (lr.reason NOT LIKE '%Marked as Leave by Team/Project Head%' AND lr.reason NOT LIKE '%Marked on dashboard%'))
     `;
     const leaveParams = [];
     let leaveFilterClause = "";
@@ -894,6 +917,9 @@ router.get("/management-reports", async (req, res) => {
       FROM leave_requests lr
       JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       WHERE 1=1
+      AND (lr.team_head_remark IS NULL OR lr.team_head_remark != 'DASHBOARD_HEAD_MARK')
+      AND (lr.management_remark IS NULL OR lr.management_remark != 'DASHBOARD_HEAD_MARK')
+      AND (lr.reason IS NULL OR (lr.reason NOT LIKE '%Marked as Leave by Team/Project Head%' AND lr.reason NOT LIKE '%Marked on dashboard%'))
       AND (ed.designation LIKE '%Project Head%' 
           OR ed.designation LIKE '%SBU%' 
           OR ed.designation LIKE '%HR%' 
@@ -1189,6 +1215,9 @@ router.get("/reports/:employee_id", async (req, res) => {
       FROM leave_requests lr
       JOIN employees_details ed ON (lr.employee_id = ed.employee_id OR (ed.intern_id IS NOT NULL AND lr.employee_id = ed.intern_id))
       WHERE (ed.employee_id IN (${phs}) OR (ed.intern_id IS NOT NULL AND ed.intern_id IN (${phs})) OR lr.employee_id IN (${phs}))
+        AND (lr.team_head_remark IS NULL OR lr.team_head_remark != 'DASHBOARD_HEAD_MARK')
+        AND (lr.management_remark IS NULL OR lr.management_remark != 'DASHBOARD_HEAD_MARK')
+        AND (lr.reason IS NULL OR (lr.reason NOT LIKE '%Marked as Leave by Team/Project Head%' AND lr.reason NOT LIKE '%Marked on dashboard%'))
     `;
     const leaveParams = [...empAliases, ...empAliases, ...empAliases];
 
