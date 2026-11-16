@@ -724,7 +724,7 @@ export default function EmployeeTaskTable({
         const pageNumber = Math.floor(taskIndex / itemsPerPage) + 1;
         setCurrentPage(pageNumber);
       }
-      handleAddReport(matchedTask, true);
+      handleAddReport(matchedTask, false);
     }
   }, [
     autoOpenTaskId,

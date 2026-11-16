@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { useConfirm } from "../ConfirmContext";
 import { useNotification } from "../NotificationContext";
@@ -33,6 +34,22 @@ const ChevronLeftIcon = ({ className }) => (
 const ChevronRightIcon = ({ className }) => (
   <Icon className={className} strokeWidth="2.5">
     <polyline points="9 18 15 12 9 6" />
+  </Icon>
+);
+const ChevronDownIcon = ({ className }) => (
+  <Icon className={className} strokeWidth="2">
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+const FilterIcon = ({ className }) => (
+  <Icon className={className} strokeWidth="2">
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+  </Icon>
+);
+const XCloseIcon = ({ className }) => (
+  <Icon className={className} strokeWidth="2.5">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
   </Icon>
 );
 const MinimizeIcon = ({ className }) => (
@@ -773,6 +790,7 @@ const TodayTasksCard = ({
   assignedEmployeeIds = [],
   onRefreshTasks,
 }) => {
+  const navigate = useNavigate();
   const confirm = useConfirm();
   const { notify } = useNotification();
   const [todaysWorkItems, setTodaysWorkItems] = useState([]);
@@ -784,12 +802,28 @@ const TodayTasksCard = ({
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [hoveredCardId, setHoveredCardId] = useState(null);
   const [processingLeaveEmpId, setProcessingLeaveEmpId] = useState(null);
+  const [activeTaskTab, setActiveTaskTab] = useState("dailyPlan"); // "dailyPlan" | "deadlines"
+  const [deadlineDate, setDeadlineDate] = useState(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  });
+  const [deadlineItems, setDeadlineItems] = useState([]);
+  const [loadingDeadlines, setLoadingDeadlines] = useState(false);
+  const [deadlineSearch, setDeadlineSearch] = useState("");
+  const [deadlineDepartmentFilter, setDeadlineDepartmentFilter] = useState("all");
+  const [deadlineEmployeeFilter, setDeadlineEmployeeFilter] = useState("all");
+  const [showDeadlineFilterDropdown, setShowDeadlineFilterDropdown] = useState(false);
+  const [collapsedDepts, setCollapsedDepts] = useState({});
+  const deadlineFilterDropdownRef = useRef(null);
 
   // Check if current user is Team Head or Project Head (or Admin/Management/SBU/MD)
-  const canManageLeave = useMemo(() => {
+  const userAuthInfo = useMemo(() => {
     try {
       const stored = sessionStorage.getItem("user") || localStorage.getItem("user");
-      if (!stored) return false;
+      if (!stored) return { isHead: false, empId: "" };
       const user = JSON.parse(stored);
       const designation = (user.designation || user.role || user.userRole || "").trim().toLowerCase();
       const teamHeadVal = user.teamHead ?? user.team_head ?? user.isTeamHead ?? user.teamhead;
@@ -806,11 +840,70 @@ const TodayTasksCard = ({
         designation === "md" ||
         designation.includes("admin") ||
         designation.includes("management");
-      return isTeamHead || isProjectHead || isAdminOrMgmt;
+      const empId =
+        user.userName ||
+        user.employeeId ||
+        user.employee_id ||
+        user.id ||
+        "";
+      return { isHead: isTeamHead || isProjectHead || isAdminOrMgmt, empId };
     } catch {
-      return false;
+      return { isHead: false, empId: "" };
     }
   }, []);
+
+  const canManageLeave = userAuthInfo.isHead;
+
+  // Fetch deadline tasks
+  useEffect(() => {
+    let isCancelled = false;
+    const fetchDeadlines = async () => {
+      setLoadingDeadlines(true);
+      try {
+        const queryParams = new URLSearchParams({
+          date: deadlineDate,
+          isHead: userAuthInfo.isHead ? "true" : "false",
+          ...(userAuthInfo.empId ? { employeeId: userAuthInfo.empId } : {}),
+        });
+        const res = await fetch(`${apiBaseUrl}/tasks/deadline-tasks?${queryParams.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch deadlines");
+        const json = await res.json();
+        if (!isCancelled && json.success) {
+          setDeadlineItems(json.data || []);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error("Error loading deadlines:", err);
+          setDeadlineItems([]);
+        }
+      } finally {
+        if (!isCancelled) setLoadingDeadlines(false);
+      }
+    };
+
+    fetchDeadlines();
+    return () => {
+      isCancelled = true;
+    };
+  }, [apiBaseUrl, deadlineDate, userAuthInfo.isHead, userAuthInfo.empId]);
+
+  // Close deadline filter dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        deadlineFilterDropdownRef.current &&
+        !deadlineFilterDropdownRef.current.contains(e.target)
+      ) {
+        setShowDeadlineFilterDropdown(false);
+      }
+    };
+    if (showDeadlineFilterDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showDeadlineFilterDropdown]);
 
   const handleMarkAsLeave = async (item, e) => {
     e.stopPropagation();
@@ -933,13 +1026,20 @@ const TodayTasksCard = ({
     const map = new Map();
     const source = allEmployees.length > 0 ? allEmployees : employees;
     (source || []).forEach((e) => {
-      const id = e.employee_id?.toString() || e._id?.toString();
-      if (id) map.set(id, e);
+      const id = e.employee_id?.toString() || e.employeeId?.toString() || e._id?.toString();
+      if (id) {
+        map.set(id, e);
+        map.set(id.toLowerCase(), e);
+      }
       if (e.intern_id) {
-        map.set(e.intern_id.toString().trim(), e);
+        const iid = e.intern_id.toString().trim();
+        map.set(iid, e);
+        map.set(iid.toLowerCase(), e);
       }
       if (e.internId) {
-        map.set(e.internId.toString().trim(), e);
+        const iid = e.internId.toString().trim();
+        map.set(iid, e);
+        map.set(iid.toLowerCase(), e);
       }
     });
     return map;
@@ -961,24 +1061,34 @@ const TodayTasksCard = ({
     if (!employeeId) return null;
     const strId = employeeId.toString().trim();
     if (employeeCache[strId]) return employeeCache[strId];
-    const local = allEmpMap.get(strId);
+    if (employeeCache[strId.toLowerCase()]) return employeeCache[strId.toLowerCase()];
+    const local = allEmpMap.get(strId) || allEmpMap.get(strId.toLowerCase());
     if (local) {
       const norm = {
-        employeeName: local.employee_name,
-        profile: local.profile_url || null,
-        employee_id: local.employee_id,
-        intern_id: local.intern_id,
+        employeeName: local.employee_name || local.employeeName,
+        profile: local.profile_url || local.profile || null,
+        employee_id: local.employee_id || local.employeeId,
+        intern_id: local.intern_id || local.internId,
       };
-      setEmployeeCache((p) => ({ ...p, [strId]: norm }));
+      setEmployeeCache((p) => ({ ...p, [strId]: norm, [strId.toLowerCase()]: norm }));
       return norm;
     }
     try {
-      const r = await fetch(`${apiBaseUrl}/Profile/${employeeId}`);
+      const r = await fetch(`${apiBaseUrl}/employeeRegister/${employeeId}`);
       if (!r.ok) return null;
       const d = await r.json();
-      const emp = d?.data || d;
-      setEmployeeCache((p) => ({ ...p, [strId]: emp }));
-      return emp;
+      const emp = d?.employee || d?.data || d;
+      if (emp) {
+        const norm = {
+          employeeName: emp.employeeName || emp.employee_name,
+          profile: emp.profile || emp.profile_url || null,
+          employee_id: emp.employeeId || emp.employee_id,
+          intern_id: emp.internId || emp.intern_id,
+        };
+        setEmployeeCache((p) => ({ ...p, [strId]: norm, [strId.toLowerCase()]: norm }));
+        return norm;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -1489,19 +1599,20 @@ const TodayTasksCard = ({
           }}
         >
           {showAvatar ? (
-            <img
-              src={item.avatar}
-              alt={item.employeeName}
-              style={{
-                width: "2.08vw",
-                height: "2.08vw",
-                borderRadius: "50%",
-                objectFit: "cover",
-                flexShrink: 0,
-                opacity: isLowerOpacity ? 0.6 : 1,
-              }}
-              onError={() => setImageErrors((p) => ({ ...p, [item.id]: true }))}
-            />
+              <img
+                src={item.avatar}
+                alt={item.employeeName}
+                loading="lazy"
+                style={{
+                  width: "2.08vw",
+                  height: "2.08vw",
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  flexShrink: 0,
+                  opacity: isLowerOpacity ? 0.6 : 1,
+                }}
+                onError={() => setImageErrors((p) => ({ ...p, [item.id]: true }))}
+              />
           ) : (
             <div
               style={{
@@ -1663,6 +1774,349 @@ const TodayTasksCard = ({
     });
   };
 
+  // Unique departments & employees from deadlineItems for filters
+  const deadlineDepartmentOptions = useMemo(() => {
+    const set = new Set();
+    (deadlineItems || []).forEach((item) => {
+      const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+      const dept = item.department || emp?.designation;
+      if (dept && dept.trim()) set.add(dept.trim());
+    });
+    return Array.from(set).sort();
+  }, [deadlineItems, allEmpMap]);
+
+  const deadlineEmployeeOptions = useMemo(() => {
+    const map = new Map();
+    (deadlineItems || []).forEach((item) => {
+      const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+      const empName = emp?.employee_name || emp?.employeeName || item.employeeId;
+      const dept = (item.department || emp?.designation || "").trim().toLowerCase();
+
+      // If a department is selected, only include employees matching that department
+      if (
+        deadlineDepartmentFilter !== "all" &&
+        dept !== deadlineDepartmentFilter.trim().toLowerCase()
+      ) {
+        return;
+      }
+
+      if (item.employeeId && !map.has(item.employeeId)) {
+        map.set(item.employeeId, empName);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [deadlineItems, allEmpMap, deadlineDepartmentFilter]);
+
+  // Filtered deadline items based on search and dropdown filters
+  const filteredDeadlines = useMemo(() => {
+    let result = deadlineItems;
+
+    // Filter by department
+    if (deadlineDepartmentFilter !== "all") {
+      result = result.filter((item) => {
+        const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+        const dept = item.department || emp?.designation || "";
+        return dept.toLowerCase().trim() === deadlineDepartmentFilter.toLowerCase().trim();
+      });
+    }
+
+    // Filter by employee
+    if (deadlineEmployeeFilter !== "all") {
+      result = result.filter((item) => {
+        const itemEmpId = (item.employeeId || "").toLowerCase().trim();
+        const filterId = deadlineEmployeeFilter.toLowerCase().trim();
+        return itemEmpId === filterId;
+      });
+    }
+
+    // Search filter
+    if (deadlineSearch.trim()) {
+      const q = deadlineSearch.toLowerCase().trim();
+      result = result.filter((item) => {
+        const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+        const empName = (emp?.employee_name || emp?.employeeName || item.employeeId || "").toLowerCase();
+        const proj = (item.projectName || "").toLowerCase();
+        const task = (item.taskName || "").toLowerCase();
+        const act = (item.activityName || "").toLowerCase();
+        return empName.includes(q) || proj.includes(q) || task.includes(q) || act.includes(q);
+      });
+    }
+
+    return result;
+  }, [
+    deadlineItems,
+    deadlineDepartmentFilter,
+    deadlineEmployeeFilter,
+    deadlineSearch,
+    allEmpMap,
+  ]);
+
+  const renderDeadlineList = () => {
+    if (loadingDeadlines) {
+      return (
+        <div className="p-3 space-y-3 animate-pulse">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-3 p-2 border-b border-gray-100">
+              <div className="w-[2.08vw] h-[2.08vw] bg-gray-200 rounded-full shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 bg-gray-200 rounded w-1/3" />
+                <div className="h-2.5 bg-gray-100 rounded w-2/3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (filteredDeadlines.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+          <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-500 mb-2">
+            <CalendarIcon className="w-5 h-5" />
+          </div>
+          <p className="text-[0.8vw] font-medium text-gray-700">No deadline tasks found</p>
+          <p className="text-[0.68vw] text-gray-400 mt-0.5">
+            {activeTaskTab === "deadlines"
+              ? "No tasks or activities due on this date."
+              : "No tasks found."}
+          </p>
+        </div>
+      );
+    }
+
+    // Group deadline items by Department
+    const groupedByDept = new Map();
+    filteredDeadlines.forEach((item) => {
+      const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+      const deptName = (item.department || emp?.designation || "Other").trim() || "Other";
+      if (!groupedByDept.has(deptName)) {
+        groupedByDept.set(deptName, []);
+      }
+      groupedByDept.get(deptName).push(item);
+    });
+
+    const deptKeys = Array.from(groupedByDept.keys()).sort((a, b) => {
+      if (a === "Other") return 1;
+      if (b === "Other") return -1;
+      return a.localeCompare(b);
+    });
+
+    return deptKeys.map((deptName) => {
+      const itemsInDept = groupedByDept.get(deptName) || [];
+      const isCollapsed = userAuthInfo.isHead && !!collapsedDepts[deptName];
+
+      return (
+        <div key={deptName} className="border-b border-gray-100 last:border-b-0">
+          {/* Department Header */}
+          <div
+            onClick={() => {
+              if (userAuthInfo.isHead) {
+                setCollapsedDepts((prev) => ({
+                  ...prev,
+                  [deptName]: !prev[deptName],
+                }));
+              }
+            }}
+            className={`sticky top-0 z-10 bg-gray-50/95 backdrop-blur-xs px-[0.83vw] py-[0.35vw] border-b border-gray-100 flex items-center justify-between select-none ${
+              userAuthInfo.isHead ? "cursor-pointer hover:bg-gray-100/90 transition-colors" : ""
+            }`}
+            title={userAuthInfo.isHead ? (isCollapsed ? "Click to expand" : "Click to minimize") : undefined}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {userAuthInfo.isHead && (
+                <ChevronDownIcon
+                  className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-200 shrink-0 ${
+                    isCollapsed ? "-rotate-90" : "rotate-0"
+                  }`}
+                />
+              )}
+              <span className="text-[0.68vw] font-medium text-gray-700 tracking-wide truncate">
+                {deptName}
+              </span>
+            </div>
+            <span className="text-[0.58vw] text-gray-700 bg-gray-200/80 px-1.5 py-0.2 rounded-full shrink-0">
+              {itemsInDept.length}
+            </span>
+          </div>
+
+          {/* Department Items (collapsible for Heads) */}
+          {!isCollapsed &&
+            itemsInDept.map((item, index) => {
+            const emp = allEmpMap.get(item.employeeId) || allEmpMap.get(item.employeeId?.toLowerCase?.());
+            const empName = emp?.employee_name || emp?.employeeName || item.employeeId;
+            const avatarUrl = resolveAvatarUrl(emp?.profile_url || emp?.profile);
+            const initials = getInitials(empName);
+
+            // Dynamic task status calculation (aligned with AdminReportsTable & EmplyeeReportsTable)
+            const taskProgress = item.percentage ?? 0;
+            let displayStatus = item.status || "In Progress";
+
+            if (["Hold", "Cancelled"].includes(displayStatus)) {
+              // Keep manual status
+            } else if (taskProgress >= 100) {
+              if (displayStatus === "underReview") {
+                displayStatus = "Under Review";
+              } else {
+                let isDelayed = false;
+                if (item.endDate && item.latestReportDate) {
+                  try {
+                    const [endH, endM] = (item.endTime || "18:30").split(":").map(Number);
+                    const endDt = new Date(item.endDate);
+                    endDt.setHours(endH, endM, 0, 0);
+                    if (new Date(item.latestReportDate) > endDt) {
+                      isDelayed = true;
+                    }
+                  } catch {
+                    // fallback
+                  }
+                }
+                displayStatus = isDelayed ? "Delayed" : "Completed";
+              }
+            } else {
+              try {
+                const now = new Date();
+                const currentIST = new Date(
+                  now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+                );
+                const [endH, endM] = (item.endTime || "18:30").split(":").map(Number);
+                const endDt = new Date(item.endDate);
+                endDt.setHours(endH, endM, 0, 0);
+
+                if (endDt < currentIST && taskProgress < 100) {
+                  displayStatus = "Overdue";
+                } else if (taskProgress > 0) {
+                  displayStatus = "In Progress";
+                } else {
+                  displayStatus = item.status === "In Progress" ? "In Progress" : (item.status || "Not Started");
+                }
+              } catch {
+                displayStatus = item.status || "In Progress";
+              }
+            }
+
+            const getStatusBadgeClass = (st) => {
+              switch (st) {
+                case "Completed":
+                  return "bg-green-100 text-green-700";
+                case "In Progress":
+                  return "bg-blue-100 text-blue-700";
+                case "Delayed":
+                  return "bg-yellow-100 text-yellow-800";
+                case "Overdue":
+                  return "bg-red-100 text-red-700";
+                case "Under Review":
+                  return "bg-purple-100 text-purple-700";
+                case "Hold":
+                  return "bg-orange-100 text-orange-700";
+                case "Cancelled":
+                  return "bg-rose-100 text-rose-700";
+                default:
+                  return "bg-gray-100 text-gray-700";
+              }
+            };
+
+            const handleNavigateToProject = () => {
+              if (!item.projectId) return;
+              navigate("/projects/projectOverview/overview", {
+                state: {
+                  projectId: item.projectId,
+                  projectName: item.projectName,
+                  autoOpenReport: true,
+                  openTaskId: item.taskId,
+                  openActivityId: item.isActivity ? item.activityId : null,
+                },
+              });
+            };
+
+            return (
+              <div
+                key={item.id || index}
+                className="flex items-start gap-[0.6vw] p-[0.6vw] border-b border-gray-100 last:border-b-0 hover:bg-gray-50/80 transition-colors group"
+              >
+                {avatarUrl && !imageErrors[`deadline_${item.id}`] ? (
+                  <img
+                    src={avatarUrl}
+                    alt={empName}
+                    loading="lazy"
+                    onError={() =>
+                      setImageErrors((prev) => ({ ...prev, [`deadline_${item.id}`]: true }))
+                    }
+                    className="w-[2.08vw] h-[2.08vw] rounded-full object-cover shrink-0 mt-0.5 border border-gray-200"
+                  />
+                ) : (
+                  <div
+                    className="w-[2.08vw] h-[2.08vw] rounded-full flex items-center justify-center font-semibold text-[0.73vw] shrink-0 mt-0.5 bg-blue-500 text-white"
+                  >
+                    {initials}
+                  </div>
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-1 mb-0.5">
+                    <span className="font-medium text-[0.76vw] text-gray-800 truncate">
+                      {empName}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span
+                        className={`text-[0.6vw] px-1.5 py-0.5 rounded font-normal ${getStatusBadgeClass(displayStatus)}`}
+                      >
+                        {displayStatus}
+                      </span>
+
+                      {/* View Project Reports Button */}
+                      <button
+                        type="button"
+                        onClick={handleNavigateToProject}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.6vw] font-normal text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+                        title="View reports for this task in Project Overview"
+                      >
+                        <span>View</span>
+                        <ChevronDownIcon className="w-[0.55vw] h-[0.55vw] -rotate-90 group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {item.projectName && (
+                    <div
+                      className="text-[0.66vw] text-gray-700 truncate mb-0.5 cursor-default"
+                      title={`Project: ${item.projectName}`}
+                    >
+                      <span className="text-gray-700">Project:</span> {item.projectName}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[0.7vw] text-gray-800 mb-0.5">
+                    {item.isActivity ? (
+                      <div
+                        className="truncate flex-1 min-w-0 cursor-default"
+                        title={`Task: ${item.taskName} ↳ Activity: ${item.activityName}`}
+                      >
+                        <span className="text-gray-700">Task:</span> {item.taskName}
+                        <span className="text-blue-600 ml-1.5">
+                          ↳ <span className="text-gray-700">Act:</span> {item.activityName}
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="truncate flex-1 min-w-0 cursor-default"
+                        title={`Task: ${item.taskName}`}
+                      >
+                        <span className="text-gray-700">Task:</span> {item.taskName}
+                      </div>
+                    )}
+                    {typeof item.percentage === "number" && (
+                      <span className="text-[0.66vw] text-gray-700 ml-2 shrink-0">{item.percentage}%</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    });
+  };
+
   return (
     <div
       style={{
@@ -1670,32 +2124,294 @@ const TodayTasksCard = ({
         borderRadius: "0.9vw",
         boxShadow: "0 0.05vw 0.16vw rgba(0,0,0,0.1)",
         height: "100%",
+        minHeight: "72vh",
+        display: "flex",
+        flexDirection: "column",
       }}
       className="overflow-hidden"
     >
+      {/* Header with Segmented Tabs */}
       <div
         style={{
-          padding: "0.83vw",
+          padding: "0.5vw 0.7vw",
           borderBottom: "0.05vw solid #E5E7EB",
           backgroundColor: "#ffffff",
         }}
+        className="flex flex-col gap-[0.4vw] shrink-0"
       >
-        <h3
-          style={{
-            margin: 0,
-            fontSize: "0.98vw",
-            fontWeight: "500",
-            color: "#111827",
-          }}
-        >
-          Today's Tasks
-        </h3>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4vw" }}>
+          {/* Segmented Tab Buttons */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.2vw",
+              backgroundColor: "#F3F4F6",
+              padding: "0.15vw",
+              borderRadius: "0.4vw",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => setActiveTaskTab("dailyPlan")}
+              style={{
+                padding: "0.2vw 0.5vw",
+                fontSize: "0.68vw",
+                borderRadius: "0.3vw",
+                cursor: "pointer",
+                border: "none",
+                background: activeTaskTab === "dailyPlan" ? "#ffffff" : "transparent",
+                color: activeTaskTab === "dailyPlan" ? "#111827" : "#4B5563",
+                boxShadow: activeTaskTab === "dailyPlan" ? "0 0.05vw 0.1vw rgba(0,0,0,0.06)" : "none",
+                fontWeight: activeTaskTab === "dailyPlan" ? "600" : "500",
+                whiteSpace: "nowrap",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Today's Tasks
+            </button>
+            <button
+              onClick={() => setActiveTaskTab("deadlines")}
+              style={{
+                padding: "0.2vw 0.5vw",
+                fontSize: "0.68vw",
+                borderRadius: "0.3vw",
+                cursor: "pointer",
+                border: "none",
+                background: activeTaskTab === "deadlines" ? "#ffffff" : "transparent",
+                color: activeTaskTab === "deadlines" ? "#111827" : "#4B5563",
+                boxShadow: activeTaskTab === "deadlines" ? "0 0.05vw 0.1vw rgba(0,0,0,0.06)" : "none",
+                fontWeight: activeTaskTab === "deadlines" ? "600" : "500",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.3vw",
+                whiteSpace: "nowrap",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>Deadlines</span>
+              {deadlineItems.length > 0 && (
+                <span
+                  style={{
+                    fontSize: "0.6vw",
+                    color: "#DC2626",
+                    fontWeight: "600",
+                  }}
+                >
+                  {deadlineItems.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Date Picker Section on Deadlines tab */}
+          {activeTaskTab === "deadlines" && (
+            <div style={{ flexShrink: 0 }}>
+              <DatePickerInline
+                value={new Date(deadlineDate + "T00:00:00")}
+                onChange={(d) => setDeadlineDate(toDateString(d))}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Filters & Search for Deadlines */}
+        {activeTaskTab === "deadlines" && (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4vw", paddingTop: "0.1vw" }}>
+            {/* Quick search input with clear (x) button */}
+            <div style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder={userAuthInfo.isHead ? "Search employee, project, task..." : "Search project, task..."}
+                value={deadlineSearch}
+                onChange={(e) => setDeadlineSearch(e.target.value)}
+                style={{
+                  width: "100%",
+                  fontSize: "0.68vw",
+                  border: "0.05vw solid #D1D5DB",
+                  borderRadius: "0.3vw",
+                  padding: "0.22vw 1.6vw 0.22vw 0.5vw",
+                  color: "#374151",
+                  backgroundColor: "#ffffff",
+                  outline: "none",
+                }}
+              />
+              {deadlineSearch && (
+                <button
+                  type="button"
+                  onClick={() => setDeadlineSearch("")}
+                  style={{
+                    position: "absolute",
+                    right: "0.3vw",
+                    padding: "0.1vw",
+                    color: "#9CA3AF",
+                    background: "none",
+                    border: "none",
+                    borderRadius: "50%",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  title="Clear search"
+                >
+                  <XCloseIcon className="w-[0.7vw] h-[0.7vw]" />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Button & Dropdown (for Heads / Management) */}
+            {userAuthInfo.isHead && (
+              <div style={{ position: "relative" }} ref={deadlineFilterDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowDeadlineFilterDropdown((prev) => !prev)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.25vw",
+                    fontSize: "0.68vw",
+                    padding: "0.22vw 0.6vw",
+                    borderRadius: "0.3vw",
+                    border: deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all" ? "0.05vw solid #93C5FD" : "0.05vw solid #D1D5DB",
+                    backgroundColor: deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all" ? "#EFF6FF" : "#ffffff",
+                    color: deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all" ? "#2563EB" : "#374151",
+                    fontWeight: deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all" ? "600" : "500",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                  title="Filter by Department or Employee"
+                >
+                  <FilterIcon className="w-[0.72vw] h-[0.72vw]" />
+                  <span>Filter</span>
+                  {(deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all") && (
+                    <span style={{ width: "0.35vw", height: "0.35vw", borderRadius: "50%", backgroundColor: "#2563EB" }} />
+                  )}
+                </button>
+
+                {/* Filter Popup Dropdown */}
+                {showDeadlineFilterDropdown && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 0.3vw)",
+                      width: "15vw",
+                      minWidth: "200px",
+                      backgroundColor: "#ffffff",
+                      borderRadius: "0.4vw",
+                      boxShadow: "0 0.4vw 1vw rgba(0,0,0,0.15)",
+                      border: "0.05vw solid #E5E7EB",
+                      padding: "0.6vw",
+                      zIndex: 50,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingBottom: "0.4vw",
+                        marginBottom: "0.4vw",
+                        borderBottom: "0.05vw solid #F3F4F6",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.72vw", fontWeight: "600", color: "#1F2937" }}>Filters</span>
+                      {(deadlineDepartmentFilter !== "all" || deadlineEmployeeFilter !== "all") && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeadlineDepartmentFilter("all");
+                            setDeadlineEmployeeFilter("all");
+                          }}
+                          style={{
+                            fontSize: "0.62vw",
+                            color: "#2563EB",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4vw" }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.62vw", fontWeight: "500", color: "#4B5563", marginBottom: "0.2vw" }}>
+                          Department
+                        </label>
+                        <select
+                          value={deadlineDepartmentFilter}
+                          onChange={(e) => {
+                            setDeadlineDepartmentFilter(e.target.value);
+                            setDeadlineEmployeeFilter("all");
+                          }}
+                          style={{
+                            width: "100%",
+                            fontSize: "0.66vw",
+                            border: "0.05vw solid #E5E7EB",
+                            borderRadius: "0.25vw",
+                            padding: "0.2vw 0.4vw",
+                            color: "#374151",
+                            backgroundColor: "#F9FAFB",
+                            outline: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="all">All Departments</option>
+                          {deadlineDepartmentOptions.map((dept) => (
+                            <option key={dept} value={dept}>
+                              {dept}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.62vw", fontWeight: "500", color: "#4B5563", marginBottom: "0.2vw" }}>
+                          Employee
+                        </label>
+                        <select
+                          value={deadlineEmployeeFilter}
+                          onChange={(e) => setDeadlineEmployeeFilter(e.target.value)}
+                          style={{
+                            width: "100%",
+                            fontSize: "0.66vw",
+                            border: "0.05vw solid #E5E7EB",
+                            borderRadius: "0.25vw",
+                            padding: "0.2vw 0.4vw",
+                            color: "#374151",
+                            backgroundColor: "#F9FAFB",
+                            outline: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="all">All Employees</option>
+                          {deadlineEmployeeOptions.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* List Container */}
       <div
         style={{ borderRadius: "0 0 0.42vw 0.42vw" }}
-        className="overflow-y-auto custom-scroll min-h-0 max-h-[90%] bg-white text-gray-700"
+        className="overflow-y-auto custom-scroll flex-1 min-h-0 bg-white text-gray-700"
       >
-        {renderList()}
+        {activeTaskTab === "dailyPlan" ? renderList() : renderDeadlineList()}
       </div>
       {renderTooltipPortal()}
     </div>
@@ -3701,9 +4417,9 @@ const Personal = () => {
           Error: {error}
         </div>
       )}
-      <div className="grid grid-cols-3 gap-[1vw] flex-1 min-h-0">
+      <div className="grid grid-cols-3 gap-[1vw] flex-1 min-h-[72vh]">
         {/* Column 1: Today's Tasks */}
-        <div className="h-full min-h-0">
+        <div className="h-full min-h-[72vh]">
           <TodayTasksCard
             loading={loadingTasks}
             apiBaseUrl={API_BASE_URL}

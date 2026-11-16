@@ -1149,6 +1149,8 @@ export default function Overview() {
             onTaskUpdate={handleTaskUpdate}
             projectTab={projectTab}
             statusHistory={statusHistory}
+            autoOpenTaskId={openTaskId}
+            autoOpenActivityId={openActivityId}
           />
         ) : (
           <EmplyeeReportsTable

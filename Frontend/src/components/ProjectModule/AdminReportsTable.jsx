@@ -47,6 +47,8 @@ export default function AdminReportsTable({
   onTaskUpdate,
   projectTab,
   statusHistory,
+  autoOpenTaskId,
+  autoOpenActivityId,
 }) {
 
   console.log(tasks)
@@ -715,6 +717,47 @@ export default function AdminReportsTable({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showFilterDropdown]);
+
+  const autoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoOpenTaskId || autoOpenedRef.current) return;
+    if (!flattenedTasks.length) return;
+
+    let matchedTask = null;
+    if (autoOpenActivityId) {
+      matchedTask = flattenedTasks.find(
+        (t) =>
+          t.isActivityReport &&
+          (String(t.activityId) === String(autoOpenActivityId) ||
+            String(t._id) === String(autoOpenActivityId)) &&
+          (!autoOpenTaskId ||
+            String(t.taskId) === String(autoOpenTaskId) ||
+            String(t._id) === String(autoOpenTaskId)),
+      );
+    } else {
+      matchedTask = flattenedTasks.find(
+        (t) =>
+          String(t.taskId) === String(autoOpenTaskId) ||
+          String(t._id) === String(autoOpenTaskId),
+      );
+    }
+
+    if (matchedTask) {
+      autoOpenedRef.current = true;
+      const taskIndex = filteredTasks.findIndex(
+        (t) =>
+          (matchedTask.activityId
+            ? t.activityId === matchedTask.activityId
+            : (t._id || t.taskId) === (matchedTask._id || matchedTask.taskId)),
+      );
+      if (taskIndex !== -1) {
+        const pageNumber = Math.floor(taskIndex / itemsPerPage) + 1;
+        setCurrentPage(pageNumber);
+      }
+      handleViewReports(matchedTask);
+    }
+  }, [autoOpenTaskId, autoOpenActivityId, flattenedTasks, filteredTasks]);
 
   useEffect(() => {
     if (!showCommunicateModal && !showDeleteConfirm) {

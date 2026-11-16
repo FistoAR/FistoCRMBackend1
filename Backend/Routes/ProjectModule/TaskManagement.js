@@ -6,6 +6,7 @@ const {
   Project_Details,
   DayReport,
   UnscheduledTask,
+  TaskReports,
   TaskReportsReview
 } = require("../../Models/DB_Collections");
 const { queryWithRetry } = require("../../dataBase/connection");
@@ -449,6 +450,264 @@ router.post("/create", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to create tasks",
+      error: error.message,
+    });
+  }
+});
+
+// ─── GET /deadline-tasks ──────────────────────────────────────────────────────
+// Returns tasks and sub-activities whose deadline (endDate) falls on the requested date.
+// Query params:
+//   date: YYYY-MM-DD or DD/MM/YYYY (defaults to today in IST)
+//   employeeId: string (optional, when regular employee or filtering by employee)
+//   isHead: "true" | "false" (whether caller is Team Head / Project Head / Admin / Management)
+router.get("/deadline-tasks", async (req, res) => {
+  try {
+    const { date, employeeId, isHead } = req.query;
+
+    const toISTDateStr = (rawVal) => {
+      if (!rawVal) return "";
+      const str = String(rawVal).trim();
+      // Format 1: YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+      // Format 2: DD/MM/YYYY
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+        const parts = str.split("/");
+        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+      }
+      // Format 3: DD-MM-YYYY
+      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(str)) {
+        const parts = str.split("-");
+        return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+      }
+      // Format 4: ISO string (e.g. 2026-11-16T... or Date object)
+      const dateObj = new Date(str);
+      if (!isNaN(dateObj.getTime())) {
+        return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(dateObj);
+      }
+      return str.split("T")[0];
+    };
+
+    // Default to current date in IST (YYYY-MM-DD)
+    const targetDateStr = date
+      ? toISTDateStr(date)
+      : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+
+    const isUserHead = isHead === "true" || isHead === true;
+
+    // Fetch aliases for the employee if employeeId is provided
+    let empAliases = [];
+    if (employeeId) {
+      const cleanId = String(employeeId).trim();
+      empAliases.push(cleanId);
+      try {
+        const empRows = await queryWithRetry(
+          `SELECT employee_id, intern_id FROM employees_details WHERE employee_id = ? OR intern_id = ? LIMIT 1`,
+          [cleanId, cleanId]
+        );
+        if (empRows && empRows.length > 0) {
+          const row = empRows[0];
+          if (row.employee_id) empAliases.push(String(row.employee_id).trim());
+          if (row.intern_id) empAliases.push(String(row.intern_id).trim());
+        }
+      } catch (err) {
+        console.error("Error fetching aliases for deadline-tasks:", err);
+      }
+    }
+    const empAliasSet = new Set(empAliases.map((a) => a.toLowerCase()));
+
+    // Find all tasks that are active (not Cancelled)
+    const rawTasks = await Tasks.find(
+      {
+        status: { $ne: "Cancelled" },
+      },
+      {
+        projectId: 1,
+        taskName: 1,
+        employeeID: 1,
+        employee: 1,
+        department: 1,
+        startDate: 1,
+        startTime: 1,
+        endDate: 1,
+        endTime: 1,
+        percentage: 1,
+        status: 1,
+        statusHistory: 1,
+        activities: 1,
+        supportingPersons: 1,
+      }
+    ).lean();
+
+    // Collect project IDs to get Project Name
+    const projectIds = [
+      ...new Set(
+        rawTasks
+          .map((t) => t.projectId)
+          .filter((p) => p && mongoose.Types.ObjectId.isValid(p))
+      ),
+    ];
+
+    const projectDocs = await Project_Details.find(
+      { _id: { $in: projectIds } },
+      { projectName: 1, companyName: 1 }
+    ).lean();
+
+    const projectMap = new Map(
+      projectDocs.map((p) => [p._id.toString(), p.projectName || p.companyName || ""])
+    );
+
+    // Fetch active underReview reports and latest reports to get accurate status & latest report date
+    const allTaskIds = rawTasks.map((t) => t._id);
+    const [reviewReports, normalReports] = await Promise.all([
+      TaskReportsReview.find({
+        taskId: { $in: allTaskIds },
+        status: "underReview",
+      })
+        .sort({ createdAt: -1 })
+        .select("taskId activityId status percentage createdAt")
+        .lean(),
+      TaskReports.find({
+        taskId: { $in: allTaskIds },
+      })
+        .sort({ createdAt: -1 })
+        .select("taskId activityId status percentage createdAt")
+        .lean(),
+    ]);
+
+    const reviewMap = new Map();
+    reviewReports.forEach((r) => {
+      const tId = r.taskId ? r.taskId.toString() : "";
+      if (!tId) return;
+      const actId = r.activityId ? r.activityId.toString() : "";
+      const key = actId ? `${tId}_${actId}` : tId;
+      if (!reviewMap.has(key)) reviewMap.set(key, r);
+    });
+
+    const reportMap = new Map();
+    normalReports.forEach((r) => {
+      const tId = r.taskId ? r.taskId.toString() : "";
+      if (!tId) return;
+      const actId = r.activityId ? r.activityId.toString() : "";
+      const key = actId ? `${tId}_${actId}` : tId;
+      if (!reportMap.has(key)) reportMap.set(key, r);
+    });
+
+    const deadlineItems = [];
+
+    const matchesEmployee = (empVal) => {
+      if (isUserHead) return true;
+      if (!employeeId) return true;
+      const strVal = String(empVal || "").trim().toLowerCase();
+      return empAliasSet.has(strVal);
+    };
+
+    rawTasks.forEach((t) => {
+      const projName = t.projectId ? projectMap.get(t.projectId.toString()) || "" : "";
+      const tIdStr = t._id.toString();
+
+      // Check if task itself is underReview or has latest report
+      const taskReview = reviewMap.get(tIdStr);
+      const taskLatestReport = taskReview || reportMap.get(tIdStr);
+      const taskStatus = taskReview?.status === "underReview" ? "underReview" : (t.status || "Not Started");
+      const taskPercentage = taskReview?.percentage !== undefined ? taskReview.percentage : (t.percentage || 0);
+
+      // 1. Check parent task deadline
+      if (t.endDate) {
+        const taskEndStr = toISTDateStr(t.endDate);
+        if (taskEndStr === targetDateStr) {
+          const empList = Array.isArray(t.employee)
+            ? t.employee
+            : t.employee
+            ? [t.employee]
+            : t.employeeID
+            ? [t.employeeID]
+            : [];
+
+          empList.forEach((emp) => {
+            if (!emp) return;
+            const empStr = emp.toString().trim();
+            if (!matchesEmployee(empStr)) return;
+
+            deadlineItems.push({
+              id: `${t._id}_task_${empStr}`,
+              taskId: t._id,
+              projectId: t.projectId,
+              projectName: projName,
+              taskName: t.taskName || "Untitled Task",
+              activityName: null,
+              isActivity: false,
+              employeeId: empStr,
+              department: t.department || "",
+              startDate: t.startDate || "",
+              startTime: t.startTime || "",
+              endDate: t.endDate || "",
+              endTime: t.endTime || "18:30",
+              percentage: taskPercentage,
+              status: taskStatus,
+              statusHistory: t.statusHistory || [],
+              latestReportDate: taskLatestReport?.createdAt || null,
+            });
+          });
+        }
+      }
+
+      // 2. Check activities deadline
+      if (Array.isArray(t.activities)) {
+        t.activities.forEach((act) => {
+          if (act.status === "Cancelled") return;
+          if (act.endDate) {
+            const actEndStr = toISTDateStr(act.endDate);
+            if (actEndStr === targetDateStr) {
+              const actEmp = act.employee ? act.employee.toString().trim() : "";
+              if (!actEmp) return;
+              if (!matchesEmployee(actEmp)) return;
+
+              const actIdStr = act._id ? act._id.toString() : "";
+              const actKey = `${tIdStr}_${actIdStr}`;
+              const actReview = reviewMap.get(actKey);
+              const actLatestReport = actReview || reportMap.get(actKey);
+              const actStatus = actReview?.status === "underReview" ? "underReview" : (act.status || "Not Started");
+              const actPercentage = actReview?.percentage !== undefined ? actReview.percentage : (act.percentage || 0);
+
+              deadlineItems.push({
+                id: `${t._id}_act_${act._id || Math.random()}_${actEmp}`,
+                taskId: t._id,
+                activityId: act._id,
+                projectId: t.projectId,
+                projectName: projName,
+                taskName: t.taskName || "Untitled Task",
+                activityName: act.activityName || "Activity",
+                isActivity: true,
+                employeeId: actEmp,
+                department: act.department || t.department || "",
+                startDate: act.startDate || "",
+                startTime: act.startTime || "",
+                endDate: act.endDate || "",
+                endTime: act.endTime || "18:30",
+                percentage: actPercentage,
+                status: actStatus,
+                statusHistory: act.statusHistory || t.statusHistory || [],
+                latestReportDate: actLatestReport?.createdAt || null,
+              });
+            }
+          }
+        });
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Deadline tasks fetched successfully",
+      date: targetDateStr,
+      count: deadlineItems.length,
+      data: deadlineItems,
+    });
+  } catch (error) {
+    console.error("Error fetching deadline tasks:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch deadline tasks",
       error: error.message,
     });
   }
