@@ -184,6 +184,7 @@ const DayTask = () => {
         status: task.project?.status,
         projectTab: task.project?.status || "In Progress",
         autoOpenReport: true,
+        autoOpenMode: "add",
         openTaskId: task.taskId || task._id,
         openActivityId: activity?._id || null,
       },

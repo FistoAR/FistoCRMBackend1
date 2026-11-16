@@ -121,6 +121,7 @@ export default function Overview() {
     projectTab,
     statusHistory,
     autoOpenReport,
+    autoOpenMode,
     openTaskId,
     openActivityId,
   } = location.state || {};
@@ -1151,6 +1152,7 @@ export default function Overview() {
             statusHistory={statusHistory}
             autoOpenTaskId={openTaskId}
             autoOpenActivityId={openActivityId}
+            autoOpenMode={autoOpenMode}
           />
         ) : (
           <EmplyeeReportsTable
@@ -1167,6 +1169,7 @@ export default function Overview() {
             statusHistory={statusHistory}
             autoOpenTaskId={openTaskId}
             autoOpenActivityId={openActivityId}
+            autoOpenMode={autoOpenMode}
           />
         )}
       </div>

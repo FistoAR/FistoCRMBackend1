@@ -14,6 +14,7 @@ const ProjectOverview = () => {
     projectTab,
     statusHistory,
     autoOpenReport,
+    autoOpenMode,
     openTaskId,
     openActivityId,
   } = location.state || {};
@@ -43,6 +44,7 @@ const ProjectOverview = () => {
           projectTab,
           statusHistory,
           autoOpenReport,
+          autoOpenMode,
           openTaskId,
           openActivityId,
         },
@@ -58,6 +60,7 @@ const ProjectOverview = () => {
     projectTab,
     statusHistory,
     autoOpenReport,
+    autoOpenMode,
     openTaskId,
     openActivityId,
   ]);

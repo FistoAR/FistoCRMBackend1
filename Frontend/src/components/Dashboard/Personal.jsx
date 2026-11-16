@@ -2022,6 +2022,7 @@ const TodayTasksCard = ({
                   projectId: item.projectId,
                   projectName: item.projectName,
                   autoOpenReport: true,
+                  autoOpenMode: "view",
                   openTaskId: item.taskId,
                   openActivityId: item.isActivity ? item.activityId : null,
                 },

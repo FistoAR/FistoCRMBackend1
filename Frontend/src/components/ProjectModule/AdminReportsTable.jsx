@@ -49,6 +49,7 @@ export default function AdminReportsTable({
   statusHistory,
   autoOpenTaskId,
   autoOpenActivityId,
+  autoOpenMode,
 }) {
 
   console.log(tasks)
@@ -757,7 +758,13 @@ export default function AdminReportsTable({
       }
       handleViewReports(matchedTask);
     }
-  }, [autoOpenTaskId, autoOpenActivityId, flattenedTasks, filteredTasks]);
+  }, [
+    autoOpenTaskId,
+    autoOpenActivityId,
+    autoOpenMode,
+    flattenedTasks,
+    filteredTasks,
+  ]);
 
   useEffect(() => {
     if (!showCommunicateModal && !showDeleteConfirm) {

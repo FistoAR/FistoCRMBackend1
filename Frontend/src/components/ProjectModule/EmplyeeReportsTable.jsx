@@ -57,6 +57,7 @@ export default function EmployeeTaskTable({
   statusHistory,
   autoOpenTaskId,
   autoOpenActivityId,
+  autoOpenMode,
 }) {
   const { notify } = useNotification();
   const [showReportModal, setShowReportModal] = useState(false);
@@ -724,11 +725,14 @@ export default function EmployeeTaskTable({
         const pageNumber = Math.floor(taskIndex / itemsPerPage) + 1;
         setCurrentPage(pageNumber);
       }
-      handleAddReport(matchedTask, false);
+      // If autoOpenMode is "view", open View Reports (History); if "add" or default, open Add Report form
+      const isAddMode = autoOpenMode === "add" || !autoOpenMode;
+      handleAddReport(matchedTask, isAddMode);
     }
   }, [
     autoOpenTaskId,
     autoOpenActivityId,
+    autoOpenMode,
     employeeFilteredTasks,
     flattenedTasks,
     filteredTasks,
