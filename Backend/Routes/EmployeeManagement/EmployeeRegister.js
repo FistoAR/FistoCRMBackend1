@@ -47,7 +47,7 @@ router.get("/", (req, res) => {
       phone_alternative, phone_relation, blood_group,
       account_name, account_number, bank_name, ifsc_code,
       designation, team_head, employment_type, working_status,
-      join_date, intern_start_date, intern_end_date,
+      join_date, relieving_date, intern_start_date, intern_end_date,
       address, password, profile_url, resume_url, offer_letter_url, 
       intern_offer_letter_url,
       ID_url, Certificates_url, otherDocs_url, officialLetters_url, exit_docs_url
@@ -112,6 +112,7 @@ router.get("/", (req, res) => {
         employment_type: emp.employment_type,
         working_status: emp.working_status,
         join_date: emp.join_date,
+        relieving_date: emp.relieving_date,
         intern_start_date: emp.intern_start_date,
         intern_end_date: emp.intern_end_date,
         address: emp.address,
@@ -321,11 +322,11 @@ router.post("/", uploadFields, async (req, res) => {
      phone_alternative, phone_relation, blood_group,
      account_name, account_number, bank_name, ifsc_code,
      designation, team_head, employment_type, working_status,
-     join_date, intern_start_date, intern_end_date,
+     join_date, relieving_date, intern_start_date, intern_end_date,
      address, password, profile_url, resume_url, offer_letter_url,
      intern_offer_letter_url,
      ID_url, Certificates_url, otherDocs_url, officialLetters_url, exit_docs_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.pool.query(
@@ -352,6 +353,7 @@ router.post("/", uploadFields, async (req, res) => {
       data.employmentType || "On Role",
       data.workingStatus || "Active",
       data.doj || null,
+      data.workingStatus === "Relieved" ? data.relievedDate || null : null,
       data.internStartDate || null,
       data.internEndDate || null,
       data.address || null,
@@ -686,6 +688,7 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         employment_type = ?,
         working_status = ?,
         join_date = ?,
+        relieving_date = ?,
         intern_start_date = ?,
         intern_end_date = ?,
         address = ?,
@@ -725,6 +728,7 @@ router.put("/updateEmployee/:id", uploadFields, async (req, res) => {
         data.employmentType || "On Role",
         data.workingStatus || "Active",
         data.doj || null,
+        data.workingStatus === "Relieved" ? data.relievedDate || null : null,
         data.internStartDate || null,
         data.internEndDate || null,
         data.address || null,
@@ -1083,7 +1087,7 @@ router.get("/:id", (req, res) => {
       phone_alternative, phone_relation, blood_group,
       account_name, account_number, bank_name, ifsc_code,
       designation, team_head, employment_type, working_status,
-      join_date, intern_start_date, intern_end_date, 
+      join_date, relieving_date, intern_start_date, intern_end_date, 
       address, profile_url
     FROM employees_details
     WHERE employee_id = ?
@@ -1132,6 +1136,7 @@ router.get("/:id", (req, res) => {
         employmentType: emp.employment_type,
         workingStatus: emp.working_status,
         doj: emp.join_date,
+        relievedDate: emp.relieving_date,
         internStartDate: emp.intern_start_date,
         internEndDate: emp.intern_end_date,
         address: emp.address,

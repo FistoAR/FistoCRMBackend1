@@ -1104,7 +1104,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                         {emp.working_status === "Relieved" ? (
                           <div className="flex flex-col items-center justify-center gap-[4px]">
                             <span className="px-2.5 py-1 rounded-full text-[0.75vw] font-medium bg-orange-100 text-orange-800 border border-orange-200 whitespace-nowrap">
-                              Relieved
+                              Relieved {emp.relieving_date ? `(${formatDate(emp.relieving_date)})` : ""}
                             </span>
                             {isPendingRelieved ? (
                               <span className="px-2.5 py-1 rounded-full text-[0.75vw] font-medium bg-red-100 text-red-800 border border-red-200 whitespace-nowrap">
@@ -1313,7 +1313,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
               {/* Modal Body (No vertical page scrolling) */}
               <div className="p-[1vw] space-y-[0.8vw]">
                 {/* 1. Quick Info Bar */}
-                <div className="grid grid-cols-4 gap-[0.5vw] bg-gray-50 p-[0.6vw] rounded-lg border border-gray-200 text-[0.78vw]">
+                <div className={`grid ${infoModalEmployee.working_status === "Relieved" ? "grid-cols-5" : "grid-cols-4"} gap-[0.5vw] bg-gray-50 p-[0.6vw] rounded-lg border border-gray-200 text-[0.78vw]`}>
                   <div>
                     <span className="text-gray-500 block text-[0.7vw]">Email</span>
                     <span className="font-medium text-gray-800 truncate block" title={infoModalEmployee.email_official || infoModalEmployee.email_personal || "-"}>
@@ -1332,6 +1332,14 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                       {formatDate(infoModalEmployee.join_date)}
                     </span>
                   </div>
+                  {infoModalEmployee.working_status === "Relieved" && (
+                    <div>
+                      <span className="text-gray-500 block text-[0.7vw]">Relieved Date</span>
+                      <span className="font-medium text-orange-700 block">
+                        {formatDate(infoModalEmployee.relieving_date)}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-gray-500 block text-[0.7vw]">Bank Info</span>
                     <span className="font-medium text-gray-800 truncate block" title={infoModalEmployee.bank_name || "-"}>

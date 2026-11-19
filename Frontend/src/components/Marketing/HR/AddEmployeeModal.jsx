@@ -94,6 +94,7 @@ const AddEmployee = ({
     employmentType: "On Role",
     workingStatus: "Active",
     doj: "",
+    relievedDate: "",
     internStartDate: "",
     internEndDate: "",
     address: "",
@@ -212,6 +213,7 @@ const AddEmployee = ({
         employmentType: editingEmployee.employment_type || "On Role",
         workingStatus: editingEmployee.working_status || "Active",
         doj: formatDateForInput(editingEmployee.join_date),
+        relievedDate: formatDateForInput(editingEmployee.relieving_date),
         internStartDate: formatDateForInput(editingEmployee.intern_start_date),
         internEndDate: formatDateForInput(editingEmployee.intern_end_date),
         address: editingEmployee.address || "",
@@ -301,6 +303,7 @@ const AddEmployee = ({
         employmentType: "Intern",
         workingStatus: "Active",
         doj: "",
+        relievedDate: "",
         internStartDate: "",
         internEndDate: "",
         address: "",
@@ -844,6 +847,9 @@ const AddEmployee = ({
       newErrors.designation = "Designation is required";
     if (!formData.workingStatus)
       newErrors.workingStatus = "Working status is required";
+    if (formData.workingStatus === "Relieved" && !formData.relievedDate) {
+      newErrors.relievedDate = "Relieved date is required";
+    }
 
     if (usernameAvailable === false) {
       newErrors.userName = "This Employee ID is already Exist";
@@ -943,6 +949,10 @@ const AddEmployee = ({
       }
 
       submitFormData.append("doj", formData.doj);
+      submitFormData.append(
+        "relievedDate",
+        formData.workingStatus === "Relieved" ? formData.relievedDate || "" : ""
+      );
       submitFormData.append("internStartDate", formData.internStartDate);
       submitFormData.append("internEndDate", formData.internEndDate);
 
@@ -1979,6 +1989,33 @@ const AddEmployee = ({
                             />
                           </div>
                         </>
+                      )}
+
+                      {formData.workingStatus === "Relieved" && (
+                        <div>
+                          <label className="block text-[0.92vw] font-semibold text-gray-900 mb-[0.4vw]">
+                            Relieved Date <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <Calendar className="w-[1vw] h-[1vw] absolute left-[0.8vw] top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="date"
+                              name="relievedDate"
+                              value={formData.relievedDate}
+                              onChange={handleInputChange}
+                              className={`w-full pl-[2.5vw] pr-[0.8vw] py-[0.5vw] border rounded-full text-[0.9vw] focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent transition-all ${
+                                errors.relievedDate
+                                  ? "border-red-500"
+                                  : "border-gray-300"
+                              }`}
+                            />
+                          </div>
+                          {errors.relievedDate && (
+                            <p className="text-red-500 text-[0.75vw] mt-[0.3vw]">
+                              {errors.relievedDate}
+                            </p>
+                          )}
+                        </div>
                       )}
 
                       {formData.designation && (

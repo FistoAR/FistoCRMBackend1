@@ -4,5 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
     base: '/fisto_crm/',
+    server: {
+    port: 5180,
+    strictPort: true,
+  },
   plugins: [react(), tailwindcss()],
 })

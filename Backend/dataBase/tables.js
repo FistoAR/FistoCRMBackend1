@@ -1017,6 +1017,12 @@ const databaseSchema = {
       default: "NULL",
     },
     {
+      column: "relieving_date",
+      type: "date",
+      nullable: true,
+      default: "NULL",
+    },
+    {
       column: "intern_start_date",
       type: "date",
       nullable: true,
