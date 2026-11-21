@@ -244,8 +244,8 @@ export default function AddTask({
         }
         return endDateValue;
       })(),
-      startTime: "",
-      endTime: "",
+      startTime: "09:30",
+      endTime: "20:30",
       duration: "",
       taskName: "",
       description: "",
@@ -323,7 +323,7 @@ export default function AddTask({
     if (!sDate || !eDate) return "";
 
     const start = new Date(`${sDate}T${sTime || "09:30"}`);
-    const end = new Date(`${eDate}T${eTime || "18:30"}`);
+    const end = new Date(`${eDate}T${eTime || "20:30"}`);
 
     if (end <= start) return "Invalid duration";
 
@@ -495,7 +495,7 @@ export default function AddTask({
     }
 
     const currentStartTime = checkStartTime || "09:30";
-    const currentEndTime = checkEndTime || "18:30";
+    const currentEndTime = checkEndTime || "20:30";
 
     const currentStart = new Date(`${checkStartDate}T${currentStartTime}`);
     const currentEnd = new Date(`${checkEndDate}T${currentEndTime}`);
@@ -505,7 +505,7 @@ export default function AddTask({
       if (taskIdx !== excludeTaskIndex && task.employees === employeeId) {
         if (task.startDate && task.endDate) {
           const taskStartTime = task.startTime || "09:30";
-          const taskEndTime = task.endTime || "18:30";
+          const taskEndTime = task.endTime || "20:30";
           const taskStart = new Date(`${task.startDate}T${taskStartTime}`);
           const taskEnd = new Date(`${task.endDate}T${taskEndTime}`);
 
@@ -527,7 +527,7 @@ export default function AddTask({
           activity.endDate
         ) {
           const actStartTime = activity.startTime || "09:30";
-          const actEndTime = activity.endTime || "18:30";
+          const actEndTime = activity.endTime || "20:30";
           const actStart = new Date(`${activity.startDate}T${actStartTime}`);
           const actEnd = new Date(`${activity.endDate}T${actEndTime}`);
 
@@ -554,9 +554,9 @@ export default function AddTask({
     }
 
     const taskStartTime = task.startTime || "09:30";
-    const taskEndTime = task.endTime || "18:30";
+    const taskEndTime = task.endTime || "20:30";
     const activityStartTime = activity.startTime || "09:30";
-    const activityEndTime = activity.endTime || "18:30";
+    const activityEndTime = activity.endTime || "20:30";
 
     const taskStart = new Date(`${task.startDate}T${taskStartTime}`);
     const taskEnd = new Date(`${task.endDate}T${taskEndTime}`);
@@ -590,7 +590,7 @@ export default function AddTask({
 
         if (tempTask.activities.length > 0) {
           const taskStartTime = tempTask.startTime || "09:30";
-          const taskEndTime = tempTask.endTime || "18:30";
+          const taskEndTime = tempTask.endTime || "20:30";
           const taskStart = new Date(`${tempTask.startDate}T${taskStartTime}`);
           const taskEnd = new Date(`${tempTask.endDate}T${taskEndTime}`);
 
@@ -598,7 +598,7 @@ export default function AddTask({
             if (!activity.startDate || !activity.endDate) return false;
 
             const actStartTime = activity.startTime || "09:30";
-            const actEndTime = activity.endTime || "18:30";
+            const actEndTime = activity.endTime || "20:30";
             const actStart = new Date(`${activity.startDate}T${actStartTime}`);
             const actEnd = new Date(`${activity.endDate}T${actEndTime}`);
 
@@ -747,9 +747,9 @@ export default function AddTask({
 
             if (act.employee === value && act.startDate && act.endDate) {
               const currentStartTime = activity.startTime || "09:30";
-              const currentEndTime = activity.endTime || "18:30";
+              const currentEndTime = activity.endTime || "20:30";
               const actStartTime = act.startTime || "09:30";
-              const actEndTime = act.endTime || "18:30";
+              const actEndTime = act.endTime || "20:30";
 
               const currentStart = new Date(
                 `${activity.startDate}T${currentStartTime}`,
@@ -840,9 +840,9 @@ export default function AddTask({
 
       if (act.employee === activity.employee && act.startDate && act.endDate) {
         const currentStartTime = activity.startTime || "09:30";
-        const currentEndTime = activity.endTime || "18:30";
+        const currentEndTime = activity.endTime || "20:30";
         const actStartTime = act.startTime || "09:30";
-        const actEndTime = act.endTime || "18:30";
+        const actEndTime = act.endTime || "20:30";
 
         const currentStart = new Date(
           `${activity.startDate}T${currentStartTime}`,
@@ -1243,8 +1243,8 @@ export default function AddTask({
         newTaskCreatedAt,
       ),
       endDate: effectiveDates.endDate,
-      startTime: "",
-      endTime: "",
+      startTime: "09:30",
+      endTime: "20:30",
       duration: "",
       taskName: "",
       description: "",

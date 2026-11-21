@@ -25,21 +25,47 @@ const getEarliestJoinDate = (joinDate, internStartDate) => {
   return validJoin || validIntern || null;
 };
 
-// Helper to check if an employee is active/applicable for a given month and year
-const isEmployeeActiveInMonth = (emp, month, year) => {
-  // If employee is Active, they are shown
-  if (emp.working_status === 'Active') {
-    return true;
+// Helper to get effective job role (Intern vs On Role) in a given month and year
+const getEffectiveJobRole = (emp, month, year) => {
+  const currentRole = emp.employment_type || 'On Role';
+
+  // If currently an Intern and not converted to On Role
+  if (currentRole.toLowerCase().includes('intern')) {
+    return 'Intern';
   }
 
+  // If current role is 'On Role', check if they converted from Intern
+  // If they have intern history and a join_date for on role:
+  const hasInternHistory = isValidJoinDate(emp.intern_start_date);
+  const hasOnRoleDate = isValidJoinDate(emp.join_date);
+
+  if (hasInternHistory && hasOnRoleDate) {
+    const targetYear = parseInt(year);
+    const targetMonth = parseInt(month);
+    // Month end in UTC
+    const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0, 23, 59, 59, 999));
+    const onRoleStart = new Date(emp.join_date);
+
+    // If the chosen month ended before the on-role start date, they were an Intern during that month
+    if (monthEnd < onRoleStart) {
+      return 'Intern';
+    }
+  }
+
+  return currentRole;
+};
+
+// Helper to check if an employee is active/applicable for a given month and year
+const isEmployeeActiveInMonth = (emp, month, year) => {
   // Target month range in UTC
   const targetYear = parseInt(year);
   const targetMonth = parseInt(month); // 1 - 12
   const monthStart = new Date(Date.UTC(targetYear, targetMonth - 1, 1, 0, 0, 0));
   const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0, 23, 59, 59, 999));
 
-  // Determine effective start date:
-  // if intern, consider intern start date; if direct on role without intern date, consider normal start date
+  // Determine effective earliest start date:
+  // - If intern, consider intern start date first (fallback to join_date if any)
+  // - If on role without intern date, consider join_date (fallback to intern_start_date if any)
   let startDate = null;
   const isIntern = (emp.employment_type || '').toLowerCase().includes('intern');
   if (isIntern) {
@@ -49,33 +75,37 @@ const isEmployeeActiveInMonth = (emp, month, year) => {
       startDate = new Date(emp.join_date);
     }
   } else {
-    if (isValidJoinDate(emp.join_date)) {
+    // If they have intern history before on-role, their active employment started on intern_start_date
+    if (isValidJoinDate(emp.intern_start_date) && isValidJoinDate(emp.join_date)) {
+      const tIntern = new Date(emp.intern_start_date).getTime();
+      const tJoin = new Date(emp.join_date).getTime();
+      startDate = new Date(Math.min(tIntern, tJoin));
+    } else if (isValidJoinDate(emp.join_date)) {
       startDate = new Date(emp.join_date);
     } else if (isValidJoinDate(emp.intern_start_date)) {
       startDate = new Date(emp.intern_start_date);
     }
   }
 
-  // Determine effective end/relieved date:
-  // Till relieved date... if relieved date is not mentioned, then use intern end date... if no date is present, do not hide at all
-  let endDate = null;
-  if (isValidJoinDate(emp.relieving_date)) {
-    endDate = new Date(emp.relieving_date);
-  } else if (isValidJoinDate(emp.intern_end_date)) {
-    endDate = new Date(emp.intern_end_date);
-  }
-
-  // If start date exists and month ends before start date began, hide
+  // If start date exists and the chosen month ended before the employee ever started, do NOT show
   if (startDate && monthEnd < startDate) {
     return false;
   }
 
-  // If end date exists and month starts after employee left/relieved, hide
+  // Determine effective end/relieved date:
+  // Till relieved date... if relieved date is not mentioned, use intern end date (if intern)... if neither is present, they are currently working
+  let endDate = null;
+  if (isValidJoinDate(emp.relieving_date)) {
+    endDate = new Date(emp.relieving_date);
+  } else if (isIntern && isValidJoinDate(emp.intern_end_date)) {
+    endDate = new Date(emp.intern_end_date);
+  }
+
+  // If end date exists and the chosen month started after the employee was relieved, do NOT show
   if (endDate && monthStart > endDate) {
     return false;
   }
 
-  // If neither end date is present or month falls within start and end range, keep visible
   return true;
 };
 
@@ -194,7 +224,7 @@ router.get("/employees/:month/:year", async (req, res) => {
       employeeName: (row.employee_name || "").trim(),
       profile_url: row.profile_url || null,
       designation: row.designation,
-      jobRole: row.employment_type || 'On Role',
+      jobRole: getEffectiveJobRole(row, month, year),
       workingStatus: row.working_status,
       joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       hasSalary: row.salary_id ? true : false,
@@ -920,7 +950,7 @@ router.get("/reports", async (req, res) => {
       employeeName: (row.employee_name || "").trim(),
       profile_url: row.profile_url || null,
       designation: row.designation,
-      jobRole: row.employment_type || 'On Role',
+      jobRole: getEffectiveJobRole(row, row.month, row.year),
       workingStatus: row.working_status,
       joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       month: row.month || null,
