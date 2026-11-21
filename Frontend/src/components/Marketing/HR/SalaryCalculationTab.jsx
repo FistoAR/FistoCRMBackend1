@@ -609,9 +609,9 @@ const SalaryCalculationTab = ({
   );
 
   // 👇 Generate dynamic year range
-  const getYearRange = () => {
+  const getYearRange = (minYear = 2021) => {
     const currentYear = new Date().getFullYear();
-    const startYear = 2023;
+    const startYear = minYear;
     const endYear = currentYear + 2;
     const years = [];
 
@@ -797,8 +797,13 @@ const SalaryCalculationTab = ({
         </div>
       </div>
       <div>
-        <div className="text-[0.86vw] font-regular text-gray-900 leading-tight">
-          {data.employeeName || data.employeeId}
+        <div className="text-[0.86vw] font-regular text-gray-900 leading-tight flex items-center gap-[0.35vw]">
+          <span>{data.employeeName || data.employeeId}</span>
+          {(data.workingStatus === "Relieved" || data.working_status === "Relieved") && (
+            <span className="text-[0.82vw] text-gray-700">
+              (Relieved)
+            </span>
+          )}
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@ console.log("🚀 LOADING Salary Calculation route...");
 const express = require("express");
 const router = express.Router();
 
-// Helper to get earliest valid joining date between join_date and intern_start_date (Option B)
+// Helper to validate date values
 const isValidJoinDate = (d) => {
   if (!d) return false;
   const dateObj = new Date(d);
@@ -23,6 +23,60 @@ const getEarliestJoinDate = (joinDate, internStartDate) => {
     return tJoin <= tIntern ? validJoin : validIntern;
   }
   return validJoin || validIntern || null;
+};
+
+// Helper to check if an employee is active/applicable for a given month and year
+const isEmployeeActiveInMonth = (emp, month, year) => {
+  // If employee is Active, they are shown
+  if (emp.working_status === 'Active') {
+    return true;
+  }
+
+  // Target month range in UTC
+  const targetYear = parseInt(year);
+  const targetMonth = parseInt(month); // 1 - 12
+  const monthStart = new Date(Date.UTC(targetYear, targetMonth - 1, 1, 0, 0, 0));
+  const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0, 23, 59, 59, 999));
+
+  // Determine effective start date:
+  // if intern, consider intern start date; if direct on role without intern date, consider normal start date
+  let startDate = null;
+  const isIntern = (emp.employment_type || '').toLowerCase().includes('intern');
+  if (isIntern) {
+    if (isValidJoinDate(emp.intern_start_date)) {
+      startDate = new Date(emp.intern_start_date);
+    } else if (isValidJoinDate(emp.join_date)) {
+      startDate = new Date(emp.join_date);
+    }
+  } else {
+    if (isValidJoinDate(emp.join_date)) {
+      startDate = new Date(emp.join_date);
+    } else if (isValidJoinDate(emp.intern_start_date)) {
+      startDate = new Date(emp.intern_start_date);
+    }
+  }
+
+  // Determine effective end/relieved date:
+  // Till relieved date... if relieved date is not mentioned, then use intern end date... if no date is present, do not hide at all
+  let endDate = null;
+  if (isValidJoinDate(emp.relieving_date)) {
+    endDate = new Date(emp.relieving_date);
+  } else if (isValidJoinDate(emp.intern_end_date)) {
+    endDate = new Date(emp.intern_end_date);
+  }
+
+  // If start date exists and month ends before start date began, hide
+  if (startDate && monthEnd < startDate) {
+    return false;
+  }
+
+  // If end date exists and month starts after employee left/relieved, hide
+  if (endDate && monthStart > endDate) {
+    return false;
+  }
+
+  // If neither end date is present or month falls within start and end range, keep visible
+  return true;
 };
 
 const { queryWithRetry } = require("../../dataBase/connection");
@@ -103,8 +157,11 @@ router.get("/employees/:month/:year", async (req, res) => {
         ed.profile_url,
         ed.designation,
         ed.employment_type,
+        ed.working_status,
         ed.join_date,
+        ed.relieving_date,
         ed.intern_start_date,
+        ed.intern_end_date,
         sc.id as salary_id,
         sc.basic_salary,
         sc.total_leave_days,
@@ -122,18 +179,23 @@ router.get("/employees/:month/:year", async (req, res) => {
         ON ed.employee_id = sc.employee_id 
         AND sc.month = ? 
         AND sc.year = ?
-      WHERE ed.working_status = 'Active'
       ORDER BY ed.employee_name ASC
     `;
 
     const results = await queryWithRetry(query, [month, year]);
 
-    const employees = results.map((row) => ({
+    // Filter employees: Active always visible, Inactive/Relieved visible during their employment period
+    const filteredResults = results.filter((row) =>
+      isEmployeeActiveInMonth(row, month, year)
+    );
+
+    const employees = filteredResults.map((row) => ({
       employeeId: row.employee_id,
       employeeName: (row.employee_name || "").trim(),
       profile_url: row.profile_url || null,
       designation: row.designation,
       jobRole: row.employment_type || 'On Role',
+      workingStatus: row.working_status,
       joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       hasSalary: row.salary_id ? true : false,
       date: row.salary_date ? new Date(row.salary_date).toLocaleDateString('en-IN') : '-',
@@ -494,32 +556,68 @@ router.get("/summary/:month/:year", async (req, res) => {
 
     const query = `
       SELECT 
-        COUNT(*) as total_employees,
-        COUNT(sc.id) as employees_with_salary,
-        SUM(sc.total_salary) as total_salary_amount,
-        AVG(sc.total_salary) as average_salary,
-        SUM(sc.basic_salary) as total_basic_salary,
-        SUM(sc.incentive + sc.bonus + sc.medical + sc.other_allowance) as total_allowances,
-        SUM(sc.deduction_amount) as total_deductions
+        ed.employee_id,
+        ed.working_status,
+        ed.employment_type,
+        ed.join_date,
+        ed.relieving_date,
+        ed.intern_start_date,
+        ed.intern_end_date,
+        sc.id as salary_id,
+        sc.basic_salary,
+        sc.incentive,
+        sc.bonus,
+        sc.medical,
+        sc.other_allowance,
+        sc.deduction_amount,
+        sc.total_salary
       FROM employees_details ed
       LEFT JOIN salary_calculation sc 
         ON ed.employee_id = sc.employee_id 
         AND sc.month = ? 
         AND sc.year = ?
-      WHERE ed.working_status = 'Active'
     `;
 
     const results = await queryWithRetry(query, [month, year]);
 
+    // Filter employees according to active month logic
+    const activeEmployees = results.filter((row) =>
+      isEmployeeActiveInMonth(row, month, year)
+    );
+
+    let employeesWithSalary = 0;
+    let totalSalaryAmount = 0;
+    let totalBasicSalary = 0;
+    let totalAllowances = 0;
+    let totalDeductions = 0;
+
+    activeEmployees.forEach((row) => {
+      if (row.salary_id) {
+        employeesWithSalary++;
+        totalSalaryAmount += parseFloat(row.total_salary || 0);
+        totalBasicSalary += parseFloat(row.basic_salary || 0);
+        totalAllowances +=
+          parseFloat(row.incentive || 0) +
+          parseFloat(row.bonus || 0) +
+          parseFloat(row.medical || 0) +
+          parseFloat(row.other_allowance || 0);
+        totalDeductions += parseFloat(row.deduction_amount || 0);
+      }
+    });
+
+    const totalEmployees = activeEmployees.length;
+    const averageSalary =
+      employeesWithSalary > 0 ? totalSalaryAmount / employeesWithSalary : 0;
+
     const summary = {
-      total_employees: results[0].total_employees || 0,
-      employees_with_salary: results[0].employees_with_salary || 0,
-      employees_pending: (results[0].total_employees || 0) - (results[0].employees_with_salary || 0),
-      total_salary_amount: parseFloat(results[0].total_salary_amount || 0),
-      average_salary: parseFloat(results[0].average_salary || 0),
-      total_basic_salary: parseFloat(results[0].total_basic_salary || 0),
-      total_allowances: parseFloat(results[0].total_allowances || 0),
-      total_deductions: parseFloat(results[0].total_deductions || 0)
+      total_employees: totalEmployees,
+      employees_with_salary: employeesWithSalary,
+      employees_pending: totalEmployees - employeesWithSalary,
+      total_salary_amount: totalSalaryAmount,
+      average_salary: averageSalary,
+      total_basic_salary: totalBasicSalary,
+      total_allowances: totalAllowances,
+      total_deductions: totalDeductions,
     };
 
     console.log(`✅ Summary fetched for ${month}/${year}`);
@@ -791,6 +889,7 @@ router.get("/reports", async (req, res) => {
         ed.profile_url,
         ed.designation,
         ed.employment_type,
+        ed.working_status,
         ed.join_date,
         ed.intern_start_date,
         sc.id as salary_id,
@@ -822,6 +921,7 @@ router.get("/reports", async (req, res) => {
       profile_url: row.profile_url || null,
       designation: row.designation,
       jobRole: row.employment_type || 'On Role',
+      workingStatus: row.working_status,
       joinDate: getEarliestJoinDate(row.join_date, row.intern_start_date),
       month: row.month || null,
       year: row.year || null,

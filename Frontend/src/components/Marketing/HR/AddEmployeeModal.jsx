@@ -216,6 +216,10 @@ const AddEmployee = ({
         relievedDate: formatDateForInput(editingEmployee.relieving_date),
         internStartDate: formatDateForInput(editingEmployee.intern_start_date),
         internEndDate: formatDateForInput(editingEmployee.intern_end_date),
+        durationMonths: calculateDuration(
+          editingEmployee.intern_start_date,
+          editingEmployee.intern_end_date,
+        ),
         address: editingEmployee.address || "",
         password: "",
         profile: null,
@@ -1982,7 +1986,12 @@ const AddEmployee = ({
                             </label>
                             <input
                               type="text"
-                              value={formData.durationMonths}
+                              value={
+                                calculateDuration(
+                                  formData.internStartDate,
+                                  formData.internEndDate,
+                                ) || formData.durationMonths || ""
+                              }
                               readOnly
                               className="w-full px-[0.8vw] py-[0.5vw] border border-gray-300 rounded-full bg-gray-100 cursor-not-allowed text-[0.9vw] text-gray-600"
                               placeholder="Auto-calculated"

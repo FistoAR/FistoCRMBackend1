@@ -33,15 +33,33 @@ export const getPendingExitDocuments = (employee) => {
   };
 
   const pending = [];
+  const empType = (employee.employment_type || employee.employmentType || "").toLowerCase();
+  const isIntern = empType.includes("intern");
 
-  const hasPaySlip = isDocPresent(exitDocs.paySlip) || isDocPresent(exitDocs.pay_slip) || isDocPresent(exitDocs.payslip);
-  if (!hasPaySlip) {
-    pending.push("Pay Slip");
-  }
+  if (isIntern) {
+    const hasInternCert =
+      isDocPresent(exitDocs.intershipCertificate) ||
+      isDocPresent(exitDocs.internshipCertificate) ||
+      isDocPresent(exitDocs.intership_certificate) ||
+      isDocPresent(exitDocs.internship_certificate);
+    if (!hasInternCert) {
+      pending.push("Internship Certificate");
+    }
+  } else {
+    const hasPaySlip =
+      isDocPresent(exitDocs.paySlip) ||
+      isDocPresent(exitDocs.pay_slip) ||
+      isDocPresent(exitDocs.payslip);
+    if (!hasPaySlip) {
+      pending.push("Pay Slip");
+    }
 
-  const hasExperienceLetter = isDocPresent(exitDocs.experienceLetter) || isDocPresent(exitDocs.experience_letter);
-  if (!hasExperienceLetter) {
-    pending.push("Experience Letter");
+    const hasExperienceLetter =
+      isDocPresent(exitDocs.experienceLetter) ||
+      isDocPresent(exitDocs.experience_letter);
+    if (!hasExperienceLetter) {
+      pending.push("Experience Letter");
+    }
   }
 
   return pending;
@@ -122,11 +140,26 @@ export const hasPendingExitDocuments = (employee) => {
 
     // 2. Exit Documents (If Relieved)
     if (emp.working_status === "Relieved") {
-      const exitSpecs = [
-        { key: "paySlip", label: "Pay Slip", val: exitDocs.paySlip || exitDocs.pay_slip || exitDocs.payslip },
-        { key: "experienceLetter", label: "Experience Letter", val: exitDocs.experienceLetter || exitDocs.experience_letter },
-        { key: "relievingLetter", label: "Relieving Letter", val: exitDocs.relievingLetter || exitDocs.relieving_letter },
-      ];
+      const empType = (emp.employment_type || "").toLowerCase();
+      const isIntern = empType.includes("intern");
+
+      const exitSpecs = isIntern
+        ? [
+            {
+              key: "intershipCertificate",
+              label: "Internship Certificate",
+              val:
+                exitDocs.intershipCertificate ||
+                exitDocs.internshipCertificate ||
+                exitDocs.intership_certificate ||
+                exitDocs.internship_certificate,
+            },
+          ]
+        : [
+            { key: "paySlip", label: "Pay Slip", val: exitDocs.paySlip || exitDocs.pay_slip || exitDocs.payslip },
+            { key: "experienceLetter", label: "Experience Letter", val: exitDocs.experienceLetter || exitDocs.experience_letter },
+            { key: "relievingLetter", label: "Relieving Letter", val: exitDocs.relievingLetter || exitDocs.relieving_letter },
+          ];
 
       exitSpecs.forEach((spec) => {
         if (isPresent(spec.val)) {
