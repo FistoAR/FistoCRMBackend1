@@ -46,14 +46,6 @@ export const getPendingExitDocuments = (employee) => {
       pending.push("Internship Certificate");
     }
   } else {
-    const hasPaySlip =
-      isDocPresent(exitDocs.paySlip) ||
-      isDocPresent(exitDocs.pay_slip) ||
-      isDocPresent(exitDocs.payslip);
-    if (!hasPaySlip) {
-      pending.push("Pay Slip");
-    }
-
     const hasExperienceLetter =
       isDocPresent(exitDocs.experienceLetter) ||
       isDocPresent(exitDocs.experience_letter);
@@ -156,16 +148,16 @@ export const hasPendingExitDocuments = (employee) => {
             },
           ]
         : [
-            { key: "paySlip", label: "Pay Slip", val: exitDocs.paySlip || exitDocs.pay_slip || exitDocs.payslip },
             { key: "experienceLetter", label: "Experience Letter", val: exitDocs.experienceLetter || exitDocs.experience_letter },
-            { key: "relievingLetter", label: "Relieving Letter", val: exitDocs.relievingLetter || exitDocs.relieving_letter },
+            { key: "paySlip", label: "Pay Slip", val: exitDocs.paySlip || exitDocs.pay_slip || exitDocs.payslip, optional: true },
+            { key: "relievingLetter", label: "Relieving Letter", val: exitDocs.relievingLetter || exitDocs.relieving_letter, optional: true },
           ];
 
       exitSpecs.forEach((spec) => {
         if (isPresent(spec.val)) {
           const { path, name } = getDocDetails(spec.val);
           uploaded.push({ label: spec.label, category: "Exit Documents", path, name });
-        } else {
+        } else if (!spec.optional) {
           pending.push({ label: spec.label, category: "Exit Documents" });
         }
       });
@@ -221,6 +213,7 @@ const EmployeeOverview = () => {
     endDate: ""
   });
   const [showDateFilter, setShowDateFilter] = useState(false);
+  const [sortField, setSortField] = useState("doj"); // "doj" | "relieving_date"
   const [sortOrder, setSortOrder] = useState("asc"); // "none", "asc", "desc"
   const [showNotificationPopup, setShowNotificationPopup] = useState(false);
   const [highlightedEmpId, setHighlightedEmpId] = useState(null);
@@ -361,13 +354,18 @@ const EmployeeOverview = () => {
     setDateFilter({ ...dateFilter, endDate: newEndDate });
   };
 
-  const toggleSort = () => {
-    if (sortOrder === "none") {
+  const toggleSort = (field = "doj") => {
+    if (sortField !== field) {
+      setSortField(field);
       setSortOrder("asc");
-    } else if (sortOrder === "asc") {
-      setSortOrder("desc");
     } else {
-      setSortOrder("none");
+      if (sortOrder === "none") {
+        setSortOrder("asc");
+      } else if (sortOrder === "asc") {
+        setSortOrder("desc");
+      } else {
+        setSortOrder("none");
+      }
     }
   };
 
@@ -432,13 +430,20 @@ const EmployeeOverview = () => {
     return matchesSearch && matchesDateFilter && matchesStatus;
   });
 
-  // Sort employees by date of joining
+  // Sort employees by date of joining or date of relieving
 const sortedEmployees = [...filteredEmployees].sort((a, b) => {
   if (sortOrder === "none") return 0;
   
-  // Get dates - try both field names just in case
-  const dateA = a.join_date || a.date_of_joining;
-  const dateB = b.join_date || b.date_of_joining;
+  let dateA;
+  let dateB;
+
+  if (sortField === "relieving_date") {
+    dateA = a.relieving_date || (a.employment_type === "Intern" ? a.intern_end_date : null);
+    dateB = b.relieving_date || (b.employment_type === "Intern" ? b.intern_end_date : null);
+  } else {
+    dateA = a.join_date || a.intern_start_date || a.date_of_joining;
+    dateB = b.join_date || b.intern_start_date || b.date_of_joining;
+  }
   
   // Handle missing dates - put them at the end
   if (!dateA && !dateB) return 0;
@@ -516,6 +521,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
       }
 
       // Prepare table data
+      const isInactiveView = statusFilter === "Inactive";
       const tableData = sortedEmployees.map((emp, index) => {
         const row = [
           index + 1,
@@ -525,7 +531,16 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
         if (isAdmin) row.push(emp.password || '-');
         row.push(
           emp.designation || '-',
-          emp.employment_type === "On Role" ? formatDate(emp.join_date) : formatDate(emp.intern_start_date) || '-',
+          emp.employment_type === "On Role" ? formatDate(emp.join_date) : formatDate(emp.intern_start_date) || '-'
+        );
+        if (isInactiveView) {
+          row.push(
+            emp.employment_type === "Intern"
+              ? formatDate(emp.intern_end_date || emp.relieving_date) || '-'
+              : formatDate(emp.relieving_date) || '-'
+          );
+        }
+        row.push(
           emp.email_official || emp.email_personal || '-',
           emp.employment_type || '-',
           emp.working_status || '-'
@@ -542,6 +557,7 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
           ...(isAdmin ? ['Password'] : []),
           'Designation', 
           'Date of Joining', 
+          ...(isInactiveView ? ['Date of Relieving'] : []),
           'Email', 
           'Employment Type', 
           'Status'
@@ -698,14 +714,14 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
     });
   };
 
-  const getSortIcon = () => {
-    if (sortOrder === "asc") {
-      return <ArrowUp size={"1vw"} className="text-blue-600 mt-[0.2vw]" />;
-    } else if (sortOrder === "desc") {
-      return <ArrowDown size={"1vw"} className="text-blue-600 mt-[0.2vw]" />;
-    } else {
+  const getSortIcon = (field = "doj") => {
+    if (sortField !== field || sortOrder === "none") {
       return <ArrowUpDown size={"1vw"} className="text-gray-400 mt-[0.2vw]" />;
     }
+    if (sortOrder === "asc") {
+      return <ArrowUp size={"1vw"} className="text-blue-600 mt-[0.2vw]" />;
+    }
+    return <ArrowDown size={"1vw"} className="text-blue-600 mt-[0.2vw]" />;
   };
 
   const hasActiveFilter = dateFilter.startDate || dateFilter.endDate;
@@ -1054,13 +1070,24 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                   </th>
                   <th 
                     className="w-[10%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
-                    onClick={toggleSort}
+                    onClick={() => toggleSort("doj")}
                   >
                     <div className="flex items-center justify-center gap-[0.3vw]">
                       <span>Date of Joining</span>
-                      <span>{getSortIcon()}</span>
+                      <span>{getSortIcon("doj")}</span>
                     </div>
                   </th>
+                  {statusFilter === "Inactive" && (
+                    <th 
+                      className="w-[11%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300 cursor-pointer hover:bg-blue-100 transition"
+                      onClick={() => toggleSort("relieving_date")}
+                    >
+                      <div className="flex items-center justify-center gap-[0.3vw]">
+                        <span>Date of Relieving</span>
+                        <span>{getSortIcon("relieving_date")}</span>
+                      </div>
+                    </th>
+                  )}
                   <th className="w-[16%] px-[0.6vw] py-[0.5vw] text-center text-[0.9vw] font-medium text-gray-800 border border-gray-300">
                     Email
                   </th>
@@ -1119,6 +1146,13 @@ const sortedEmployees = [...filteredEmployees].sort((a, b) => {
                       <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
                         {emp.employment_type === "On Role" ? formatDate(emp.join_date) : formatDate(emp.intern_start_date)}
                       </td>
+                      {statusFilter === "Inactive" && (
+                        <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 text-center">
+                          {emp.employment_type === "Intern"
+                            ? formatDate(emp.intern_end_date || emp.relieving_date)
+                            : formatDate(emp.relieving_date)}
+                        </td>
+                      )}
                       <td className="px-[0.6vw] py-[0.56vw] text-[0.86vw] text-gray-600 border border-gray-300 truncate max-w-[12vw]">
                         {emp.email_official || emp.email_personal}
                       </td>
