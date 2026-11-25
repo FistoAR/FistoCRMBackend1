@@ -86,9 +86,9 @@ const ProjectActionModal = ({
     taskName: "",
     description: "",
     startDate: "",
-    startTime: "09:00",
+    startTime: "09:30",
     endDate: "",
-    endTime: "18:00",
+    endTime: "20:30",
     employee: "",
     department: "",
   });
@@ -165,8 +165,8 @@ const ProjectActionModal = ({
       ...prev,
       startDate: toInputDate(latestCorr?.startDate || activeProject.startDate),
       endDate: toInputDate(latestCorr?.date || activeProject.endDate),
-      startTime: latestCorr?.startTime || "09:00",
-      endTime: latestCorr?.time || "18:00",
+      startTime: latestCorr?.startTime || "09:30",
+      endTime: latestCorr?.time || "20:30",
     }));
   }, [activeProjectId, activeProject]);
 
@@ -327,12 +327,31 @@ const ProjectActionModal = ({
     const targets = targetProjects("supporting");
     await Promise.all(
       targets.map(async (proj) => {
-        const existingSupp = (proj.accessGrantedTo || []).map((e) =>
-          typeof e === "object" ? getEmpId(e) : String(e),
-        );
-        const mergedSupp = Array.from(
-          new Set([...existingSupp, ...selectedSupportingIds.map(String)]),
-        );
+        const existingItems = Array.isArray(proj.accessGrantedTo)
+          ? proj.accessGrantedTo
+          : [];
+        const existingMap = new Map();
+        existingItems.forEach((item) => {
+          const id =
+            typeof item === "object"
+              ? item.employeeId || getEmpId(item)
+              : String(item);
+          if (id) {
+            existingMap.set(String(id), {
+              employeeId: String(id),
+              ...(typeof item === "object" && item.grantedAt
+                ? { grantedAt: item.grantedAt }
+                : {}),
+            });
+          }
+        });
+        selectedSupportingIds.forEach((id) => {
+          const strId = String(id);
+          if (strId && !existingMap.has(strId)) {
+            existingMap.set(strId, { employeeId: strId });
+          }
+        });
+        const mergedSupp = Array.from(existingMap.values());
         const res = await fetch(
           `${import.meta.env.VITE_API_BASE_URL}/project/${proj._id}`,
           {
