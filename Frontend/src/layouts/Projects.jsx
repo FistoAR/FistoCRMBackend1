@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import HandIcon from "../assets/ProjectPages/rightHand.png";
 import searchIcon from "../assets/ProjectPages/search.webp";
 import filterIcon from "../assets/ProjectPages/filter.webp";
 import clearFilter from "../assets/ProjectPages/overview/clear-filter.webp";
+import ProjectActionModal from "../components/ProjectModule/ProjectActionModal";
 
 const TableSkeleton = () => (
   <>
@@ -42,7 +43,12 @@ const TableSkeleton = () => (
 const Projects = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const tableBodyRef = useRef(null);
+
+  const [selectedProjectIds, setSelectedProjectIds] = useState([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [showProjectActionModal, setShowProjectActionModal] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
@@ -76,6 +82,18 @@ const Projects = () => {
   const empIDParam = !["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role)
     ? loggedEmpDetails.id
     : selectedEmployee || "";
+
+  const canBulkSelect =
+    ["Admin", "SBU", "Project Head"].includes(loggedEmpDetails.role) ||
+    Boolean(loggedEmpDetails.teamHead);
+
+  const toggleProjectSelection = (projectId) => {
+    setSelectedProjectIds((prev) =>
+      prev.includes(projectId)
+        ? prev.filter((id) => id !== projectId)
+        : [...prev, projectId],
+    );
+  };
 
   const isBaseRoute =
     !location.pathname.toLowerCase().includes("newproject") &&
@@ -964,6 +982,38 @@ const Projects = () => {
                 </div>
 
                 <div className="flex items-center gap-[0.7vw]">
+                  {canBulkSelect && (
+                    <button
+                      onClick={() => {
+                        if (isSelectionMode) {
+                          setIsSelectionMode(false);
+                          setSelectedProjectIds([]);
+                        } else {
+                          setIsSelectionMode(true);
+                        }
+                      }}
+                      className={`flex items-center gap-[0.4vw] px-[0.9vw] py-[0.4vw] rounded-full text-[0.8vw] font-medium cursor-pointer transition-colors ${
+                        isSelectionMode
+                          ? "bg-gray-200 hover:bg-gray-300 text-gray-800"
+                          : "bg-gray-800 hover:bg-gray-900 text-white"
+                      }`}
+                    >
+                      <span>
+                        {isSelectionMode ? "Cancel Selection" : "Select Projects"}
+                      </span>
+                    </button>
+                  )}
+                  {canBulkSelect && isSelectionMode && selectedProjectIds.length > 0 && (
+                    <button
+                      onClick={() => setShowProjectActionModal(true)}
+                      className="flex items-center gap-[0.4vw] px-[0.9vw] py-[0.4vw] rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[0.8vw] font-medium cursor-pointer shadow-sm transition-colors"
+                    >
+                      <span>Project Action</span>
+                      <span className="bg-white text-blue-600 rounded-full px-[0.45vw] py-[0.05vw] text-[0.7vw] font-semibold">
+                        {selectedProjectIds.length}
+                      </span>
+                    </button>
+                  )}
                   <div className="relative">
                     <img
                       src={searchIcon}
@@ -1228,6 +1278,35 @@ const Projects = () => {
                     <table className="w-full border-collapse border border-gray-300">
                       <thead className="bg-[#E2EBFF] sticky top-0 z-10">
                         <tr>
+                          {canBulkSelect && isSelectionMode && (
+                            <th className="px-[0.6vw] py-[0.5vw] text-center text-[0.85vw] font-medium text-gray-800 border border-gray-300 w-[2.8vw]">
+                              <input
+                                type="checkbox"
+                                className="w-[0.95vw] h-[0.95vw] accent-blue-600 cursor-pointer"
+                                checked={
+                                  Object.values(paginatedGroupedProjects).flat().length > 0 &&
+                                  Object.values(paginatedGroupedProjects)
+                                    .flat()
+                                    .every((p) => selectedProjectIds.includes(p._id))
+                                }
+                                onChange={(e) => {
+                                  const pageIds = Object.values(paginatedGroupedProjects)
+                                    .flat()
+                                    .map((p) => p._id);
+                                  if (e.target.checked) {
+                                    setSelectedProjectIds((prev) =>
+                                      Array.from(new Set([...prev, ...pageIds])),
+                                    );
+                                  } else {
+                                    setSelectedProjectIds((prev) =>
+                                      prev.filter((id) => !pageIds.includes(id)),
+                                    );
+                                  }
+                                }}
+                                title="Select all on this page"
+                              />
+                            </th>
+                          )}
                           <th className="px-[0.7vw] py-[0.5vw] text-left text-[0.85vw] font-medium text-gray-800 border border-gray-300">
                             Project Name
                           </th>
@@ -1274,7 +1353,7 @@ const Projects = () => {
                           <TableSkeleton />
                         ) : Object.keys(paginatedGroupedProjects).length === 0 ? (
                           <tr>
-                            <td colSpan="8" className="text-center py-4">
+                            <td colSpan={canBulkSelect && isSelectionMode ? 9 : 8} className="text-center py-4">
                               No projects
                             </td>
                           </tr>
@@ -1284,7 +1363,7 @@ const Projects = () => {
                               <React.Fragment key={company}>
                                 <tr className="bg-gray-200">
                                   <td
-                                    colSpan="8"
+                                    colSpan={canBulkSelect && isSelectionMode ? 9 : 8}
                                     className="px-[0.7vw] py-[0.3vw] text-[0.9vw] font-semibold text-gray-800"
                                   >
                                     {company}
@@ -1310,8 +1389,26 @@ const Projects = () => {
                                   return (
                                     <tr
                                       key={project._id}
-                                      className={`hover:bg-gray-50 transition-all`}
+                                      className={`hover:bg-gray-50 transition-all ${
+                                        selectedProjectIds.includes(project._id)
+                                          ? "bg-blue-50/60"
+                                          : ""
+                                      }`}
                                     >
+                                      {canBulkSelect && isSelectionMode && (
+                                        <td className="px-[0.6vw] py-[0.6vw] border border-gray-300 text-center">
+                                          <input
+                                            type="checkbox"
+                                            className="w-[0.95vw] h-[0.95vw] accent-blue-600 cursor-pointer"
+                                            checked={selectedProjectIds.includes(
+                                              project._id,
+                                            )}
+                                            onChange={() =>
+                                              toggleProjectSelection(project._id)
+                                            }
+                                          />
+                                        </td>
+                                      )}
                                       <td className="px-[0.7vw] py-[0.6vw] border border-gray-300">
                                         <div className="relative flex items-center gap-[0.4vw]">
                                           {isWorking && (
@@ -1558,6 +1655,22 @@ const Projects = () => {
         </>
       ) : (
         <Outlet />
+      )}
+      {showProjectActionModal && (
+        <ProjectActionModal
+          isOpen={showProjectActionModal}
+          onClose={() => setShowProjectActionModal(false)}
+          selectedProjects={filteredProjects.filter((p) =>
+            selectedProjectIds.includes(p._id),
+          )}
+          loggedEmpDetails={loggedEmpDetails}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["projectsBase"] });
+            queryClient.invalidateQueries({ queryKey: ["projectsMetrics"] });
+            setSelectedProjectIds([]);
+            setShowProjectActionModal(false);
+          }}
+        />
       )}
     </div>
   );

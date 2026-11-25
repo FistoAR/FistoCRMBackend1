@@ -1863,17 +1863,17 @@ export default function AdminReportsTable({
                                     }}
                                   />
                                   <div className="hidden absolute inset-0 bg-blue-500 text-white  rounded-full  flex items-center justify-center font-medium text-[0.9vw]">
-                                    {task.assigned_by.name?.[0]?.toUpperCase() ||
+                                    {task.assigned_by?.name?.[0]?.toUpperCase() ||
                                       "?"}
                                   </div>
                                 </div>
                               ) : (
                                 <div className="w-[1.5vw] h-[1.5vw] rounded-full bg-blue-500 text-white flex items-center justify-center text-[0.7vw] font-medium">
-                                  {getInitials(task.assigned_by.name)}
+                                  {getInitials(task.assigned_by?.name || "?")}
                                 </div>
                               )}
                               <span className="text-[0.75vw]">
-                                {task.assigned_by.name}
+                                {task.assigned_by?.name || "—"}
                               </span>
                             </div>
                           );
