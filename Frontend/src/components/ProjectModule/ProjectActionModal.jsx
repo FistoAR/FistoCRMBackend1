@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { X, Calendar, Building2, Users, CheckSquare, Save, Check, History } from "lucide-react";
+import { X, Calendar, Building2, Users, CheckSquare, Save, Check, History, UserPlus } from "lucide-react";
 
 const TABS = [
   { id: "correction", label: "Correction Date", icon: Calendar },
   { id: "employees", label: "Assign Employees", icon: Users },
+  { id: "supporting", label: "Supporting Persons", icon: UserPlus },
   { id: "task", label: "Create Task", icon: CheckSquare },
   { id: "departments", label: "Assign Departments", icon: Building2 },
 ];
@@ -48,6 +49,7 @@ const ProjectActionModal = ({
     correction: false,
     departments: false,
     employees: false,
+    supporting: false,
     task: false,
   });
 
@@ -56,6 +58,7 @@ const ProjectActionModal = ({
     correction: false,
     departments: false,
     employees: false,
+    supporting: false,
     task: false,
   });
 
@@ -76,6 +79,8 @@ const ProjectActionModal = ({
   const [selectedDeptIds, setSelectedDeptIds] = useState([]);
   const [selectedEmpIds, setSelectedEmpIds] = useState([]);
   const [empSearch, setEmpSearch] = useState("");
+  const [selectedSupportingIds, setSelectedSupportingIds] = useState([]);
+  const [supportingSearch, setSupportingSearch] = useState("");
 
   const [taskForm, setTaskForm] = useState({
     taskName: "",
@@ -146,6 +151,11 @@ const ProjectActionModal = ({
       typeof e === "object" ? e._id || e.id : e,
     );
     setSelectedEmpIds(empIds);
+
+    const suppIds = (activeProject.accessGrantedTo || []).map((e) =>
+      typeof e === "object" ? getEmpId(e) : String(e),
+    );
+    setSelectedSupportingIds(suppIds);
 
     const latestCorr =
       activeProject.correctionDate && activeProject.correctionDate.length > 0
@@ -313,12 +323,40 @@ const ProjectActionModal = ({
     setDirtyTabs((prev) => ({ ...prev, task: false }));
   };
 
+  const saveaccessGrantedTo = async () => {
+    const targets = targetProjects("supporting");
+    await Promise.all(
+      targets.map(async (proj) => {
+        const existingSupp = (proj.accessGrantedTo || []).map((e) =>
+          typeof e === "object" ? getEmpId(e) : String(e),
+        );
+        const mergedSupp = Array.from(
+          new Set([...existingSupp, ...selectedSupportingIds.map(String)]),
+        );
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE_URL}/project/${proj._id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ accessGrantedTo: mergedSupp }),
+          },
+        );
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "Failed to assign supporting persons");
+        }
+      }),
+    );
+    setDirtyTabs((prev) => ({ ...prev, supporting: false }));
+  };
+
   const handleTabSave = async (tabId) => {
     setSavingTab(tabId);
     try {
       if (tabId === "correction") await saveCorrectionDate();
       else if (tabId === "departments") await saveDepartments();
       else if (tabId === "employees") await saveEmployees();
+      else if (tabId === "supporting") await saveaccessGrantedTo();
       else if (tabId === "task") await saveTask();
 
       showMsg("success", "Saved successfully!");
@@ -345,6 +383,7 @@ const ProjectActionModal = ({
         if (tabId === "correction") await saveCorrectionDate();
         else if (tabId === "departments") await saveDepartments();
         else if (tabId === "employees") await saveEmployees();
+        else if (tabId === "supporting") await saveaccessGrantedTo();
         else if (tabId === "task") await saveTask();
       }
       showMsg("success", "All changes saved successfully!");
@@ -376,6 +415,7 @@ const ProjectActionModal = ({
   const getEmpId = (emp) =>
     emp.employee_id ||
     emp.employeeID ||
+    emp.employeeId ||
     emp._id ||
     emp.id ||
     emp.userName ||
@@ -906,6 +946,138 @@ const ProjectActionModal = ({
                     >
                       <Save className="w-4 h-4" />
                       {savingTab === "employees" ? "Saving..." : "Save Employees"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: Supporting Persons */}
+              {activeTab === "supporting" && (
+                <div className="space-y-4">
+                  {activeProject?.accessGrantedTo?.length > 0 && (
+                    <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-200 text-[0.76vw] text-gray-700">
+                      <span className="font-semibold text-gray-800">
+                        Currently Allocated:{" "}
+                      </span>
+                      {activeProject.accessGrantedTo
+                        .map((e) => {
+                          const id = typeof e === "object" ? getEmpId(e) : e;
+                          const directName =
+                            typeof e === "object" ? getEmpName(e) : "Unknown";
+                          if (directName !== "Unknown") return directName;
+                          const found = employeesList.find(
+                            (emp) => getEmpId(emp) === id,
+                          );
+                          return found ? getEmpName(found) : id || "Unknown";
+                        })
+                        .join(", ")}
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    placeholder="Search supporting person by name or ID..."
+                    value={supportingSearch}
+                    onChange={(e) => setSupportingSearch(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[0.82vw]"
+                  />
+                  {loadingRefs ? (
+                    <div className="text-[0.82vw] text-gray-500">
+                      Loading employees...
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 max-h-[34vh] overflow-y-auto p-1">
+                      {(() => {
+                        const allocatedSuppIds = (
+                          activeProject?.accessGrantedTo || []
+                        ).map((e) =>
+                          typeof e === "object" ? getEmpId(e) : String(e),
+                        );
+                        return employeesList
+                          .filter((emp) => {
+                            const isTeamHead =
+                              emp.teamHead === true ||
+                              emp.teamHead === 1 ||
+                              emp.team_head === true ||
+                              emp.team_head === 1;
+                            if (!isTeamHead) return false;
+                            const name = getEmpName(emp).toLowerCase();
+                            const id = String(getEmpCode(emp)).toLowerCase();
+                            const q = supportingSearch.toLowerCase();
+                            return name.includes(q) || id.includes(q);
+                          })
+                          .sort((a, b) => {
+                            const aAlloc = allocatedSuppIds.includes(
+                              getEmpId(a),
+                            )
+                              ? 0
+                              : 1;
+                            const bAlloc = allocatedSuppIds.includes(
+                              getEmpId(b),
+                            )
+                              ? 0
+                              : 1;
+                            return aAlloc - bAlloc;
+                          })
+                          .map((emp) => {
+                            const empId = getEmpId(emp);
+                            const isAllocated =
+                              allocatedSuppIds.includes(empId);
+                            const checked =
+                              isAllocated ||
+                              selectedSupportingIds.includes(empId);
+                            return (
+                              <label
+                                key={empId}
+                                className={`flex items-center gap-2.5 p-2 rounded-lg border text-[0.82vw] ${
+                                  isAllocated
+                                    ? "bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed opacity-80"
+                                    : checked
+                                      ? "bg-blue-50 border-blue-400 text-blue-800 cursor-pointer"
+                                      : "bg-white border-gray-200 hover:bg-gray-50 cursor-pointer"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 accent-blue-600 disabled:cursor-not-allowed"
+                                  checked={checked}
+                                  disabled={isAllocated}
+                                  onChange={() => {
+                                    if (isAllocated) return;
+                                    setSelectedSupportingIds((prev) =>
+                                      prev.includes(empId)
+                                        ? prev.filter((id) => id !== empId)
+                                        : [...prev, empId],
+                                    );
+                                    setDirtyTabs((d) => ({
+                                      ...d,
+                                      supporting: true,
+                                    }));
+                                  }}
+                                />
+                                <div className="truncate">
+                                  <div className="font-medium truncate text-gray-800">
+                                    {getEmpName(emp)}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500">
+                                    {getEmpCode(emp)}
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          });
+                      })()}
+                    </div>
+                  )}
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => handleTabSave("supporting")}
+                      disabled={savingTab === "supporting"}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[0.82vw] font-medium rounded-lg cursor-pointer disabled:opacity-50"
+                    >
+                      <Save className="w-4 h-4" />
+                      {savingTab === "supporting"
+                        ? "Saving..."
+                        : "Save Supporting Persons"}
                     </button>
                   </div>
                 </div>
